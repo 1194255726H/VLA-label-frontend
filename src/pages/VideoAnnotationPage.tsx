@@ -981,7 +981,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         {approvalStage && <button className="secondary-button" type="button" onClick={() => setCommentsOpen((value) => !value)}>全部批注（{result.comments.length}）</button>}
         <span className={readonly ? 'readonly-badge' : 'editing-badge'} title={`当前处理人：${session.account.name}`}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
-        <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button>
+        {/* <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button> */}
         {approvalStage && <button className="secondary-button return-button" type="button" disabled={workspace.readonly || submitted} onClick={returnTask}>退回</button>}
         <button className="primary-button" type="button" disabled={hardReadonly || saving || Boolean(editing)} onClick={submit}><Check size={16} />提交</button>
       </div>

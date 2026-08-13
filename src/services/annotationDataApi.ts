@@ -2,6 +2,7 @@ import { runtimeConfig } from '../config/runtime'
 import { mockTasks } from '../mocks/data'
 import type { AnnotationDataItem, AnnotationDataStatus, TaskNode } from '../types/api'
 import { request } from './api'
+import { getMockFleetSyncedTasks } from './managementApi'
 
 function delay() { return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay)) }
 function numberOrNull(value: unknown) { return value === null || value === undefined || value === '' ? null : Number(value) }
@@ -31,7 +32,10 @@ export const annotationDataApi = {
   async list(projectId: string): Promise<AnnotationDataItem[]> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
-      return mockTasks.map((task) => normalize({ ...task, id: task.dataId, name: task.dataName, taskId: task.id, status: task.status === 'submitted' || task.status === 'completed' ? 'completed' : task.status }))
+      const existing = mockTasks.map((task) => normalize({ ...task, id: task.dataId, name: task.dataName, taskId: task.id, status: task.status === 'submitted' || task.status === 'completed' ? 'completed' : task.status }))
+      const knownIds = new Set(existing.map((item) => item.id))
+      const synced = getMockFleetSyncedTasks(projectId).filter((task) => !knownIds.has(task.externalTaskId)).map((task) => normalize({ id: `fleet-${task.id}`, external_task_id: task.externalTaskId, title: task.name || task.externalTaskId, status: 'pending', current_node: 'annotation', total_duration_ms: task.totalDuration * 1000, updated_at: new Date().toISOString().replace('T', ' ').slice(0, 19) }))
+      return [...synced, ...existing]
     }
     const result = await request<{ items: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/tasks?page_size=100`)
     return result.items.map(normalize)

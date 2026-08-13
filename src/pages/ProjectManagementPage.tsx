@@ -1,9 +1,9 @@
-import { Archive, ChevronDown, CircleAlert, Edit3, Eye, Pause, Play, Plus, RotateCcw, Search, Square, Trash2 } from 'lucide-react'
+import { Archive, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Edit3, Eye, Pause, Play, Plus, RotateCcw, Search, Square, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { AppShell } from '../components/AppShell'
 import { Modal } from '../components/Modal'
-import { labelApi, projectApi, teamApi } from '../services/managementApi'
-import type { LabelLibrary, ManagedProject, Member, ProjectPayload, ProjectStatus, SessionResponse, Team } from '../types/api'
+import { fleetApi, labelApi, projectApi, teamApi } from '../services/managementApi'
+import type { FleetScene, FleetTask, LabelLibrary, ManagedProject, Member, ProjectPayload, ProjectStatus, SessionResponse, Team } from '../types/api'
 
 const statusLabels: Record<ProjectStatus, string> = { 'not-started': '未启动', running: '进行中', paused: '已暂停', finished: '已结束', archived: '已归档' }
 const statusActions: Record<ProjectStatus, Array<{ label: string; status: ProjectStatus; icon: typeof Play }>> = {
@@ -12,6 +12,96 @@ const statusActions: Record<ProjectStatus, Array<{ label: string; status: Projec
 const emptyForm: ProjectPayload = { name: '', desc: '', teams: [], owner: '', deliveryAt: '', completionNode: '验收', assignmentStrategy: 'manual_claim', labelLibraryIds: [] }
 
 function duration(value: number) { if (!value) return '-'; const hours = Math.floor(value / 3600); const minutes = Math.floor(value % 3600 / 60); return `${hours}时${minutes}分` }
+
+export function FleetSyncModal({ projectId, projectName, onClose, onSynced }: { projectId: string; projectName: string; onClose: () => void; onSynced: (message: string) => void }) {
+  const [view, setView] = useState<'scenes' | 'tasks'>('scenes')
+  const [scenes, setScenes] = useState<FleetScene[]>([])
+  const [selectedScene, setSelectedScene] = useState('')
+  const [sceneKeywordInput, setSceneKeywordInput] = useState('')
+  const [sceneKeyword, setSceneKeyword] = useState('')
+  const [scenePage, setScenePage] = useState(1)
+  const [sceneTotal, setSceneTotal] = useState<number>()
+  const [tasks, setTasks] = useState<FleetTask[]>([])
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set())
+  const [selectedTaskDetails, setSelectedTaskDetails] = useState<Map<number, FleetTask>>(new Map())
+  const [taskKeywordInput, setTaskKeywordInput] = useState('')
+  const [taskKeyword, setTaskKeyword] = useState('')
+  const [taskPage, setTaskPage] = useState(1)
+  const [taskTotal, setTaskTotal] = useState<number>()
+  const [loading, setLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [error, setError] = useState('')
+  const pageSize = 20
+
+  useEffect(() => {
+    if (!projectId || view !== 'scenes') return
+    let active = true
+    fleetApi.scenes(projectId, { keyword: sceneKeyword, page: scenePage, pageSize }).then((data) => {
+      if (!active) return
+      setScenes(data.items); setSceneTotal(data.total)
+    }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Fleet 场景加载失败') }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [projectId, sceneKeyword, scenePage, view])
+
+  useEffect(() => {
+    if (!projectId || !selectedScene || view !== 'tasks') return
+    let active = true
+    fleetApi.tasks(projectId, { scene: selectedScene, keyword: taskKeyword, page: taskPage, pageSize }).then((data) => {
+      if (!active) return
+      setTasks(data.items); setTaskTotal(data.total)
+    }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Fleet 任务加载失败') }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [projectId, selectedScene, taskKeyword, taskPage, view])
+
+  const sceneHasNext = sceneTotal == null ? scenes.length === pageSize : scenePage * pageSize < sceneTotal
+  const taskHasNext = taskTotal == null ? tasks.length === pageSize : taskPage * pageSize < taskTotal
+  const selectableTasks = tasks.filter((task) => task.availableCount > 0)
+  const currentPageSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id))
+  const selectedTasks = [...selectedTaskDetails.values()]
+  const selectedAvailable = selectedTasks.reduce((sum, task) => sum + task.availableCount, 0)
+  const selectedDuration = selectedTasks.reduce((sum, task) => sum + task.totalDuration, 0)
+
+  function startLoading() { setLoading(true); setError('') }
+  function openTasks() { if (!selectedScene) return; startLoading(); setTaskKeywordInput(''); setTaskKeyword(''); setTaskPage(1); setSelectedTaskIds(new Set()); setSelectedTaskDetails(new Map()); setView('tasks') }
+  function toggleTask(id: number) {
+    const task = tasks.find((item) => item.id === id); if (!task) return
+    setSelectedTaskIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
+    setSelectedTaskDetails((current) => { const next = new Map(current); if (next.has(id)) next.delete(id); else next.set(id, task); return next })
+  }
+  function togglePage() {
+    setSelectedTaskIds((current) => { const next = new Set(current); selectableTasks.forEach((task) => currentPageSelected ? next.delete(task.id) : next.add(task.id)); return next })
+    setSelectedTaskDetails((current) => { const next = new Map(current); selectableTasks.forEach((task) => currentPageSelected ? next.delete(task.id) : next.set(task.id, task)); return next })
+  }
+  async function sync(taskIds?: number[]) {
+    if (!projectId || !selectedScene || syncing) return
+    setSyncing(true); setError('')
+    try {
+      const result = await fleetApi.sync(projectId, selectedScene, taskIds)
+      onSynced(`Fleet 同步完成：新增 ${result.createdCount} 个，更新 ${result.updatedCount} 个任务`)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Fleet 同步失败') }
+    finally { setSyncing(false) }
+  }
+
+  const footer = view === 'scenes'
+    ? <><button className="secondary-button" type="button" onClick={onClose}>取消</button><button className="secondary-button" type="button" disabled={!selectedScene || loading || syncing} onClick={openTasks}>选择任务同步</button><button className="primary-button" type="button" disabled={!selectedScene || loading || syncing} onClick={() => sync()}>{syncing ? '正在同步...' : '同步该场景全部数据'}</button></>
+    : <><button className="secondary-button" type="button" onClick={onClose}>取消</button><button className="secondary-button" type="button" disabled={syncing} onClick={() => { startLoading(); setView('scenes') }}>上一步</button><button className="primary-button" type="button" disabled={!selectedTaskIds.size || syncing} onClick={() => sync([...selectedTaskIds])}>{syncing ? '正在同步...' : `同步所选任务（${selectedTaskIds.size}）`}</button></>
+
+  return <Modal title="从 Fleet 同步数据" onClose={onClose} footer={footer}>
+    <div className="fleet-sync-dialog">
+      <div className="fleet-project-target"><span>同步到当前项目</span><strong>{projectName}</strong><small>{projectId}</small></div>
+      {view === 'scenes' ? <>
+        <div className="fleet-dialog-heading"><div><h3>选择场景</h3><p>从 Fleet 场景中选择整场同步，或进入任务列表选择部分任务</p></div><form className="fleet-search" onSubmit={(event) => { event.preventDefault(); startLoading(); setSelectedScene(''); setScenePage(1); setSceneKeyword(sceneKeywordInput.trim()) }}><Search size={16} /><input value={sceneKeywordInput} onChange={(event) => setSceneKeywordInput(event.target.value)} placeholder="搜索场景名称" /><button type="submit">查询</button></form></div>
+        <div className="fleet-scene-grid">{loading ? <div className="fleet-dialog-empty">正在读取 Fleet 场景...</div> : scenes.map((scene) => <button type="button" className={selectedScene === scene.scene ? 'selected' : ''} key={scene.scene} onClick={() => setSelectedScene(scene.scene)}><i className="fleet-radio" /><span><strong>{scene.scene}</strong><small>{scene.taskCount} 个任务 · {scene.videoCount} 个视频 · {duration(scene.totalDuration)}</small></span></button>)}{!loading && !scenes.length && <div className="fleet-dialog-empty">未找到可同步场景</div>}</div>
+        <div className="fleet-dialog-pagination"><span>{sceneTotal == null ? `第 ${scenePage} 页` : `共 ${sceneTotal} 个场景`}</span><button type="button" disabled={scenePage <= 1 || loading} onClick={() => { startLoading(); setSelectedScene(''); setScenePage((page) => page - 1) }}><ChevronLeft size={15} /></button><b>{scenePage}</b><button type="button" disabled={!sceneHasNext || loading} onClick={() => { startLoading(); setSelectedScene(''); setScenePage((page) => page + 1) }}><ChevronRight size={15} /></button></div>
+      </> : <>
+        <div className="fleet-dialog-heading"><div><h3>{selectedScene}</h3><p>选择需要同步的 Fleet 任务</p></div><form className="fleet-search" onSubmit={(event) => { event.preventDefault(); startLoading(); setTaskPage(1); setTaskKeyword(taskKeywordInput.trim()) }}><Search size={16} /><input value={taskKeywordInput} onChange={(event) => setTaskKeywordInput(event.target.value)} placeholder="搜索任务 ID、名称、设备或人员" /><button type="submit">查询</button></form></div>
+        <div className="fleet-task-table-wrap"><table className="fleet-task-table"><thead><tr><th><input type="checkbox" checked={currentPageSelected} disabled={!selectableTasks.length} onChange={togglePage} aria-label="选择当前页可同步任务" /></th><th>任务编号 / 任务路径</th><th>设备 / 人员</th><th>视频数</th><th>当前项目已同步</th><th>可同步</th></tr></thead><tbody>{loading ? <tr><td colSpan={6}><div className="fleet-dialog-empty">正在读取 Fleet 任务...</div></td></tr> : tasks.map((task) => <tr key={task.id}><td><input type="checkbox" checked={selectedTaskIds.has(task.id)} disabled={!task.availableCount} onChange={() => toggleTask(task.id)} aria-label={`选择 ${task.externalTaskId}`} /></td><td><strong>{task.externalTaskId}</strong><small>{task.path || task.name || '-'}</small></td><td><span>{[task.device, task.operator].filter(Boolean).join(' / ') || '-'}</span></td><td>{task.videoCount}</td><td>{task.syncedCount}</td><td><b className={task.availableCount ? 'available' : ''}>{task.availableCount}</b></td></tr>)}{!loading && !tasks.length && <tr><td colSpan={6}><div className="fleet-dialog-empty">未找到匹配任务</div></td></tr>}</tbody></table></div>
+        <div className="fleet-task-summary"><span>已选 <b>{selectedTaskIds.size}</b> 个任务</span><span>预计同步 <b>{selectedAvailable}</b> 个视频</span><span>总时长 <b>{duration(selectedDuration)}</b></span><div className="fleet-dialog-pagination"><button type="button" disabled={taskPage <= 1 || loading} onClick={() => { startLoading(); setTaskPage((page) => page - 1) }}><ChevronLeft size={15} /></button><b>{taskPage}</b><button type="button" disabled={!taskHasNext || loading} onClick={() => { startLoading(); setTaskPage((page) => page + 1) }}><ChevronRight size={15} /></button></div></div>
+      </>}
+      {error && <p className="inline-error fleet-sync-error">{error}</p>}
+    </div>
+  </Modal>
+}
 
 export function ProjectManagementPage({ session }: { session: SessionResponse }) {
   const [items, setItems] = useState<ManagedProject[]>([])

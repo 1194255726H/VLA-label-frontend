@@ -139,6 +139,39 @@ export interface ProjectPayload {
   labelLibraryIds: string[]
 }
 
+export interface FleetScene {
+  scene: string
+  taskCount: number
+  videoCount: number
+  totalDuration: number
+}
+
+export interface FleetTask {
+  id: number
+  externalTaskId: string
+  name: string
+  path: string
+  device: string
+  operator: string
+  videoCount: number
+  syncedCount: number
+  availableCount: number
+  totalDuration: number
+}
+
+export interface FleetPage<T> {
+  items: T[]
+  page: number
+  pageSize: number
+  total?: number
+}
+
+export interface FleetSyncResult {
+  createdCount: number
+  updatedCount: number
+  items: Array<{ id: number | string; externalTaskId: string; created: boolean }>
+}
+
 export interface LabelItem {
   id: string
   name: string

@@ -1,12 +1,23 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
-import type { LabelItem, LabelLibrary, ManagedProject, Member, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
+import type { FleetPage, FleetScene, FleetSyncResult, FleetTask, LabelItem, LabelLibrary, ManagedProject, Member, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
 import { request } from './api'
 
 let projects = mockManagedProjects.map((item) => ({ ...item, teams: [...item.teams], labelLibraryIds: [...item.labelLibraryIds] }))
 let libraries = mockLabelLibraries.map((item) => ({ ...item, tags: item.tags.map((tag) => ({ ...tag })) }))
 let teams = mockTeams.map((item) => ({ ...item }))
 let members = mockMembers.map((item) => ({ ...item, roles: [...item.roles], projects: [...item.projects] }))
+const mockFleetTasks: Record<string, FleetTask[]> = {
+  '合肥创运': Array.from({ length: 12 }, (_, index) => ({ id: 52 + index, externalTaskId: `TASK-20260716-G${String(index + 1).padStart(3, '0')}-01`, name: `合肥创运采集任务 ${index + 1}`, path: `合肥创运 / 路线 ${index + 1}`, device: `VLA-${String(index % 4 + 1).padStart(2, '0')}`, operator: ['王龙', '李明', '张伟'][index % 3], videoCount: 3, syncedCount: index < 2 ? 1 : 0, availableCount: index < 2 ? 2 : 3, totalDuration: 27000 })),
+  '工厂电脑装配': Array.from({ length: 4 }, (_, index) => ({ id: 101 + index, externalTaskId: `TASK-20260716-G004-0${index + 1}`, name: ['整机装配', '部件装配', '硬盘安装', '线缆连接'][index], path: `工厂电脑装配 / ${['主板安装 / 固定主板', '内存安装 / 插装内存', '硬盘安装 / 固定硬盘', '线缆连接 / 连接电源线'][index]}`, device: `工位 ${index + 1}`, operator: ['王龙', '李明'][index % 2], videoCount: [5, 7, 4, 3][index], syncedCount: [1, 2, 0, 0][index], availableCount: [4, 5, 4, 3][index], totalDuration: [15600, 22400, 12800, 9600][index] })),
+  '商超拣选': Array.from({ length: 3 }, (_, index) => ({ id: 201 + index, externalTaskId: `TASK-20260718-S${String(index + 1).padStart(3, '0')}`, name: `货架拣选任务 ${index + 1}`, path: `商超拣选 / 货架 ${index + 1}`, device: `CAM-${index + 1}`, operator: '陈静', videoCount: 4, syncedCount: 0, availableCount: 4, totalDuration: 16000 })),
+}
+const mockFleetSynced = new Map<string, Set<number>>()
+
+export function getMockFleetSyncedTasks(projectId: string) {
+  const synced = mockFleetSynced.get(projectId) || new Set<number>()
+  return clone(Object.values(mockFleetTasks).flat().filter((task) => synced.has(task.id)))
+}
 
 function delay() { return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay)) }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
@@ -67,6 +78,66 @@ export const projectApi = {
     if (runtimeConfig.apiMode === 'mock') { await delay(); projects = projects.filter((item) => item.id !== projectId); return clone(projects) }
     await request(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' })
     return this.list()
+  },
+}
+
+function fleetNumber(item: Record<string, unknown>, ...keys: string[]) {
+  const value = keys.map((key) => item[key]).find((candidate) => candidate != null)
+  return num(value)
+}
+
+function normalizeFleetScene(item: Record<string, unknown>): FleetScene {
+  return { scene: String(item.scene || item.name || ''), taskCount: fleetNumber(item, 'task_count', 'taskCount'), videoCount: fleetNumber(item, 'video_count', 'videoCount'), totalDuration: fleetNumber(item, 'total_duration', 'total_duration_ms', 'totalDuration') }
+}
+
+function normalizeFleetTask(item: Record<string, unknown>): FleetTask {
+  const id = fleetNumber(item, 'id', 'task_id', 'fleet_task_id')
+  const externalTaskId = String(item.external_task_id || item.task_code || item.code || item.task_id || id)
+  const name = String(item.name || item.task_name || '')
+  const path = String(item.path || item.task_path || item.scene_path || item.description || name)
+  const videoCount = fleetNumber(item, 'video_count', 'oss_video_count', 'recording_unit_count')
+  const syncedCount = fleetNumber(item, 'synced_count', 'current_project_synced', 'synced_video_count')
+  const explicitAvailable = ['available_count', 'syncable_count', 'available_video_count'].some((key) => item[key] != null)
+  return { id, externalTaskId, name, path, device: String(item.device || item.device_name || item.robot || ''), operator: String(item.operator || item.person || item.collector || ''), videoCount, syncedCount, availableCount: explicitAvailable ? fleetNumber(item, 'available_count', 'syncable_count', 'available_video_count') : Math.max(0, videoCount - syncedCount), totalDuration: fleetNumber(item, 'total_duration', 'total_duration_ms', 'totalDuration') }
+}
+
+export const fleetApi = {
+  async scenes(projectId: string, query: { keyword?: string; page: number; pageSize: number }): Promise<FleetPage<FleetScene>> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const all = Object.entries(mockFleetTasks).map(([scene, tasks]) => ({ scene, taskCount: tasks.length, videoCount: tasks.reduce((sum, task) => sum + task.videoCount, 0), totalDuration: tasks.reduce((sum, task) => sum + task.totalDuration, 0) })).filter((item) => !query.keyword || item.scene.includes(query.keyword))
+      const start = (query.page - 1) * query.pageSize
+      return clone({ items: all.slice(start, start + query.pageSize), page: query.page, pageSize: query.pageSize, total: all.length })
+    }
+    const params = new URLSearchParams({ page: String(query.page), page_size: String(query.pageSize) }); if (query.keyword) params.set('keyword', query.keyword)
+    const result = await request<{ items: Array<Record<string, unknown>>; page?: number; page_size?: number; total?: number }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/scenes?${params}`)
+    return { items: result.items.map(normalizeFleetScene), page: result.page || query.page, pageSize: result.page_size || query.pageSize, total: result.total }
+  },
+  async tasks(projectId: string, query: { scene: string; keyword?: string; page: number; pageSize: number }): Promise<FleetPage<FleetTask>> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const synced = mockFleetSynced.get(projectId) || new Set<number>()
+      const all = (mockFleetTasks[query.scene] || []).map((task) => synced.has(task.id) ? { ...task, syncedCount: task.videoCount, availableCount: 0 } : task).filter((item) => !query.keyword || `${item.externalTaskId}${item.name}${item.path}${item.device}${item.operator}`.toLowerCase().includes(query.keyword.toLowerCase()))
+      const start = (query.page - 1) * query.pageSize
+      return clone({ items: all.slice(start, start + query.pageSize), page: query.page, pageSize: query.pageSize, total: all.length })
+    }
+    const params = new URLSearchParams({ scene: query.scene, page: String(query.page), page_size: String(query.pageSize) }); if (query.keyword) params.set('keyword', query.keyword)
+    const result = await request<{ items: Array<Record<string, unknown>>; page?: number; page_size?: number; total?: number }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/tasks?${params}`)
+    return { items: result.items.map(normalizeFleetTask), page: result.page || query.page, pageSize: result.page_size || query.pageSize, total: result.total }
+  },
+  async sync(projectId: string, scene: string, taskIds?: number[]): Promise<FleetSyncResult> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const selected = (mockFleetTasks[scene] || []).filter((task) => !taskIds || taskIds.includes(task.id))
+      const synced = mockFleetSynced.get(projectId) || new Set<number>()
+      const items = selected.map((task) => { const created = !synced.has(task.id); synced.add(task.id); return { id: task.id, externalTaskId: task.externalTaskId, created } })
+      mockFleetSynced.set(projectId, synced)
+      const createdCount = items.filter((item) => item.created).length
+      projects = projects.map((project) => project.id === projectId ? { ...project, dataCount: project.dataCount + createdCount } : project)
+      return clone({ createdCount, updatedCount: items.length - createdCount, items })
+    }
+    const result = await request<{ created_count: number; updated_count: number; items: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/sync`, { method: 'POST', body: JSON.stringify({ scene, ...(taskIds ? { task_ids: taskIds } : {}) }) })
+    return { createdCount: result.created_count || 0, updatedCount: result.updated_count || 0, items: (result.items || []).map((item) => ({ id: String(item.id || ''), externalTaskId: String(item.external_task_id || ''), created: item.created === true })) }
   },
 }
 
