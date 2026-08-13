@@ -1,11 +1,10 @@
 import {
-  ArrowLeft, Check, ChevronDown, CircleAlert, Expand, Flag, Pause, Play, Redo2, RotateCcw,
+  ArrowLeft, Check, ChevronDown, CircleAlert, Expand, Pause, Play, Redo2, RotateCcw,
   Save, SkipBack, SkipForward, Trash2, Undo2, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { BrandLogo } from '../components/BrandLogo'
-import { Modal } from '../components/Modal'
 import { annotationApi } from '../services/annotationApi'
 import type { AnnotationResult, AnnotationSegment, AnnotationWorkspace, SessionResponse } from '../types/api'
 
@@ -15,6 +14,16 @@ function timeText(seconds: number) {
   const safe = Math.max(0, seconds || 0)
   const minutes = Math.floor(safe / 60)
   return `${String(minutes).padStart(2, '0')}:${(safe % 60).toFixed(3).padStart(6, '0')}`
+}
+
+function contrastTextColor(color: string) {
+  const match = color.match(/^#([0-9a-f]{6})$/i)
+  if (!match) return '#ffffff'
+  const value = Number.parseInt(match[1], 16)
+  const red = value >> 16
+  const green = value >> 8 & 0xff
+  const blue = value & 0xff
+  return red * 299 + green * 587 + blue * 114 > 160000 ? '#24313a' : '#ffffff'
 }
 
 function overlaps(items: AnnotationSegment[], startFrame: number, endFrame: number) {
@@ -43,9 +52,11 @@ function normalizeInvalidRanges(ranges: AnnotationResult['invalidRanges']) {
 type TimelineViewport = { startFrame: number; endFrame: number }
 type TimelineDraft = { level: 'goal' | 'action'; startFrame: number; endFrame: number; parentId?: string }
 
+const MINIMUM_VIEWPORT_FRAMES = 8
+
 function clampViewport(domainStart: number, domainEnd: number, startFrame: number, endFrame: number) {
   const domainSpan = Math.max(1, domainEnd - domainStart)
-  const minimumSpan = Math.min(domainSpan, Math.max(1, Math.round(domainSpan * 0.02)))
+  const minimumSpan = Math.min(domainSpan, MINIMUM_VIEWPORT_FRAMES)
   const span = Math.max(minimumSpan, Math.min(domainSpan, Math.round(endFrame - startFrame)))
   let start = Math.round(startFrame)
   if (start < domainStart) start = domainStart
@@ -53,12 +64,41 @@ function clampViewport(domainStart: number, domainEnd: number, startFrame: numbe
   return { startFrame: start, endFrame: start + span }
 }
 
-function frameRulerStep(frameCount: number, maximumIntervals = 12) {
-  const minimumStep = Math.max(1, Math.ceil(frameCount / maximumIntervals))
+function niceFrameStep(minimumStep: number) {
+  if (minimumStep <= 1) return 1
   const magnitude = 10 ** Math.floor(Math.log10(minimumStep))
   const normalized = minimumStep / magnitude
   const multiplier = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
   return multiplier * magnitude
+}
+
+function frameRulerSteps(frameCount: number, width: number) {
+  const major = niceFrameStep(frameCount * 104 / Math.max(320, width))
+  const minor = major >= 10 ? major / 5 : major >= 2 ? major / 2 : 1
+  return { major, minor: Math.max(1, Math.round(minor)) }
+}
+
+function wheelDelta(event: React.WheelEvent) {
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1
+  return { x: event.deltaX * unit, y: event.deltaY * unit }
+}
+
+function viewportFromWheel(domainStart: number, domainEnd: number, viewport: TimelineViewport, event: React.WheelEvent, rect: DOMRect) {
+  const span = Math.max(1, viewport.endFrame - viewport.startFrame)
+  const delta = wheelDelta(event)
+  const horizontal = event.shiftKey || Math.abs(delta.x) > Math.abs(delta.y)
+  if (horizontal) {
+    const wheel = event.shiftKey && Math.abs(delta.x) <= Math.abs(delta.y) ? delta.y : delta.x
+    const frameDelta = Math.sign(wheel) * Math.max(1, Math.round(span * Math.min(0.5, Math.abs(wheel) / 700)))
+    return clampViewport(domainStart, domainEnd, viewport.startFrame + frameDelta, viewport.endFrame + frameDelta)
+  }
+  const pointerRatio = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)))
+  const anchorFrame = viewport.startFrame + pointerRatio * span
+  const exponent = Math.max(-0.5, Math.min(0.5, delta.y * 0.0018))
+  const domainSpan = Math.max(1, domainEnd - domainStart)
+  const nextSpan = Math.max(Math.min(domainSpan, MINIMUM_VIEWPORT_FRAMES), Math.min(domainSpan, Math.round(span * Math.exp(exponent))))
+  const nextStart = anchorFrame - pointerRatio * nextSpan
+  return clampViewport(domainStart, domainEnd, nextStart, nextStart + nextSpan)
 }
 
 function segmentNumber(item: AnnotationSegment, fallbackIndex: number) {
@@ -79,6 +119,10 @@ function TimelineLane({ label, items, childItems = [], draft, totalFrames, range
   onRangeChange?: (item: AnnotationSegment, startFrame: number, endFrame: number, remember: boolean) => void
   onViewportChange?: (viewport: TimelineViewport) => void
 }) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const suppressClickRef = useRef(false)
+  const [trackWidth, setTrackWidth] = useState(900)
+  const [panning, setPanning] = useState(false)
   const domainStart = Math.max(0, Math.min(totalFrames, rangeStartFrame))
   const domainEnd = Math.max(domainStart, Math.min(totalFrames, rangeEndFrame))
   const normalizedViewport = clampViewport(domainStart, domainEnd, viewport?.startFrame ?? domainStart, viewport?.endFrame ?? domainEnd)
@@ -86,55 +130,90 @@ function TimelineLane({ label, items, childItems = [], draft, totalFrames, range
   const safeEnd = normalizedViewport.endFrame
   const safeSpan = Math.max(1, safeEnd - safeStart)
   const domainSpan = Math.max(1, domainEnd - domainStart)
-  const zoomPercent = Math.max(100, Math.round(domainSpan / safeSpan * 100))
-  const rulerStep = frameRulerStep(safeSpan)
-  const firstTick = Math.ceil(safeStart / rulerStep) * rulerStep
+  const zoomRatio = Math.max(1, domainSpan / safeSpan)
+  const { major: majorRulerStep, minor: minorRulerStep } = frameRulerSteps(safeSpan, trackWidth)
+  const firstTick = Math.ceil(safeStart / minorRulerStep) * minorRulerStep
   const playheadFrame = Math.max(safeStart, Math.min(safeEnd, currentFrame))
   const rulerFrames: number[] = []
-  for (let frame = firstTick; frame <= safeEnd; frame += rulerStep) rulerFrames.push(frame)
+  for (let frame = firstTick; frame <= safeEnd; frame += minorRulerStep) rulerFrames.push(frame)
+  useEffect(() => {
+    const track = trackRef.current
+    if (!track) return
+    const updateWidth = () => setTrackWidth(track.clientWidth || 900)
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(track)
+    return () => observer.disconnect()
+  }, [])
   const frameFromPointer = (clientX: number, left: number, width: number) => (
     safeStart + Math.max(0, Math.min(safeSpan, Math.round((clientX - left) / width * safeSpan)))
   )
   function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
     if (!onViewportChange || domainEnd <= domainStart) return
-    const rect = event.currentTarget.getBoundingClientRect()
-    if (!rect.width) return
-    if (!event.altKey) {
-      if (safeSpan >= domainSpan) return
-      event.preventDefault()
-      const direction = Math.sign(Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY)
-      const delta = Math.max(1, Math.round(safeSpan * 0.12)) * direction
-      onViewportChange(clampViewport(domainStart, domainEnd, safeStart + delta, safeEnd + delta))
-      return
-    }
+    const rect = trackRef.current?.getBoundingClientRect()
+    if (!rect?.width) return
     event.preventDefault()
-    const pointerRatio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
-    const anchorFrame = safeStart + pointerRatio * safeSpan
-    const nextSpan = Math.max(Math.max(1, Math.round(domainSpan * 0.02)), Math.min(domainSpan, Math.round(safeSpan * Math.exp(event.deltaY * 0.0025))))
-    const nextStart = anchorFrame - pointerRatio * nextSpan
-    onViewportChange(clampViewport(domainStart, domainEnd, nextStart, nextStart + nextSpan))
+    onViewportChange(viewportFromWheel(domainStart, domainEnd, normalizedViewport, event, rect))
+  }
+  function startViewportPan(event: React.PointerEvent<HTMLElement>) {
+    if (!onViewportChange || safeSpan >= domainSpan || event.button !== 0 || (event.target as HTMLElement).closest('.range-handle')) return
+    event.preventDefault(); event.stopPropagation()
+    const rect = trackRef.current?.getBoundingClientRect()
+    if (!rect?.width) return
+    const panTrackWidth = rect.width
+    const panTrackLeft = rect.left
+    const originX = event.clientX
+    const origin = normalizedViewport
+    let dragged = false
+    onSeek(frameFromPointer(event.clientX, rect.left, panTrackWidth))
+    setPanning(true)
+    function move(pointer: PointerEvent) {
+      const pixels = pointer.clientX - originX
+      if (Math.abs(pixels) >= 3) dragged = true
+      const delta = Math.round(-pixels / panTrackWidth * safeSpan)
+      const nextViewport = clampViewport(domainStart, domainEnd, origin.startFrame + delta, origin.endFrame + delta)
+      onViewportChange?.(nextViewport)
+      const pointerRatio = Math.max(0, Math.min(1, (pointer.clientX - panTrackLeft) / panTrackWidth))
+      onSeek(nextViewport.startFrame + pointerRatio * (nextViewport.endFrame - nextViewport.startFrame))
+    }
+    function end() {
+      suppressClickRef.current = dragged
+      setPanning(false)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
   }
   function startRangeDrag(event: React.PointerEvent<HTMLButtonElement>, item: AnnotationSegment) {
+    const target = event.target as HTMLElement
+    const handle = target.closest<HTMLElement>('.range-handle')
+    if (!handle) { startViewportPan(event); return }
     if (readonly || !onRangeChange || selectedId !== item.id) return
     event.preventDefault(); event.stopPropagation()
     const rect = event.currentTarget.parentElement?.getBoundingClientRect(); if (!rect) return
     const trackWidth = rect.width
-    const target = event.target as HTMLElement
-    const mode = target.dataset.handle === 'start' ? 'start' : target.dataset.handle === 'end' ? 'end' : 'move'
+    const mode = handle.dataset.handle === 'start' ? 'start' : 'end'
     const originX = event.clientX; const originStart = item.startFrame; const originEnd = item.endFrame; let first = true
+    onSeek(mode === 'start' ? originStart : originEnd)
     function move(pointer: PointerEvent) {
       const delta = Math.round((pointer.clientX - originX) / trackWidth * safeSpan)
       const startFrame = mode === 'end' ? originStart : originStart + delta
       const endFrame = mode === 'start' ? originEnd : originEnd + delta
       onRangeChange?.(item, startFrame, endFrame, first); first = false
+      onSeek(mode === 'start' ? startFrame : endFrame)
     }
     function end() { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end) }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end)
   }
-  return <div className="annotation-lane"><span className="annotation-lane-label">{label}</span><div className="annotation-track" title={`${label}时间轴 · ${zoomPercent}%`} onWheel={handleWheel} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('.timeline-block')) onViewportChange?.({ startFrame: domainStart, endFrame: domainEnd }) }} onPointerMove={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onHover?.(frameFromPointer(event.clientX, rect.left, rect.width)) }} onPointerLeave={() => onHover?.()} onClick={(event) => {
+  return <div className="annotation-lane"><span className="annotation-lane-label">{label}</span><div ref={trackRef} className={`annotation-track${panning ? ' panning' : ''}`} title={`${label}时间轴 · ${zoomRatio.toFixed(2)} 倍 · F${safeStart} - F${safeEnd}`} onWheel={handleWheel} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('.timeline-block')) onViewportChange?.({ startFrame: domainStart, endFrame: domainEnd }) }} onPointerDown={startViewportPan} onPointerMove={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onHover?.(frameFromPointer(event.clientX, rect.left, rect.width)) }} onPointerLeave={() => onHover?.()} onClick={(event) => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; return }
     const rect = event.currentTarget.getBoundingClientRect(); onSeek(frameFromPointer(event.clientX, rect.left, rect.width))
   }}>
-    <div className="timeline-ruler" aria-hidden="true">{rulerFrames.map((frame) => <i key={frame} style={{ left: `${(frame - safeStart) / safeSpan * 100}%` }}><span>{frame}</span></i>)}</div>
+    <div className="timeline-ruler" aria-hidden="true">{rulerFrames.map((frame) => { const major = frame % majorRulerStep === 0; return <i className={major ? 'major' : 'minor'} key={frame} style={{ left: `${(frame - safeStart) / safeSpan * 100}%` }}>{major && <><em>{timeText(frame / frameRate)}</em><span>F{frame}</span></>}</i> })}</div>
+    <span className="timeline-zoom-readout">{zoomRatio.toFixed(zoomRatio < 10 ? 2 : 1)}x · {safeSpan}帧</span>
     {invalidRanges?.flatMap((range) => {
       const visibleStart = Math.max(safeStart, range.startFrame)
       const visibleEnd = Math.min(safeEnd, range.endFrame)
@@ -147,7 +226,8 @@ function TimelineLane({ label, items, childItems = [], draft, totalFrames, range
       const number = segmentNumber(item, index)
       const children = item.type === 'goal' ? childItems.filter((child) => child.parentId === item.id) : []
       const childDraft = item.type === 'goal' && draft?.level === 'action' && draft.parentId === item.id ? draft : undefined
-      return [<button className={`timeline-block ${item.type}${children.length || childDraft ? ' has-child-overview' : ''}${selectedId === item.id ? ' selected' : ''}${item.startFrame < safeStart ? ' clipped-start' : ''}${item.endFrame > safeEnd ? ' clipped-end' : ''}`} type="button" key={item.id} title={`${item.code || number} · ${item.labelName || (item.type === 'no_action' ? '无动作' : '未选择标签')}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, width: `${(visibleEnd - visibleStart) / safeSpan * 100}%`, '--segment-color': item.color } as React.CSSProperties} onPointerDown={(event) => startRangeDrag(event, item)} onClick={(event) => { event.stopPropagation(); onSelect(item) }}><span className="timeline-block-bar"><span className="timeline-block-copy">{number} · {((item.endFrame - item.startFrame) / frameRate).toFixed(item.type === 'goal' ? 3 : 0)}s</span>{item.keyFrames?.map((frame) => <i className="timeline-keyframe" key={frame.id} style={{ left: `${(frame.frame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />)}{(children.length > 0 || childDraft) && <span className="timeline-child-overview" aria-hidden="true">{children.map((child) => <i key={child.id} style={{ left: `${(child.startFrame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(child.endFrame - child.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, '--child-color': child.color } as React.CSSProperties} />)}{childDraft && <i className="draft" style={{ left: `${(childDraft.startFrame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${Math.max(1, childDraft.endFrame - childDraft.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />}</span>}</span>{selectedId === item.id && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>]
+      const visibleItemSpan = Math.max(1, visibleEnd - visibleStart)
+      return [<button className={`timeline-block ${item.type}${children.length || childDraft ? ' has-child-overview' : ''}${selectedId === item.id ? ' selected' : ''}${item.startFrame < safeStart ? ' clipped-start' : ''}${item.endFrame > safeEnd ? ' clipped-end' : ''}`} type="button" key={item.id} title={`${item.code || number} · ${item.labelName || (item.type === 'no_action' ? '无动作' : '未选择标签')}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, width: `${visibleItemSpan / safeSpan * 100}%`, '--segment-color': item.color } as React.CSSProperties} onPointerDown={(event) => startRangeDrag(event, item)} onClick={(event) => { event.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return }; onSelect(item) }}><span className="timeline-block-bar"><span className="timeline-block-copy">{number} · {((item.endFrame - item.startFrame) / frameRate).toFixed(item.type === 'goal' ? 3 : 0)}s</span>{item.keyFrames?.map((frame) => <i className="timeline-keyframe" key={frame.id} style={{ left: `${(frame.frame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />)}{(children.length > 0 || childDraft) && <span className="timeline-child-overview" aria-hidden="true">{children.flatMap((child) => { const childStart = Math.max(visibleStart, child.startFrame); const childEnd = Math.min(visibleEnd, child.endFrame); return childEnd > childStart ? [<i key={child.id} style={{ left: `${(childStart - visibleStart) / visibleItemSpan * 100}%`, width: `${(childEnd - childStart) / visibleItemSpan * 100}%`, '--child-color': child.color } as React.CSSProperties} />] : [] })}{childDraft && (() => { const draftStart = Math.max(visibleStart, childDraft.startFrame); const draftEnd = Math.min(visibleEnd, childDraft.endFrame); return draftEnd > draftStart ? <i className="draft" style={{ left: `${(draftStart - visibleStart) / visibleItemSpan * 100}%`, width: `${(draftEnd - draftStart) / visibleItemSpan * 100}%` }} /> : null })()}</span>}</span>{selectedId === item.id && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>]
     })}
     {draft && draft.level === (label === '单次任务' ? 'goal' : 'action') && draft.endFrame >= safeStart && draft.startFrame <= safeEnd && <span className="timeline-draft" style={{ left: `${(Math.max(safeStart, draft.startFrame) - safeStart) / safeSpan * 100}%`, width: `${Math.max(1, Math.min(safeEnd, draft.endFrame) - Math.max(safeStart, draft.startFrame)) / safeSpan * 100}%` }} />}
     {!items.length && <span className="timeline-empty-hint">{label === '单次任务' ? '暂无单次任务片段' : '暂无小目标片段'}</span>}
@@ -163,7 +243,13 @@ function GlobalTimeline({ goals, draft, selectedId, totalFrames, frameRate, curr
 }) {
   const safeTotal = Math.max(1, totalFrames)
   const normalized = clampViewport(0, totalFrames, viewport.startFrame, viewport.endFrame)
-  const zoomPercent = Math.max(100, Math.round(totalFrames / Math.max(1, normalized.endFrame - normalized.startFrame) * 100))
+  const zoomRatio = Math.max(1, totalFrames / Math.max(1, normalized.endFrame - normalized.startFrame))
+  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (!rect.width || totalFrames <= 0) return
+    event.preventDefault()
+    onViewportChange(viewportFromWheel(0, totalFrames, normalized, event, rect))
+  }
   function startViewportDrag(event: React.PointerEvent<HTMLSpanElement>) {
     event.preventDefault(); event.stopPropagation()
     const track = event.currentTarget.parentElement?.getBoundingClientRect(); if (!track) return
@@ -180,11 +266,11 @@ function GlobalTimeline({ goals, draft, selectedId, totalFrames, frameRate, curr
     function end() { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end) }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end)
   }
-  return <div className="annotation-lane global-lane"><span className="annotation-lane-label">全局</span><div className="global-progress" onDoubleClick={() => onViewportChange({ startFrame: 0, endFrame: totalFrames })} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onSeek(Math.round((event.clientX - rect.left) / rect.width * safeTotal)) }}>
+  return <div className="annotation-lane global-lane"><span className="annotation-lane-label">全局</span><div className="global-progress" onWheel={handleWheel} onDoubleClick={() => onViewportChange({ startFrame: 0, endFrame: totalFrames })} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onSeek(Math.round((event.clientX - rect.left) / rect.width * safeTotal)) }}>
     <span className="global-progress-fill" style={{ transform: `scaleX(${Math.max(0, Math.min(1, currentFrame / safeTotal))})` }} />
     <span className="global-goal-overview" aria-hidden="true">{goals.map((goal) => <i className={selectedId === goal.id ? 'selected' : ''} key={goal.id} style={{ left: `${goal.startFrame / safeTotal * 100}%`, width: `${(goal.endFrame - goal.startFrame) / safeTotal * 100}%`, '--overview-color': goal.color } as React.CSSProperties} />)}{draft?.level === 'goal' && <i className="draft" style={{ left: `${draft.startFrame / safeTotal * 100}%`, width: `${Math.max(1, draft.endFrame - draft.startFrame) / safeTotal * 100}%` }} />}</span>
     <span className="global-time start">00:00.000</span><span className="global-time current" style={{ left: `${Math.max(4, Math.min(96, currentFrame / safeTotal * 100))}%` }}>{timeText(currentFrame / frameRate)}</span><span className="global-time end">{timeText(totalFrames / frameRate)}</span>
-    <span className={`timeline-viewport${zoomPercent === 100 ? ' full' : ''}`} style={{ left: `${normalized.startFrame / safeTotal * 100}%`, width: `${(normalized.endFrame - normalized.startFrame) / safeTotal * 100}%` }} onPointerDown={startViewportDrag} onClick={(event) => event.stopPropagation()} title="拖动平移，拖动两侧调整单次任务时间轴范围"><i data-viewport-handle="start" /><b>{zoomPercent}%</b><i data-viewport-handle="end" /></span>
+    <span className={`timeline-viewport${zoomRatio === 1 ? ' full' : ''}`} style={{ left: `${normalized.startFrame / safeTotal * 100}%`, width: `${(normalized.endFrame - normalized.startFrame) / safeTotal * 100}%` }} onPointerDown={startViewportDrag} onClick={(event) => event.stopPropagation()} title={`视窗 ${zoomRatio.toFixed(2)} 倍 · F${normalized.startFrame} - F${normalized.endFrame}`}><i data-viewport-handle="start" /><b>{zoomRatio.toFixed(zoomRatio < 10 ? 2 : 1)}x</b><i data-viewport-handle="end" /></span>
     <span className="annotation-playhead overview" style={{ left: `${currentFrame / safeTotal * 100}%` }} />
   </div></div>
 }
@@ -210,19 +296,24 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
-  const [invalidateOpen, setInvalidateOpen] = useState(false)
-  const [invalidateReason, setInvalidateReason] = useState('')
-  const [invalidateDescription, setInvalidateDescription] = useState('')
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentDraft, setCommentDraft] = useState('')
   const [keyframeObject, setKeyframeObject] = useState('')
   const [hoverPoint, setHoverPoint] = useState<{ level: 'goal' | 'action'; frame: number }>()
   const [goalViewport, setGoalViewport] = useState<TimelineViewport>({ startFrame: 0, endFrame: 0 })
-  const [atomicViewports, setAtomicViewports] = useState<Record<string, TimelineViewport>>({})
 
   useEffect(() => {
     let active = true
-    annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1').then((data) => { if (!active) return; setWorkspace(data); setResult(data.result); setRevision(data.currentRevision) }).catch((reason) => setError(reason instanceof Error ? reason.message : '操作台加载失败'))
+    annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1').then((data) => {
+      if (!active) return
+      undoStack.current = []
+      redoStack.current = []
+      setHistory({ undo: 0, redo: 0 })
+      setSelectedId(undefined)
+      setWorkspace(data)
+      setResult(data.result)
+      setRevision(data.currentRevision)
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : '操作台加载失败'))
     return () => { active = false }
   }, [searchParams, taskId])
 
@@ -249,9 +340,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const goalTimelineViewport = result && goalViewport.endFrame > goalViewport.startFrame
     ? goalViewport
     : { startFrame: 0, endFrame: result?.totalFrames || 0 }
-  const atomicViewport = selectedGoal
-    ? atomicViewports[selectedGoal.id] || { startFrame: selectedGoal.startFrame, endFrame: selectedGoal.endFrame }
-    : undefined
   const currentSeconds = currentFrame / (result?.frameRate || 30)
   const visibleLabels = workspace?.labels.filter((item) => item.appliesTo === (selected?.type === 'goal' ? 'goal' : 'action') || item.appliesTo === 'both') || []
   const draftRange = mark && ['goal', 'action', 'no_action'].includes(mark.kind) ? (() => {
@@ -326,7 +414,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const duration = target.endFrame - target.startFrame
     const moving = requestedEnd - requestedStart === duration
     let startFrame = Math.round(requestedStart); let endFrame = Math.round(requestedEnd)
-    const minimum = isGoal ? 1 : result.frameRate
+    const minimum = 1
     if (moving) { const lower = Math.max(parent?.startFrame || 0, ...siblings.filter((item) => item.endFrame <= target.startFrame).map((item) => item.endFrame)); const upper = Math.min(parent?.endFrame || result.totalFrames, ...siblings.filter((item) => item.startFrame >= target.endFrame).map((item) => item.startFrame)); startFrame = Math.max(lower, Math.min(startFrame, upper - duration)); endFrame = startFrame + duration }
     else { const lower = Math.max(parent?.startFrame || 0, ...siblings.filter((item) => item.endFrame <= target.startFrame).map((item) => item.endFrame)); const upper = Math.min(parent?.endFrame || result.totalFrames, ...siblings.filter((item) => item.startFrame >= target.endFrame).map((item) => item.startFrame)); startFrame = Math.max(lower, Math.min(startFrame, target.endFrame - minimum)); endFrame = Math.min(upper, Math.max(endFrame, target.startFrame + minimum)) }
     if (isGoal) {
@@ -387,13 +475,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     setKeyframeObject('')
   }
 
-  async function invalidateTask() {
-    const descriptionRequired = invalidateReason === '无效数据' || invalidateReason === '其他'
-    if (!invalidateReason || (descriptionRequired && !invalidateDescription.trim())) return
-    const reason = invalidateDescription.trim() ? `${invalidateReason}：${invalidateDescription.trim()}` : invalidateReason
-    try { await annotationApi.invalidate(taskId, reason); setInvalidateOpen(false); setDirty(false); setToast('任务已作废'); window.setTimeout(() => navigate('/workbench'), 700) } catch (failure) { setToast(failure instanceof Error ? failure.message : '作废失败') }
-  }
-
   async function returnTask() {
     if (!result) return
     const unresolved = result.comments.filter((item) => item.status !== 'resolved')
@@ -429,6 +510,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         else videoRef.current?.pause()
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return }
       const pointerFrame = !playing && hoverPoint ? hoverPoint.frame : currentFrame
       if (event.key.toLowerCase() === 'q' && !mark) setMark({ kind: hoverPoint?.level === 'action' || (!hoverPoint && selectedGoal) ? 'action' : 'goal', frame: pointerFrame })
       if (event.key.toLowerCase() === 'w' && !mark && selectedGoal) setMark({ kind: 'no_action', frame: pointerFrame })
@@ -444,6 +526,19 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   if (error) return <main className="annotation-load-state"><CircleAlert size={38} /><h1>无法打开视频标注工作台</h1><p>{error}</p><button className="primary-button" type="button" onClick={() => navigate('/workbench')}>返回工作台</button></main>
   if (!workspace || !result) return <main className="annotation-load-state"><RotateCcw className="spinning" size={34} /><p>正在加载任务和标注结果...</p></main>
 
+  function inlineSegmentEditor(item: AnnotationSegment) {
+    const noAction = item.type === 'no_action'
+    const labels = workspace!.labels.filter((label) => label.appliesTo === (item.type === 'goal' ? 'goal' : 'action') || label.appliesTo === 'both')
+    const selectedLabel = labels.find((label) => label.id === item.labelId)
+    return <div className="segment-inline-editor" onClick={(event) => event.stopPropagation()}>
+      {noAction ? <div className="segment-inline-row"><div className="segment-inline-system">系统无动作</div><span className="segment-inline-duration"><b>F{item.startFrame}-F{item.endFrame}</b><small>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</small></span><button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button></div> : <div className="segment-inline-fields">
+        <div className="segment-inline-row"><label className="label-select"><select className={selectedLabel ? 'has-label-color' : ''} disabled={readonly} title={item.labelName || '请选择标签'} style={selectedLabel ? { '--selected-label-color': selectedLabel.color, '--selected-label-text': contrastTextColor(selectedLabel.color) } as React.CSSProperties : undefined} value={item.labelId || ''} onChange={(event) => { const label = labels.find((candidate) => candidate.id === event.target.value); updateSelected({ labelId: label?.id, labelName: label?.name, color: label?.color || item.color }) }}><option value="">请选择标签</option>{labels.map((label) => <option key={label.id} value={label.id} style={{ color: contrastTextColor(label.color), backgroundColor: label.color }}>{label.name}</option>)}</select></label>
+        <label className="segment-content"><input disabled={readonly} value={item.descriptionZh} maxLength={300} onChange={(event) => updateSelected({ descriptionZh: event.target.value })} placeholder="输入片段内容（选填）" /></label><span className="segment-inline-duration"><b>F{item.startFrame}-F{item.endFrame}</b><small>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</small></span><button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title={item.type === 'goal' ? '删除单次任务及其全部小目标' : '删除片段'}><Trash2 size={14} /></button></div>
+        {workspace!.node !== 'annotation' && <label className="wide"><span>英文内容（选填）</span><input disabled={readonly} value={item.descriptionEn || ''} maxLength={500} onChange={(event) => updateSelected({ descriptionEn: event.target.value })} placeholder="输入英文内容" /></label>}
+      </div>}
+    </div>
+  }
+
   return <main className="annotation-page">
     <header className="annotation-header">
       <button className="annotation-back" type="button" onClick={() => navigate('/workbench')} aria-label="返回工作台"><BrandLogo compact /><ArrowLeft className="annotation-back-arrow" size={19} /></button>
@@ -454,7 +549,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         <span className={readonly ? 'readonly-badge' : 'editing-badge'} title={`当前处理人：${session.account.name}`}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>
         <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving} onClick={() => save()}><Save size={15} />保存草稿</button>
         {approvalStage && <button className="secondary-button return-button" type="button" disabled={workspace.readonly || submitted} onClick={returnTask}>退回</button>}
-        <button className="secondary-button danger-button" type="button" disabled title="当前后端 API 尚未提供整条任务作废接口">作废</button>
         <button className="primary-button" type="button" disabled={hardReadonly || saving} onClick={submit}><Check size={16} />提交</button>
       </div>
     </header>
@@ -467,23 +561,21 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <aside className="annotation-inspector">
         <header><div><strong>片段列表 <b>{result.goals.length + result.actions.length}</b></strong><span>{result.goals.length} 个单次任务 · {result.actions.length} 个小目标</span></div></header>
         <div className="segment-list-columns"><span>片段</span><span>标签与描述</span><span>总时长</span></div>
-        <div className="segment-tree">{result.goals.map((goal, index) => <div className="segment-group" key={goal.id}><button className={selectedId === goal.id ? 'active' : ''} type="button" onClick={() => { setSelectedId(goal.id); seek(goal.startFrame) }}><i style={{ background: goal.color }} /><span><b>单次任务 {index + 1}</b><small>{goal.labelName || '未选择标签'} · {timeText((goal.endFrame - goal.startFrame) / result.frameRate)}</small></span></button>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => <button className={`child${selectedId === action.id ? ' active' : ''}`} type="button" key={action.id} onClick={() => { setSelectedId(action.id); seek(action.startFrame) }}><i style={{ background: action.color }} /><span><b>小目标 {index + 1}.{actionIndex + 1}</b><small>{action.labelName || '未选择标签'} · {timeText((action.endFrame - action.startFrame) / result.frameRate)}</small></span></button>)}</div>)}</div>
-        {selected ? <div className="segment-editor"><header><strong>{selected.code || `编辑${selected.type === 'goal' ? '单次任务' : '小目标'}`}</strong><button type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段"><Trash2 size={16} /></button></header>{selected.type === 'no_action' ? <div className="no-action-note"><b>无动作 · 系统</b><span>无需选择标签或填写描述</span></div> : <label><span>标签</span><select disabled={readonly} value={selected.labelId || ''} onChange={(event) => { const label = workspace.labels.find((item) => item.id === event.target.value); updateSelected({ labelId: label?.id, labelName: label?.name, color: label?.color || selected.color }) }}><option value="">请选择标签</option>{workspace.labels.filter((item) => item.appliesTo === (selected.type === 'goal' ? 'goal' : 'action') || item.appliesTo === 'both').map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label>}<div className="frame-fields"><label><span>起始帧</span><input value={selected.startFrame} readOnly /></label><label><span>结束帧</span><input value={selected.endFrame} readOnly /></label></div><label><span>中文描述（选填）</span><textarea disabled={readonly || selected.type === 'no_action'} value={selected.descriptionZh} maxLength={300} onChange={(event) => updateSelected({ descriptionZh: event.target.value })} placeholder="选填" /></label>{workspace.node !== 'annotation' && <label><span>英文描述（选填）</span><textarea disabled={readonly || selected.type === 'no_action'} value={selected.descriptionEn || ''} maxLength={500} onChange={(event) => updateSelected({ descriptionEn: event.target.value })} placeholder="选填" /></label>}</div> : <div className="inspector-empty"><Flag size={26} /><span>选择时间轴或列表中的片段进行编辑</span></div>}
-        {selected?.type === 'action' && <section className="keyframe-panel"><header><strong>关键帧（选填）</strong><span>当前 F{currentFrame}</span></header><div><input value={keyframeObject} disabled={readonly} onChange={(event) => setKeyframeObject(event.target.value)} placeholder="接触对象名称" /><button type="button" disabled={readonly} onClick={addKeyframe}>标记当前帧</button></div>{selected.keyFrames?.map((frame) => <button type="button" className="keyframe-item" key={frame.id} onClick={() => seek(frame.frame)}><b>F{frame.frame}</b><span>{frame.objectName}</span>{!readonly && <X size={13} onClick={(event) => { event.stopPropagation(); updateSelected({ keyFrames: selected.keyFrames?.filter((item) => item.id !== frame.id) }) }} />}</button>)}</section>}
+        <div className="segment-tree">{result.goals.map((goal, index) => <div className="segment-group" key={goal.id}><div className={`segment-list-entry${selectedId === goal.id ? ' selected' : ''}`}><button className={selectedId === goal.id ? 'active' : ''} type="button" onClick={() => { setSelectedId(goal.id); seek(goal.startFrame) }}><i style={{ background: goal.color }} /><span><b>单次任务 {index + 1}</b><small>{goal.labelName || '未选择标签'} · {timeText((goal.endFrame - goal.startFrame) / result.frameRate)}</small></span></button>{selectedId === goal.id && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => <div className={`segment-list-entry child${selectedId === action.id ? ' selected' : ''}`} key={action.id}><button className={selectedId === action.id ? 'active' : ''} type="button" onClick={() => { setSelectedId(action.id); seek(action.startFrame) }}><i style={{ background: action.color }} /><span><b>小目标 {index + 1}.{actionIndex + 1}</b><small>{action.labelName || '未选择标签'} · {timeText((action.endFrame - action.startFrame) / result.frameRate)}</small></span></button>{selectedId === action.id && inlineSegmentEditor(action)}</div>)}</div>)}</div>
+        {selected?.type === 'action' && <section className="keyframe-panel"><div className="keyframe-toolbar"><strong>关键帧（选填）</strong><span>F{currentFrame}</span><input value={keyframeObject} disabled={readonly} onChange={(event) => setKeyframeObject(event.target.value)} placeholder="接触对象名称" /><button type="button" disabled={readonly} onClick={addKeyframe}>标记当前帧</button></div>{selected.keyFrames?.map((frame) => <button type="button" className="keyframe-item" key={frame.id} onClick={() => seek(frame.frame)}><b>F{frame.frame}</b><span>{frame.objectName}</span>{!readonly && <X size={13} onClick={(event) => { event.stopPropagation(); updateSelected({ keyFrames: selected.keyFrames?.filter((item) => item.id !== frame.id) }) }} />}</button>)}</section>}
         {commentsOpen && <section className="comment-panel"><header><strong>全部批注</strong><button type="button" onClick={() => setCommentsOpen(false)}><X size={15} /></button></header><div className="comment-list">{result.comments.map((comment) => <article key={comment.id}><button type="button" onClick={() => seek(comment.frame)}>#{comment.sequence} · F{comment.frame}</button><p>{comment.content}</p><small>{comment.location}</small><div>{comment.status !== 'resolved' && <button type="button" disabled={hardReadonly} onClick={() => updateCommentStatus(comment.id, comment.status === 'open' ? 'addressed' : 'resolved')}>{comment.status === 'open' ? '标记已处理' : '确认解决'}</button>}{comment.status === 'resolved' && <button type="button" disabled={hardReadonly} onClick={() => updateCommentStatus(comment.id, 'open')}>重新打开</button>}</div></article>)}</div><div className="comment-create"><textarea value={commentDraft} disabled={hardReadonly} maxLength={100} onChange={(event) => setCommentDraft(event.target.value)} placeholder="输入当前帧或选中片段的批注" /><button type="button" disabled={hardReadonly || !commentDraft.trim()} onClick={addComment}>添加批注</button></div></section>}
       </aside>
     </section>
 
     <section className="annotation-timeline">
-      <div className="annotation-label-bar"><span>片段标签</span>{selected?.type === 'no_action' ? <small>无动作由系统定义，无需选择项目标签</small> : !visibleLabels.length ? <small>当前类型无可用标签</small> : visibleLabels.map((label) => <button type="button" disabled={!selected || readonly} className={selected?.labelId === label.id ? 'active' : ''} style={{ '--label-color': label.color } as React.CSSProperties} key={label.id} onClick={() => updateSelected(selected?.labelId === label.id ? { labelId: undefined, labelName: undefined } : { labelId: label.id, labelName: label.name, color: label.color })}><i style={{ background: label.color }} />{label.name}</button>)}</div>
+      <div className="annotation-label-bar"><span>片段标签</span>{selected?.type === 'no_action' ? <small>无动作由系统定义，无需选择项目标签</small> : !visibleLabels.length ? <small>当前类型无可用标签</small> : visibleLabels.map((label) => <button type="button" disabled={!selected || readonly} className={selected?.labelId === label.id ? 'active' : ''} style={{ '--label-color': label.color } as React.CSSProperties} key={label.id} onClick={() => updateSelected(selected?.labelId === label.id ? { labelId: undefined, labelName: undefined } : { labelId: label.id, labelName: label.name, color: label.color })}>{label.name}</button>)}</div>
       <header><div><strong>{draftRange ? `正在创建：${draftRange.level === 'goal' ? '单次任务' : '小目标'}` : selectedGoal ? `当前单次任务：${selectedGoal.labelName || selectedGoal.code || '未选择标签'}` : '当前创建：单次任务'}</strong><span>{draftRange ? `${timeText(draftRange.startFrame / result.frameRate)} - ${timeText(draftRange.endFrame / result.frameRate)} · 松开 Q 完成，Esc 取消` : 'Q 普通片段 · W 无动作 · X 视频无效区间'}</span></div><div>{selected && <button type="button" onClick={() => setSelectedId(undefined)}>退出预览</button>}<button type="button" disabled={readonly || !history.undo} onClick={undo} title="撤销"><Undo2 size={14} />撤销</button><button type="button" disabled={readonly || !history.redo} onClick={redo} title="重做"><Redo2 size={14} />重做</button></div></header>
       <div className="timeline-body">
         <GlobalTimeline goals={result.goals} draft={draftRange} selectedId={selectedGoal?.id} totalFrames={result.totalFrames} frameRate={result.frameRate} currentFrame={currentFrame} viewport={goalTimelineViewport} onViewportChange={setGoalViewport} onSeek={seek} />
-        <TimelineLane label="单次任务" items={result.goals} childItems={result.actions} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} readonly={readonly} onHover={(frame) => hoverTimeline('goal', frame)} onRangeChange={changeRange} onViewportChange={setGoalViewport} onSeek={seek} onSelect={(item) => { videoRef.current?.pause(); setSelectedId(item.id); seek(item.startFrame) }} />
-        {selectedGoal ? <TimelineLane label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} invalidRanges={result.invalidRanges} readonly={readonly} onHover={(frame) => hoverTimeline('action', frame)} onRangeChange={changeRange} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onSelect={(item) => { videoRef.current?.pause(); setSelectedId(item.id); seek(item.startFrame) }} /> : <div className="annotation-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
+        <TimelineLane label="单次任务" items={result.goals} childItems={result.actions} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} readonly={readonly} onHover={(frame) => hoverTimeline('goal', frame)} onRangeChange={changeRange} onViewportChange={setGoalViewport} onSeek={seek} onSelect={(item) => { videoRef.current?.pause(); setSelectedId(item.id) }} />
+        {selectedGoal ? <TimelineLane label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} invalidRanges={result.invalidRanges} readonly={readonly} onHover={(frame) => hoverTimeline('action', frame)} onRangeChange={changeRange} onViewportChange={setGoalViewport} onSeek={seek} onSelect={(item) => { videoRef.current?.pause(); setSelectedId(item.id) }} /> : <div className="annotation-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
-    {invalidateOpen && <Modal title="作废整条视频" onClose={() => setInvalidateOpen(false)} footer={<><button className="secondary-button" type="button" onClick={() => setInvalidateOpen(false)}>取消</button><button className="primary-button invalid-confirm" type="button" disabled={!invalidateReason || ((invalidateReason === '无效数据' || invalidateReason === '其他') && !invalidateDescription.trim())} onClick={invalidateTask}>确认作废</button></>}><form className="single-column-form" onSubmit={(event) => event.preventDefault()}><label><span>作废原因 <i className="required-mark">*</i></span><select value={invalidateReason} onChange={(event) => setInvalidateReason(event.target.value)}><option value="">请选择原因</option><option>视频无法播放或文件损坏</option><option>重复数据</option><option>无效数据</option><option>其他</option></select></label><label><span>补充说明{(invalidateReason === '无效数据' || invalidateReason === '其他') && <> <i className="required-mark">*</i></>}</span><textarea value={invalidateDescription} maxLength={200} onChange={(event) => setInvalidateDescription(event.target.value)} placeholder={invalidateReason === '无效数据' ? '请说明数据无效的具体原因' : invalidateReason === '其他' ? '请说明其他作废原因' : '选填'} /></label><small className="char-count">{invalidateDescription.length}/200</small></form></Modal>}
     {toast && <div className="toast">{toast}</div>}
   </main>
 }
