@@ -17,7 +17,7 @@ function clone<T>(value: T): T {
 }
 
 function emptyResult(frameRate = 30, totalFrames = 911): AnnotationResult {
-  return { schemaVersion: 'vla-video-hierarchy@11.0.0', coordinateSystem: 'zero-based-frame', intervalConvention: 'half-open', frameRate, totalFrames, goals: [], actions: [], invalidRanges: [], usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: 1, nextActionSequenceByGoal: {} }
+  return { schemaVersion: 'vla-video-hierarchy@11.0.0', coordinateSystem: 'zero-based-frame', intervalConvention: 'half-open', frameRate, totalFrames, mediaStartTime: 0, goals: [], actions: [], invalidRanges: [], usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: 1, nextActionSequenceByGoal: {}, nextInvalidSequence: 1 }
 }
 
 function mockResult(taskId: string) {
@@ -50,29 +50,80 @@ function backendNode(value: TaskNode) {
 function msToFrame(value: unknown, frameRate: number) { return Math.max(0, Math.round(Number(value || 0) / 1000 * frameRate)) }
 function frameToMs(value: number, frameRate: number) { return Math.max(0, Math.round(value / frameRate * 1000)) }
 
-function annotationPayload(result: AnnotationResult) {
+export function normalizeAnnotationResult(source: AnnotationResult): AnnotationResult {
+  const frameRate = Number.isFinite(source.frameRate) && source.frameRate > 0 ? source.frameRate : 30
+  const totalFrames = Math.max(0, Math.round(source.totalFrames || 0))
+  const integerRange = <T extends { startFrame: number; endFrame: number }>(item: T): T => ({
+    ...item,
+    startFrame: Math.max(0, Math.min(totalFrames, Math.round(item.startFrame || 0))),
+    endFrame: Math.max(0, Math.min(totalFrames, Math.round(item.endFrame || 0))),
+  })
+  const rawActions = (source.actions || []).map((action) => {
+    const normalized = integerRange(action)
+    return {
+      ...normalized,
+      sequence: Math.max(1, Math.round(action.sequence || 1)),
+      segmentType: action.type === 'no_action' ? 'no_action' as const : 'atomic' as const,
+      labelCode: action.type === 'no_action' ? '' : action.labelCode || '',
+      descriptionSource: action.type === 'no_action' ? 'system' as const : action.descriptionSource || 'user' as const,
+      modelDescriptionRequired: action.type === 'no_action' ? false : action.modelDescriptionRequired,
+      keyFrames: (action.keyFrames || []).filter((keyFrame) => Number.isFinite(keyFrame.frame)).map((keyFrame) => ({ ...keyFrame, frame: Math.round(keyFrame.frame) })),
+    }
+  })
+  const nextActionSequenceByGoal = { ...(source.nextActionSequenceByGoal || {}) }
+  const goals = (source.goals || []).map((goal) => {
+    const normalized = integerRange(goal)
+    const atomicActions = rawActions.filter((action) => action.parentId === goal.id)
+    const nextAtomicSequence = Math.max(goal.nextAtomicSequence || 1, nextActionSequenceByGoal[goal.id] || 1, ...atomicActions.map((action) => action.sequence + 1))
+    nextActionSequenceByGoal[goal.id] = nextAtomicSequence
+    return { ...normalized, sequence: Math.max(1, Math.round(goal.sequence || 1)), segmentType: 'goal' as const, labelCode: goal.labelCode || '', nextAtomicSequence, atomicActions }
+  })
+  const invalidRanges = (source.invalidRanges || []).map((range, index) => ({ ...integerRange(range), sequence: Math.max(1, Math.round(range.sequence || index + 1)) }))
+  return {
+    ...source,
+    schemaVersion: 'vla-video-hierarchy@11.0.0', coordinateSystem: 'zero-based-frame', intervalConvention: 'half-open',
+    frameRate, totalFrames, mediaStartTime: Math.max(0, Number(source.mediaStartTime || 0)), goals, actions: rawActions, invalidRanges,
+    nextGoalSequence: Math.max(source.nextGoalSequence || 1, ...goals.map((goal) => goal.sequence + 1)),
+    nextActionSequenceByGoal,
+    nextInvalidSequence: Math.max(source.nextInvalidSequence || 1, ...invalidRanges.map((range) => range.sequence + 1)),
+  }
+}
+
+function annotationPayload(rawResult: AnnotationResult) {
+  const result = normalizeAnnotationResult(rawResult)
   return {
     atomic_tasks: result.goals.map((goal) => ({
-      start_ms: frameToMs(goal.startFrame, result.frameRate), end_ms: frameToMs(goal.endFrame, result.frameRate), sequence: goal.sequence || 0,
-      label_id: goal.labelId ? Number(goal.labelId) : null, description: goal.descriptionZh,
-      actions: result.actions.filter((action) => action.parentId === goal.id).map((action) => ({ start_ms: frameToMs(action.startFrame, result.frameRate), end_ms: frameToMs(action.endFrame, result.frameRate), sequence: action.sequence || 0, label_id: action.labelId ? Number(action.labelId) : null, description: action.descriptionZh })),
+      id: goal.id, start_frame: goal.startFrame, end_frame: goal.endFrame,
+      start_ms: frameToMs(goal.startFrame, result.frameRate), end_ms: frameToMs(goal.endFrame, result.frameRate), sequence: goal.sequence,
+      label_id: goal.labelId ? Number(goal.labelId) : null, label_code: goal.labelCode || '', description: goal.descriptionZh,
+      next_atomic_sequence: goal.nextAtomicSequence,
+      actions: result.actions.filter((action) => action.parentId === goal.id).map((action) => ({
+        id: action.id, start_frame: action.startFrame, end_frame: action.endFrame,
+        start_ms: frameToMs(action.startFrame, result.frameRate), end_ms: frameToMs(action.endFrame, result.frameRate), sequence: action.sequence,
+        segment_type: action.segmentType || (action.type === 'no_action' ? 'no_action' : 'atomic'), system_code: action.systemCode,
+        label_id: action.labelId ? Number(action.labelId) : null, label_code: action.labelCode || '', description: action.descriptionZh,
+        description_zh: action.descriptionZh, description_en: action.descriptionEn || '', description_source: action.descriptionSource || 'user',
+        model_description_required: action.modelDescriptionRequired, key_frames: action.keyFrames || [],
+        relative_start_second: (action.startFrame - goal.startFrame) / result.frameRate,
+        relative_end_second: (action.endFrame - goal.startFrame) / result.frameRate,
+      })),
     })),
-    invalid_intervals: result.invalidRanges.map((range) => ({ start_ms: frameToMs(range.startFrame, result.frameRate), end_ms: frameToMs(range.endFrame, result.frameRate), reason: range.reason, description: range.reason })),
-    meta: { frame_rate: result.frameRate, frontend_result: result },
+    invalid_intervals: result.invalidRanges.map((range) => ({ id: range.id, sequence: range.sequence, start_frame: range.startFrame, end_frame: range.endFrame, start_ms: frameToMs(range.startFrame, result.frameRate), end_ms: frameToMs(range.endFrame, result.frameRate), reason: range.reason, description: range.reason })),
+    meta: { frame_rate: result.frameRate, media_start_time: result.mediaStartTime, coordinate_system: result.coordinateSystem, interval_convention: result.intervalConvention, frontend_result: result },
   }
 }
 
 async function loadTaskLabels(projectId: string) {
-  if (!projectId) return []
+  if (!projectId) return { labels: [], bound: false }
   const project = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}`)
   const projectData = (project.project || project) as Record<string, unknown>
   const config = (projectData.work_config || {}) as Record<string, unknown>
   const ids = Array.isArray(config.label_library_ids) ? config.label_library_ids : []
   const groups = await Promise.all(ids.map((id) => request<{ items: Array<Record<string, unknown>> }>(`/api/data/label-libraries/${encodeURIComponent(String(id))}/labels?page_size=100`)))
-  return groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') }))
+  return { labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0 }
 }
 
-function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], viewOnly: boolean): AnnotationWorkspace {
+function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, viewOnly: boolean): AnnotationWorkspace {
   const task = (raw.task || raw) as Record<string, unknown>
   const project = (task.project || raw.project || {}) as Record<string, unknown>
   const videoMeta = (task.video_meta || {}) as Record<string, unknown>
@@ -81,18 +132,19 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
   const meta = (revisionPayload.meta || {}) as Record<string, unknown>
   const preserved = meta.frontend_result && typeof meta.frontend_result === 'object' ? meta.frontend_result as AnnotationResult : undefined
   const frameRate = Number(preserved?.frameRate || meta.frame_rate || videoMeta.frame_rate || 30)
+  const mediaStartTime = Number(preserved?.mediaStartTime || meta.media_start_time || videoMeta.media_start_time || videoMeta.start_time_ms && Number(videoMeta.start_time_ms) / 1000 || 0)
   const durationSeconds = Number(videoMeta.duration_ms || task.duration_ms || 0) / 1000
   const rawGoals = Array.isArray(revisionPayload.atomic_tasks) ? revisionPayload.atomic_tasks as Array<Record<string, unknown>> : []
-  const goals = rawGoals.map((goal, index) => ({ id: String(goal.id || `goal-${goal.sequence ?? index}`), sequence: Number(goal.sequence ?? index), type: 'goal' as const, startFrame: msToFrame(goal.start_ms, frameRate), endFrame: msToFrame(goal.end_ms, frameRate), labelId: goal.label_id == null ? undefined : String(goal.label_id), labelName: labels.find((label) => label.id === String(goal.label_id))?.name, color: labels.find((label) => label.id === String(goal.label_id))?.color || '#2563EB', descriptionZh: String(goal.description || '') }))
-  const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => ({ id: String(action.id || `${parent.id}-action-${action.sequence ?? index}`), sequence: Number(action.sequence ?? index), parentId: parent.id, type: 'action' as const, startFrame: msToFrame(action.start_ms, frameRate), endFrame: msToFrame(action.end_ms, frameRate), labelId: action.label_id == null ? undefined : String(action.label_id), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: String(action.description || ''), keyFrames: [] })) })
+  const goals = rawGoals.map((goal, index) => ({ id: String(goal.id || `goal-${goal.sequence ?? index + 1}`), sequence: Number(goal.sequence ?? index + 1), type: 'goal' as const, startFrame: goal.start_frame == null ? msToFrame(goal.start_ms, frameRate) : Number(goal.start_frame), endFrame: goal.end_frame == null ? msToFrame(goal.end_ms, frameRate) : Number(goal.end_frame), labelId: goal.label_id == null ? undefined : String(goal.label_id), labelCode: String(goal.label_code || ''), labelName: labels.find((label) => label.id === String(goal.label_id))?.name, color: labels.find((label) => label.id === String(goal.label_id))?.color || '#2563EB', descriptionZh: String(goal.description || '') }))
+  const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => { const noAction = action.segment_type === 'no_action' || action.system_code === 'NO_ACTION'; return ({ id: String(action.id || `${parent.id}-A${String(action.sequence ?? index + 1).padStart(3, '0')}`), sequence: Number(action.sequence ?? index + 1), parentId: parent.id, type: noAction ? 'no_action' as const : 'action' as const, startFrame: action.start_frame == null ? msToFrame(action.start_ms, frameRate) : Number(action.start_frame), endFrame: action.end_frame == null ? msToFrame(action.end_ms, frameRate) : Number(action.end_frame), labelId: action.label_id == null ? undefined : String(action.label_id), labelCode: String(action.label_code || ''), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: noAction ? '#64748B' : labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: String(action.description_zh || action.description || (noAction ? '未执行有效动作' : '')), descriptionEn: String(action.description_en || (noAction ? 'No valid action is performed.' : '')), systemCode: noAction ? 'NO_ACTION' as const : undefined, descriptionSource: noAction ? 'system' as const : 'user' as const, modelDescriptionRequired: noAction ? false : undefined, keyFrames: Array.isArray(action.key_frames) ? action.key_frames as never[] : [] }) }) })
   const node = wireNode(task.current_node)
   const videoUri = String(task.video_url || task.video_uri || '')
   const status = String(task.status || '')
   const baseResult = preserved || {
     schemaVersion: 'vla-video-hierarchy@11.0.0' as const, coordinateSystem: 'zero-based-frame' as const, intervalConvention: 'half-open' as const, frameRate,
-    totalFrames: Math.round(durationSeconds * frameRate), goals, actions,
-    invalidRanges: (Array.isArray(revisionPayload.invalid_intervals) ? revisionPayload.invalid_intervals as Array<Record<string, unknown>> : []).map((range, index) => ({ id: String(range.id || `invalid-${index}`), startFrame: msToFrame(range.start_ms, frameRate), endFrame: msToFrame(range.end_ms, frameRate), reason: String(range.reason || range.description || '视频内容无效') })),
-    usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: goals.length + 1, nextActionSequenceByGoal: Object.fromEntries(goals.map((goal) => [goal.id, actions.filter((action) => action.parentId === goal.id).length + 1])),
+    totalFrames: Math.round(durationSeconds * frameRate), mediaStartTime, goals, actions,
+    invalidRanges: (Array.isArray(revisionPayload.invalid_intervals) ? revisionPayload.invalid_intervals as Array<Record<string, unknown>> : []).map((range, index) => ({ id: String(range.id || `invalid-${index + 1}`), sequence: Number(range.sequence || index + 1), startFrame: range.start_frame == null ? msToFrame(range.start_ms, frameRate) : Number(range.start_frame), endFrame: range.end_frame == null ? msToFrame(range.end_ms, frameRate) : Number(range.end_frame), reason: String(range.reason || range.description || '视频内容无效') })),
+    usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: goals.length + 1, nextActionSequenceByGoal: Object.fromEntries(goals.map((goal) => [goal.id, actions.filter((action) => action.parentId === goal.id).length + 1])), nextInvalidSequence: 1,
   }
   return {
     taskId,
@@ -101,8 +153,8 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
     readonly: viewOnly || ['submitted', 'completed'].includes(status),
     videoUrl: /^https?:\/\//i.test(videoUri) ? videoUri : '',
     frameRate,
-    durationSeconds,
-    currentRevision: Number(revision.id || revision.revision || revision.revision_no || 0), labels, result: baseResult,
+    durationSeconds, mediaStartTime,
+    currentRevision: Number(revision.id || revision.revision || revision.revision_no || 0), labels, labelLibraryBound, result: normalizeAnnotationResult(baseResult),
   }
 }
 
@@ -115,9 +167,9 @@ export const annotationApi = {
       return {
         taskId, taskCode: task.id, dataId: task.dataId, dataName: task.dataName,
         projectId: '1', projectName: '清华路端项目', node: task.node, readonly: task.status === 'submitted' || task.status === 'completed',
-        videoUrl: '/temp.mp4', frameRate: result.frameRate, durationSeconds: result.totalFrames / result.frameRate,
+        videoUrl: '/temp.mp4', frameRate: result.frameRate, durationSeconds: result.totalFrames / result.frameRate, mediaStartTime: result.mediaStartTime,
         currentRevision: mockRevisions.get(taskId) || 0,
-        labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), result,
+        labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), labelLibraryBound: true, result,
       }
     }
     const requestKey = `${taskId}:${viewOnly ? 'view' : 'edit'}`
@@ -126,8 +178,8 @@ export const annotationApi = {
     const workspaceRequest = (async () => {
       const raw = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}`)
       const task = (raw.task || raw) as Record<string, unknown>
-      const labels = await loadTaskLabels(String(task.project_id || (task.project as Record<string, unknown> | undefined)?.id || ''))
-      const workspace = normalizeWorkspace(taskId, raw, labels, viewOnly)
+      const labelSnapshot = await loadTaskLabels(String(task.project_id || (task.project as Record<string, unknown> | undefined)?.id || ''))
+      const workspace = normalizeWorkspace(taskId, raw, labelSnapshot.labels, labelSnapshot.bound, viewOnly)
       taskNodes.set(taskId, workspace.node)
       return workspace
     })()

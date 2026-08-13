@@ -201,10 +201,12 @@ export interface TeamMembersData {
 
 export interface AnnotationSegment {
   id: string
-  sequence?: number
+  sequence: number
   code?: string
+  labelCode?: string
   parentId?: string
   type: 'goal' | 'action' | 'no_action'
+  segmentType?: 'goal' | 'atomic' | 'no_action'
   startFrame: number
   endFrame: number
   labelId?: string
@@ -213,8 +215,12 @@ export interface AnnotationSegment {
   descriptionZh: string
   descriptionEn?: string
   systemCode?: 'NO_ACTION'
+  descriptionSource?: 'user' | 'system'
+  modelDescriptionRequired?: boolean
   keyFrames?: AnnotationKeyFrame[]
   keyframeNoneConfirmed?: boolean
+  nextAtomicSequence?: number
+  atomicActions?: AnnotationSegment[]
 }
 
 export interface AnnotationKeyFrame {
@@ -239,6 +245,7 @@ export interface AnnotationComment {
 
 export interface InvalidRange {
   id: string
+  sequence: number
   startFrame: number
   endFrame: number
   reason: string
@@ -250,6 +257,7 @@ export interface AnnotationResult {
   intervalConvention: 'half-open'
   frameRate: number
   totalFrames: number
+  mediaStartTime: number
   goals: AnnotationSegment[]
   actions: AnnotationSegment[]
   invalidRanges: InvalidRange[]
@@ -257,6 +265,7 @@ export interface AnnotationResult {
   comments: AnnotationComment[]
   nextGoalSequence: number
   nextActionSequenceByGoal: Record<string, number>
+  nextInvalidSequence: number
 }
 
 export interface AnnotationWorkspace {
@@ -271,9 +280,11 @@ export interface AnnotationWorkspace {
   videoUrl: string
   frameRate: number
   durationSeconds: number
+  mediaStartTime: number
   currentRevision: number
   session?: { sessionId: string; sessionToken: string; leaseVersion: string; heartbeatIntervalSeconds: number }
   labels: LabelItem[]
+  labelLibraryBound: boolean
   result: AnnotationResult
 }
 
