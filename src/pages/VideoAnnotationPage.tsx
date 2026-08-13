@@ -1,6 +1,6 @@
 import {
   ArrowLeft, Check, ChevronDown, CircleAlert, Expand, Keyboard, Pause, Play, Redo2, RotateCcw,
-  Save, SkipBack, SkipForward, Trash2, Undo2, X,
+  SkipBack, SkipForward, Trash2, Undo2, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
