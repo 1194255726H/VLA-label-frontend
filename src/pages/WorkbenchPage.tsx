@@ -1,17 +1,19 @@
 import {
   ArrowRight, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock3,
-  Filter, ListFilter, MoreHorizontal, Play, RefreshCw, Search, Sparkles,
+  Filter, ListFilter, Play, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { annotationApi } from '../services/annotationApi'
 import { workbenchApi } from '../services/api'
-import type { SessionResponse, TaskNode, TaskTab, WorkbenchSnapshot, WorkbenchTask } from '../types/api'
+import type { SessionResponse, TaskNode, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
 
 const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const nodeTones: Record<TaskNode, string> = { annotation: 'cyan', review: 'blue', quality: 'amber', acceptance: 'green' }
-const statusLabels = { pending: '待处理', processing: '处理中', submitted: '已提交', completed: '已完成' }
+const statusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', submitted: '已提交', completed: '已完成', rejected: '已退回' }
+const decisionLabels: Record<string, string> = { approved: '已通过', rejected: '已退回', submitted: '已提交' }
+const storageLabels = { available: '存在', missing: '缺失', unchecked: '未确认' }
 
 function formatSeconds(value: number) {
   const minutes = Math.floor(value / 60)
@@ -19,30 +21,45 @@ function formatSeconds(value: number) {
   return `${minutes ? `${minutes}分` : ''}${seconds}秒`
 }
 
-function TaskTable({ items, tab, loading }: { items: WorkbenchTask[]; tab: TaskTab; loading: boolean }) {
+function actionFor(video: VideoListItem, tab: TaskTab) {
+  if (video.storageStatus === 'missing') return { label: '素材缺失', readonly: true, disabled: true }
+  if (tab === 'submitted' || ['submitted', 'completed'].includes(video.videoStatus) || video.taskStatus === 'completed') return { label: '查看', readonly: true, disabled: false }
+  if (['in_progress', 'processing'].includes(video.videoStatus)) return { label: '继续处理', readonly: false, disabled: false }
+  return { label: '开始处理', readonly: false, disabled: false }
+}
+
+function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskTab; loading: boolean }) {
   const navigate = useNavigate()
-  async function openTask(task: WorkbenchTask) {
-    if (tab === 'pending' && task.status === 'pending') await annotationApi.startTask(task.id)
-    navigate(`/annotation/${encodeURIComponent(task.id)}${tab === 'submitted' ? '?readonly=1' : ''}`)
+  async function openVideo(video: VideoListItem) {
+    const action = actionFor(video, tab)
+    if (action.disabled) return
+    if (!action.readonly && !['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(video.taskId)
+    const params = new URLSearchParams({ video_id: video.id })
+    if (action.readonly) params.set('readonly', '1')
+    navigate(`/annotation/${encodeURIComponent(video.taskId)}?${params}`)
   }
   return (
     <div className="table-scroll">
-      <table className="task-table">
+      <table className="task-table workbench-video-table">
         <thead><tr>
-          <th>数据名称</th><th>当前节点</th><th>流转类型</th><th>{tab === 'pending' ? '处理状态' : '提交状态'}</th>
-          <th>总时长</th><th>有效时长</th><th>单次任务数</th><th>小目标数</th>
-          <th>{tab === 'pending' ? '最后更新时间' : '提交时间'}</th><th className="action-column">操作</th>
+          <th>视频名称</th><th>所属任务</th><th>当前节点</th><th>{tab === 'pending' ? '处理状态' : '提交状态'}</th>
+          <th>素材状态</th><th>时长</th><th>{tab === 'pending' ? '最后更新时间' : '提交时间'}</th><th className="action-column">操作</th>
         </tr></thead>
         <tbody>
-          {loading ? <tr><td colSpan={10}><div className="table-state"><RefreshCw className="spinning" size={25} /><span>正在加载任务...</span></div></td></tr> : items.length === 0 ? <tr><td colSpan={10}><div className="table-state"><ListFilter size={34} /><span>当前筛选条件下暂无任务</span></div></td></tr> : items.map((task) => <tr key={task.id}>
-            <td><div className="data-name"><strong title={task.dataName}>{task.dataName}</strong><small>{task.dataId}</small></div></td>
-            <td><span className={`node-tag ${nodeTones[task.node]}`}>{nodeLabels[task.node]}</span></td>
-            <td><span className={task.workType === 'returned' ? 'return-type' : ''}>{task.workType === 'returned' ? '退回返修' : '正常流转'}</span></td>
-            <td><span className={`status-tag ${task.status}`}>{statusLabels[task.status]}</span></td>
-            <td>{formatSeconds(task.totalDuration)}</td><td>{formatSeconds(task.validDuration)}</td><td>{task.goalCount}</td><td>{task.actionCount}</td>
-            <td>{tab === 'pending' ? task.updatedAt : task.submittedAt || task.updatedAt}</td>
-            <td><div className="row-actions"><button type="button" onClick={() => openTask(task)}>{tab === 'pending' ? (task.status === 'processing' ? '继续处理' : '开始处理') : '查看'}</button><button className="icon-button small" type="button" aria-label="更多操作"><MoreHorizontal size={17} /></button></div></td>
-          </tr>)}
+          {loading ? <tr><td colSpan={8}><div className="table-state"><RefreshCw className="spinning" size={25} /><span>正在加载视频...</span></div></td></tr> : items.length === 0 ? <tr><td colSpan={8}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video) => {
+            const action = actionFor(video, tab)
+            const displayedStatus = tab === 'submitted' ? video.submittedDecision || 'submitted' : video.videoStatus
+            return <tr key={video.id}>
+              <td><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.videoId || video.uri || `#${video.id}`}</small></div></td>
+              <td><div className="data-name"><strong title={video.taskTitle}>{video.taskTitle || '-'}</strong><small>{video.taskExternalTaskId || video.taskId}</small></div></td>
+              <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>
+              <td><div className="video-status-stack"><span className={`status-tag ${displayedStatus}`}>{decisionLabels[displayedStatus] || statusLabels[displayedStatus] || displayedStatus}</span><small>当前视频：{statusLabels[video.videoStatus] || video.videoStatus || '-'}</small><small>任务：{statusLabels[video.taskStatus] || video.taskStatus || '-'}</small></div></td>
+              <td><span className={`storage-tag ${video.storageStatus}`} title={video.storageError}>{storageLabels[video.storageStatus]}</span></td>
+              <td>{formatSeconds(video.duration)}</td>
+              <td>{tab === 'pending' ? video.updatedAt || '-' : video.submittedAt || video.updatedAt || '-'}</td>
+              <td><div className="row-actions"><button type="button" disabled={action.disabled} onClick={() => openVideo(video)}>{action.label}</button></div></td>
+            </tr>
+          })}
         </tbody>
       </table>
     </div>
@@ -53,9 +70,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const navigate = useNavigate()
   const [projectId, setProjectId] = useState('')
   const [tab, setTab] = useState<TaskTab>('pending')
-  const [keywordInput, setKeywordInput] = useState('')
-  const [keyword, setKeyword] = useState('')
-  const [node, setNode] = useState<TaskNode | ''>('')
+  const [tabTotals, setTabTotals] = useState<Record<TaskTab, number>>({ pending: 0, submitted: 0 })
   const [pageNo, setPageNo] = useState(1)
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
@@ -63,7 +78,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [claimingNode, setClaimingNode] = useState<TaskNode | null>(null)
   const [toast, setToast] = useState('')
 
-  const fetchSnapshot = useCallback(() => workbenchApi.getSnapshot({ projectId, tab, keyword, node, pageNo, pageSize: 10 }), [keyword, node, pageNo, projectId, tab])
+  const fetchSnapshot = useCallback(() => workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize: 10 }), [pageNo, projectId, session.account.id, tab])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -71,20 +86,21 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     try {
       const result = await fetchSnapshot()
       setSnapshot(result)
+      setTabTotals((current) => ({ ...current, [tab]: result.tasks.page.total }))
       if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '工作台加载失败')
     } finally { setLoading(false) }
-  }, [fetchSnapshot])
+  }, [fetchSnapshot, tab])
 
   useEffect(() => {
     let active = true
     fetchSnapshot()
-      .then((result) => { if (active) { setSnapshot(result); if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId) } })
+      .then((result) => { if (active) { setSnapshot(result); setTabTotals((current) => ({ ...current, [tab]: result.tasks.page.total })); if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId) } })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '工作台加载失败') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [fetchSnapshot])
+  }, [fetchSnapshot, tab])
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 2600)
@@ -92,7 +108,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   }, [toast])
 
   const currentProject = useMemo(() => snapshot?.projects.find((item) => item.id === projectId) || snapshot?.projects[0], [projectId, snapshot])
-  const totalPages = Math.max(1, Math.ceil((snapshot?.tasks.page.total || 0) / 10))
+  const totalPages = Math.max(1, snapshot?.tasks.pages || 1)
 
   async function claimTask(targetNode: TaskNode) {
     setClaimingNode(targetNode)
@@ -104,16 +120,13 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     finally { setClaimingNode(null) }
   }
 
-  function applySearch() {
-    setPageNo(1)
-    setKeyword(keywordInput.trim())
-  }
-
   async function openRecommendedTask() {
-    const task = snapshot?.recommendedTask
-    if (!task) return
-    if (task.status === 'pending') await annotationApi.startTask(task.id)
-    navigate(`/annotation/${encodeURIComponent(task.id)}`)
+    const video = snapshot?.recommendedTask
+    if (!video) return
+    const action = actionFor(video, 'pending')
+    if (action.disabled) return
+    if (!['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(video.taskId)
+    navigate(`/annotation/${encodeURIComponent(video.taskId)}?video_id=${encodeURIComponent(video.id)}`)
   }
 
   return (
@@ -123,31 +136,25 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
         <section className="project-hero panel">
           <div className="project-hero-main">
             <div className="project-kicker"><span className="live-dot" />当前作业项目</div>
-            <div className="project-title-row"><h1>{currentProject?.name || '加载中...'}</h1><div className="project-select-wrap"><select value={projectId} onChange={(event) => { setProjectId(event.target.value); setPageNo(1) }}>{snapshot?.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
-            <p>{currentProject?.batchName} <span /> 待处理 {snapshot?.tasks.page.total || 0} 条 <span /> 跨项目自动领取额度 {currentProject?.pendingCount || 0}/{currentProject?.claimLimit || 10}</p>
+            <div className="project-title-row"><h1>{currentProject?.name || '加载中...'}</h1><div className="project-select-wrap"><select value={projectId} onChange={(event) => { setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{snapshot?.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
+            <p>{currentProject?.batchName} <span /> {tab === 'pending' ? '待处理' : '已提交'} {snapshot?.tasks.page.total || 0} 条 <span /> 当前任务额度 {currentProject?.pendingCount || 0}/{currentProject?.claimLimit || 10}</p>
           </div>
           {snapshot?.recommendedTask ? <div className="recommended-task">
             <div className="recommended-icon"><Sparkles size={19} /></div>
-            <div><small>推荐优先处理</small><strong>{snapshot.recommendedTask.dataName}</strong><span>{nodeLabels[snapshot.recommendedTask.node]} · {statusLabels[snapshot.recommendedTask.status]} · 更新于 {snapshot.recommendedTask.updatedAt.slice(11)}</span></div>
-            <button className="primary-button" type="button" onClick={openRecommendedTask}><Play size={16} />{snapshot.recommendedTask.status === 'processing' ? '继续处理' : '开始处理'}</button>
-          </div> : <button className="primary-button claim-random-button" type="button" onClick={() => claimTask('annotation')}>随机领取</button>}
+            <div><small>推荐优先处理</small><strong>{snapshot.recommendedTask.filename}</strong><span>{nodeLabels[snapshot.recommendedTask.currentNode]} · {statusLabels[snapshot.recommendedTask.videoStatus] || snapshot.recommendedTask.videoStatus} · 更新于 {snapshot.recommendedTask.updatedAt.slice(11)}</span></div>
+            <button className="primary-button" type="button" disabled={snapshot.recommendedTask.storageStatus === 'missing'} onClick={openRecommendedTask}><Play size={16} />{['in_progress', 'processing'].includes(snapshot.recommendedTask.videoStatus) ? '继续处理' : '开始处理'}</button>
+          </div> : tab === 'pending' ? <button className="primary-button claim-random-button" type="button" onClick={() => claimTask('annotation')}>随机领取</button> : null}
         </section>
 
         <div className="workbench-grid">
           <section className="task-panel panel">
             <header className="panel-heading">
-              <div><h2>我的任务</h2><p>处理已领取、分配或被退回的作业任务</p></div>
+              <div><h2>我的任务</h2><p>按视频处理已分配或已提交的作业数据</p></div>
               <button className="icon-button bordered" type="button" onClick={load} aria-label="刷新"><RefreshCw size={17} /></button>
             </header>
             <div className="task-tabs">
-              <button className={tab === 'pending' ? 'active' : ''} type="button" onClick={() => { setTab('pending'); setPageNo(1) }}>待处理<span>{tab === 'pending' ? snapshot?.tasks.page.total || 0 : ''}</span></button>
-              <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { setTab('submitted'); setPageNo(1) }}>已提交</button>
-            </div>
-            <div className="task-filters">
-              <div className="search-field"><Search size={17} /><input value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="搜索数据名称或数据 ID" /></div>
-              <div className="select-field"><Filter size={16} /><select value={node} onChange={(event) => { setNode(event.target.value as TaskNode | ''); setPageNo(1) }}><option value="">全部节点</option>{Object.entries(nodeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><ChevronDown size={14} /></div>
-              <button className="primary-button compact" type="button" onClick={applySearch}>查询</button>
-              <button className="secondary-button compact" type="button" onClick={() => { setKeywordInput(''); setKeyword(''); setNode(''); setPageNo(1) }}>重置</button>
+              <button className={tab === 'pending' ? 'active' : ''} type="button" onClick={() => { setTab('pending'); setPageNo(1) }}>待处理<span>{tabTotals.pending}</span></button>
+              <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
             </div>
             <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} />
             <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><div className="pagination"><button type="button" disabled={pageNo === 1} onClick={() => setPageNo((value) => value - 1)}><ChevronLeft size={16} /></button><strong>{pageNo}</strong><span>/ {totalPages}</span><button type="button" disabled={pageNo === totalPages} onClick={() => setPageNo((value) => value + 1)}><ChevronRight size={16} /></button></div></footer>

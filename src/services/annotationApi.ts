@@ -159,7 +159,7 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
 }
 
 export const annotationApi = {
-  async getWorkspace(taskId: string, viewOnly = false): Promise<AnnotationWorkspace> {
+  async getWorkspace(taskId: string, viewOnly = false, videoId = ''): Promise<AnnotationWorkspace> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const task = mockTasks.find((item) => item.id === taskId) || mockTasks[0]
@@ -172,11 +172,12 @@ export const annotationApi = {
         labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), labelLibraryBound: true, result,
       }
     }
-    const requestKey = `${taskId}:${viewOnly ? 'view' : 'edit'}`
+    const requestKey = `${taskId}:${videoId}:${viewOnly ? 'view' : 'edit'}`
     const pending = workspaceRequests.get(requestKey)
     if (pending) return pending
     const workspaceRequest = (async () => {
-      const raw = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}`)
+      const videoQuery = videoId ? `?video_id=${encodeURIComponent(videoId)}` : ''
+      const raw = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}${videoQuery}`)
       const task = (raw.task || raw) as Record<string, unknown>
       const labelSnapshot = await loadTaskLabels(String(task.project_id || (task.project as Record<string, unknown> | undefined)?.id || ''))
       const workspace = normalizeWorkspace(taskId, raw, labelSnapshot.labels, labelSnapshot.bound, viewOnly)

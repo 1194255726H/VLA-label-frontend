@@ -1,43 +1,58 @@
 import { runtimeConfig } from '../config/runtime'
-import { mockTasks } from '../mocks/data'
-import type { AnnotationDataItem, AnnotationDataStatus, TaskNode } from '../types/api'
+import { mockProjects, mockTasks } from '../mocks/data'
+import type { ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem } from '../types/api'
 import { request } from './api'
 import { getMockFleetSyncedTasks } from './managementApi'
 
 function delay() { return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay)) }
-function numberOrNull(value: unknown) { return value === null || value === undefined || value === '' ? null : Number(value) }
+function numberValue(value: unknown) { return value === null || value === undefined || value === '' ? 0 : Number(value) }
+function optionalString(value: unknown) { return value === null || value === undefined || value === '' ? undefined : String(value) }
 
-function normalize(item: Record<string, unknown>): AnnotationDataItem {
-  const summary = (item.vlaSummary || {}) as Record<string, unknown>
-  const rawStatus = String(item.statusGroupKey || item.status || 'pending')
-  const statusMap: Record<string, AnnotationDataStatus> = { assigned: 'pending', claimed: 'pending', in_progress: 'processing', processing: 'processing', submitted: 'completed', completed: 'completed', invalid: 'voided', voided: 'voided', cut_failed: 'exception' }
-  const status = statusMap[rawStatus] || rawStatus as AnnotationDataStatus
+function normalizeNode(value: unknown): TaskNode {
+  const raw = String(value || 'annotation')
   const nodeMap: Record<string, TaskNode> = { '标注': 'annotation', '质检': 'review', '审核': 'quality', '验收': 'acceptance', quality_check: 'review', review: 'quality' }
-  const rawNode = String(item.current_node || item.nodeKey || item.node || 'annotation')
-  const videoMeta = (item.video_meta || {}) as Record<string, unknown>
-  const assignee = (item.current_assignee || {}) as Record<string, unknown>
+  return nodeMap[raw] || raw as TaskNode
+}
+
+function backendNode(node: TaskNode | '') {
+  return ({ annotation: 'annotation', review: 'quality_check', quality: 'review', acceptance: 'acceptance' } as const)[node as TaskNode] || ''
+}
+
+function normalize(item: Record<string, unknown>): VideoListItem {
   return {
-    id: String(item.external_task_id || item.id || item.dataId || item.dataCode || ''), name: String(item.title || item.name || item.dataName || item.fileName || item.external_task_id || ''), status,
-    statusLabel: String(item.statusGroupLabel || item.statusDetailLabel || ({ pending: '待处理', processing: '处理中', completed: '已完成', voided: '已作废', exception: '异常' }[status] || status)),
-    node: nodeMap[rawNode] || rawNode as TaskNode, workType: String(item.workTypeKey || item.workType) === 'returned' ? 'returned' : 'normal',
-    totalDuration: Number(item.total_duration_ms ?? videoMeta.duration_ms ?? 0) / 1000, selectedDuration: Number(item.selected_duration_ms ?? summary.selectedDurationSeconds ?? 0) / (item.selected_duration_ms == null ? 1 : 1000),
-    validDuration: Number(item.effective_duration_ms ?? summary.validDurationSeconds ?? 0) / (item.effective_duration_ms == null ? 1 : 1000), invalidDuration: Number(item.invalid_duration_ms ?? summary.invalidDurationSeconds ?? 0) / (item.invalid_duration_ms == null ? 1 : 1000),
-    unselectedDuration: Number(item.unselected_duration_ms ?? summary.unselectedDurationSeconds ?? 0) / (item.unselected_duration_ms == null ? 1 : 1000), goalCount: numberOrNull(item.atomic_task_count ?? summary.timelineTaskCount),
-    actionCount: numberOrNull(item.atomic_action_count ?? summary.smallGoalCount), ownerName: String(assignee.display_name || assignee.username || item.ownerName || '-'), updatedAt: String(item.updated_at || item.updatedAt || '-'),
-    taskId: item.id ? String(item.id) : undefined,
+    id: String(item.id || ''), projectId: String(item.project_id || ''), projectName: String(item.project_name || ''),
+    taskId: String(item.task_id || ''), taskExternalTaskId: String(item.task_external_task_id || ''), taskTitle: String(item.task_title || ''), taskStatus: String(item.task_status || ''),
+    taskCurrentNode: normalizeNode(item.task_current_node), taskCurrentAssigneeId: optionalString(item.task_current_assignee_id), currentNode: normalizeNode(item.current_node), currentAssigneeId: optionalString(item.current_assignee_id),
+    videoStatus: String(item.video_status || item.task_status || 'pending'), assignmentSource: String(item.assignment_source || ''), videoIndex: numberValue(item.video_index), videoId: optionalString(item.video_id),
+    filename: String(item.filename || item.video_id || item.uri || `视频 ${item.id || ''}`), uri: String(item.uri || ''), ossBucket: String(item.oss_bucket || ''), ossKey: String(item.oss_key || ''),
+    duration: numberValue(item.duration), fileSize: numberValue(item.file_size), storageStatus: String(item.storage_status || 'unchecked') as VideoListItem['storageStatus'], storageError: optionalString(item.storage_error), storageCheckedAt: optionalString(item.storage_checked_at),
+    createdAt: String(item.created_at || ''), updatedAt: String(item.updated_at || ''), submittedNode: optionalString(item.submitted_node), submittedById: optionalString(item.submitted_by_id), submittedAt: optionalString(item.submitted_at), submittedDecision: optionalString(item.submitted_decision),
   }
 }
 
+function mockItems(projectId: string): VideoListItem[] {
+  const project = mockProjects.find((item) => item.id === projectId) || mockProjects[0]
+  const taskVideos = mockTasks.map((task, index) => normalize({ id: `video-${index + 1}`, project_id: projectId, project_name: project.name, task_id: task.id, task_external_task_id: task.dataId, task_title: task.dataName, task_status: task.status, task_current_node: task.node, current_node: task.node, current_assignee_id: task.assignee, video_status: task.status === 'processing' ? 'in_progress' : task.status === 'pending' ? 'assigned' : task.status, video_index: 0, video_id: task.dataId, filename: `${task.dataName}.mp4`, uri: '/temp.mp4', duration: task.totalDuration, file_size: 96978164, storage_status: index === 2 ? 'missing' : index === 4 ? 'unchecked' : 'available', storage_error: index === 2 ? '对象存储中未找到该视频' : '', updated_at: task.updatedAt }))
+  const syncedVideos = getMockFleetSyncedTasks(projectId).map((task, index) => normalize({ id: `fleet-video-${task.id}`, project_id: projectId, project_name: project.name, task_id: `fleet-${task.id}`, task_external_task_id: task.externalTaskId, task_title: task.name || task.externalTaskId, task_status: 'pending', current_node: 'annotation', video_status: 'pending', video_index: index, filename: `${task.externalTaskId}.mp4`, duration: task.totalDuration, storage_status: 'unchecked', updated_at: new Date().toISOString() }))
+  return [...syncedVideos, ...taskVideos]
+}
+
 export const annotationDataApi = {
-  async list(projectId: string): Promise<AnnotationDataItem[]> {
+  async list(projectId: string, query: ProjectVideoQuery = {}): Promise<ProjectVideoPage> {
+    const page = query.page || 1
+    const pageSize = query.pageSize || 20
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
-      const existing = mockTasks.map((task) => normalize({ ...task, id: task.dataId, name: task.dataName, taskId: task.id, status: task.status === 'submitted' || task.status === 'completed' ? 'completed' : task.status }))
-      const knownIds = new Set(existing.map((item) => item.id))
-      const synced = getMockFleetSyncedTasks(projectId).filter((task) => !knownIds.has(task.externalTaskId)).map((task) => normalize({ id: `fleet-${task.id}`, external_task_id: task.externalTaskId, title: task.name || task.externalTaskId, status: 'pending', current_node: 'annotation', total_duration_ms: task.totalDuration * 1000, updated_at: new Date().toISOString().replace('T', ' ').slice(0, 19) }))
-      return [...synced, ...existing]
+      const keyword = query.keyword?.toLowerCase()
+      const items = mockItems(projectId).filter((item) => (!keyword || `${item.filename}${item.videoId}${item.uri}${item.taskTitle}${item.taskExternalTaskId}`.toLowerCase().includes(keyword)) && (!query.status || item.taskStatus === query.status) && (!query.currentNode || item.currentNode === query.currentNode) && (!query.storageStatus || item.storageStatus === query.storageStatus))
+      return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize, pages: Math.max(1, Math.ceil(items.length / pageSize)) }
     }
-    const result = await request<{ items: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/tasks?page_size=100`)
-    return result.items.map(normalize)
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+    if (query.keyword) params.set('keyword', query.keyword)
+    if (query.status) params.set('status', query.status)
+    if (query.currentNode) params.set('current_node', backendNode(query.currentNode))
+    if (query.storageStatus) params.set('storage_status', query.storageStatus)
+    const result = await request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(projectId)}/videos?${params}`)
+    return { items: result.items.map(normalize), total: result.total || 0, page: result.page || page, pageSize: result.page_size || pageSize, pages: result.pages || 1 }
   },
 }

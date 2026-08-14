@@ -8,6 +8,7 @@ import type {
   SmsChallenge,
   TaskNode,
   TaskQuery,
+  VideoListItem,
   WorkbenchSnapshot,
   WorkbenchTask,
 } from '../types/api'
@@ -142,8 +143,7 @@ export const authApi = {
 function filteredMockTasks(query: TaskQuery) {
   return mutableTasks.filter((task) => {
     const matchesTab = query.tab === 'submitted' ? ['submitted', 'completed'].includes(task.status) : ['pending', 'processing'].includes(task.status)
-    const matchesKeyword = !query.keyword || `${task.dataName}${task.dataId}`.toLowerCase().includes(query.keyword.toLowerCase())
-    return matchesTab && matchesKeyword && (!query.node || task.node === query.node)
+    return matchesTab
   })
 }
 
@@ -182,6 +182,75 @@ function normalizeTask(item: Record<string, unknown>): WorkbenchTask {
   }
 }
 
+function normalizeNode(value: unknown): TaskNode {
+  const wireNode = String(value || 'annotation')
+  const nodeMap: Record<string, TaskNode> = { '标注': 'annotation', '质检': 'review', '审核': 'quality', '验收': 'acceptance', quality_check: 'review', review: 'quality' }
+  return nodeMap[wireNode] || wireNode as TaskNode
+}
+
+function optionalString(value: unknown) {
+  return value === null || value === undefined || value === '' ? undefined : String(value)
+}
+
+function normalizeVideo(item: Record<string, unknown>): VideoListItem {
+  return {
+    id: String(item.id || ''),
+    projectId: String(item.project_id || ''),
+    projectName: String(item.project_name || ''),
+    taskId: String(item.task_id || ''),
+    taskExternalTaskId: String(item.task_external_task_id || ''),
+    taskTitle: String(item.task_title || ''),
+    taskStatus: String(item.task_status || ''),
+    taskCurrentNode: normalizeNode(item.task_current_node),
+    taskCurrentAssigneeId: optionalString(item.task_current_assignee_id),
+    currentNode: normalizeNode(item.current_node),
+    currentAssigneeId: optionalString(item.current_assignee_id),
+    videoStatus: String(item.video_status || item.task_status || 'pending'),
+    assignmentSource: String(item.assignment_source || ''),
+    videoIndex: numberValue(item.video_index),
+    videoId: optionalString(item.video_id),
+    filename: String(item.filename || item.video_id || item.uri || `视频 ${item.id || ''}`),
+    uri: String(item.uri || ''),
+    ossBucket: String(item.oss_bucket || ''),
+    ossKey: String(item.oss_key || ''),
+    duration: numberValue(item.duration),
+    fileSize: numberValue(item.file_size),
+    storageStatus: String(item.storage_status || 'unchecked') as VideoListItem['storageStatus'],
+    storageError: optionalString(item.storage_error),
+    storageCheckedAt: optionalString(item.storage_checked_at),
+    createdAt: String(item.created_at || ''),
+    updatedAt: String(item.updated_at || ''),
+    submittedNode: optionalString(item.submitted_node),
+    submittedById: optionalString(item.submitted_by_id),
+    submittedAt: optionalString(item.submitted_at),
+    submittedDecision: optionalString(item.submitted_decision),
+  }
+}
+
+function mockVideo(task: WorkbenchTask, index: number): VideoListItem {
+  return normalizeVideo({
+    id: `video-${index + 1}`,
+    project_id: '1',
+    project_name: mockProjects[0].name,
+    task_id: task.id,
+    task_external_task_id: task.dataId,
+    task_title: task.dataName,
+    task_status: task.status,
+    task_current_node: task.node,
+    current_node: task.node,
+    current_assignee_id: mockUser.id,
+    video_status: task.status === 'processing' ? 'in_progress' : task.status === 'pending' ? 'assigned' : task.status,
+    video_index: 0,
+    video_id: task.dataId,
+    filename: `${task.dataName}.mp4`,
+    uri: '/temp.mp4',
+    duration: task.totalDuration,
+    storage_status: 'available',
+    updated_at: task.updatedAt,
+    submitted_at: task.submittedAt,
+  })
+}
+
 export const workbenchApi = {
   async getSnapshot(query: TaskQuery): Promise<WorkbenchSnapshot> {
     if (runtimeConfig.apiMode === 'mock') {
@@ -192,31 +261,29 @@ export const workbenchApi = {
       return {
         projects: mockProjects.map((item) => ({ ...item })),
         currentProjectId: query.projectId || mockProjects[0].id,
-        recommendedTask: mutableTasks.find((task) => ['pending', 'processing'].includes(task.status)) || null,
-        tasks: { items: all.slice((pageNo - 1) * pageSize, pageNo * pageSize), page: { pageNo, pageSize, total: all.length }, viewMode: 'personal', selfClaimEnabled: true },
+        recommendedTask: query.tab === 'pending' ? all.map(mockVideo)[0] || null : null,
+        tasks: { items: all.map(mockVideo).slice((pageNo - 1) * pageSize, pageNo * pageSize), page: { pageNo, pageSize, total: all.length }, pages: Math.max(1, Math.ceil(all.length / pageSize)), viewMode: 'personal', selfClaimEnabled: true },
         claimPool: mutablePool.map((item) => ({ ...item })),
         summary: { todayObjects: 3008, validDuration: 972, goalCount: 68, actionCount: 214 },
       }
     }
-    const [projects, rawTasks, pool] = await Promise.all([
-      request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100'),
-      request<{ items: Array<Record<string, unknown>> }>('/api/tasks/my?page_size=100'),
-      request<{ items: Array<Record<string, unknown>> }>('/api/tasks/pool?page_size=100'),
-    ])
+    const projects = await request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100')
     const effectiveProjectId = query.projectId || String(projects.items[0]?.id || '')
-    const allTasks = rawTasks.items.filter((item) => !effectiveProjectId || String(item.project_id || (item.project as Record<string, unknown> | undefined)?.id || '') === effectiveProjectId).map(normalizeTask)
-    const filteredTasks = allTasks.filter((task) => (query.tab === 'submitted' ? ['submitted', 'completed'].includes(task.status) : ['pending', 'processing'].includes(task.status)) && (!query.keyword || `${task.dataName}${task.dataId}`.toLowerCase().includes(query.keyword.toLowerCase())) && (!query.node || task.node === query.node))
     const pageNo = query.pageNo || 1; const pageSize = query.pageSize || 10
-    const taskItems = filteredTasks.slice((pageNo - 1) * pageSize, pageNo * pageSize)
-    const tasks: WorkbenchSnapshot['tasks'] = { items: taskItems, page: { pageNo, pageSize, total: filteredTasks.length }, viewMode: 'personal', selfClaimEnabled: true }
-    const todayTasks = taskItems.filter((item) => item.updatedAt.startsWith(new Date().toISOString().slice(0, 10)))
+    const params = new URLSearchParams({ operator_id: query.operatorId, tab: query.tab, page: String(pageNo), page_size: String(pageSize) })
+    const [rawVideos, pool] = effectiveProjectId ? await Promise.all([
+      request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/workbench/videos?${params}`),
+      request<{ items: Array<Record<string, unknown>> }>('/api/tasks/pool?page_size=100'),
+    ]) : [{ items: [], total: 0, page: pageNo, page_size: pageSize, pages: 0 }, { items: [] }]
+    const videoItems = rawVideos.items.map(normalizeVideo)
+    const tasks: WorkbenchSnapshot['tasks'] = { items: videoItems, page: { pageNo: rawVideos.page || pageNo, pageSize: rawVideos.page_size || pageSize, total: rawVideos.total || 0 }, pages: rawVideos.pages || 1, viewMode: 'personal', selfClaimEnabled: true }
     return {
-      projects: projects.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: allTasks.filter((task) => ['pending', 'processing'].includes(task.status)).length, claimLimit: numberValue(config.active_task_limit) || 10 } }),
+      projects: projects.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: String(item.id) === effectiveProjectId && query.tab === 'pending' ? rawVideos.total : 0, claimLimit: numberValue(config.active_task_limit) || 10 } }),
       currentProjectId: effectiveProjectId,
-      recommendedTask: tasks.items.find((item) => ['pending', 'processing'].includes(item.status)) || null,
+      recommendedTask: query.tab === 'pending' ? videoItems[0] || null : null,
       tasks,
       claimPool: Object.values(pool.items.filter((item) => !effectiveProjectId || String(item.project_id || (item.project as Record<string, unknown> | undefined)?.id || '') === effectiveProjectId).map(normalizeTask).reduce<Record<string, ClaimPoolItem>>((groups, task) => { const current = groups[task.node] || { node: task.node, label: `${nodeLabelsForApi[task.node]}数据`, count: 0 }; current.count += 1; groups[task.node] = current; return groups }, {})),
-      summary: todayTasks.reduce((total, item) => ({ todayObjects: total.todayObjects + item.actionCount, validDuration: total.validDuration + item.validDuration, goalCount: total.goalCount + item.goalCount, actionCount: total.actionCount + item.actionCount }), { todayObjects: 0, validDuration: 0, goalCount: 0, actionCount: 0 }),
+      summary: { todayObjects: 0, validDuration: 0, goalCount: 0, actionCount: 0 },
     }
   },
   async claim(projectId: string, node: string): Promise<WorkbenchTask> {

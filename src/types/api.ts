@@ -51,9 +51,45 @@ export interface WorkbenchTask {
   assignee: string
 }
 
+export type StorageStatus = 'available' | 'missing' | 'unchecked'
+
+export interface VideoListItem {
+  id: string
+  projectId: string
+  projectName: string
+  taskId: string
+  taskExternalTaskId: string
+  taskTitle: string
+  taskStatus: string
+  taskCurrentNode: TaskNode
+  taskCurrentAssigneeId?: string
+  currentNode: TaskNode
+  currentAssigneeId?: string
+  videoStatus: string
+  assignmentSource: string
+  videoIndex: number
+  videoId?: string
+  filename: string
+  uri: string
+  ossBucket: string
+  ossKey: string
+  duration: number
+  fileSize: number
+  storageStatus: StorageStatus
+  storageError?: string
+  storageCheckedAt?: string
+  createdAt: string
+  updatedAt: string
+  submittedNode?: string
+  submittedById?: string
+  submittedAt?: string
+  submittedDecision?: string
+}
+
 export interface TaskPage {
-  items: WorkbenchTask[]
+  items: VideoListItem[]
   page: { pageNo: number; pageSize: number; total: number }
+  pages: number
   viewMode: 'personal' | 'all-projects'
   selfClaimEnabled: boolean
 }
@@ -74,7 +110,7 @@ export interface WorkbenchSummary {
 export interface WorkbenchSnapshot {
   projects: Project[]
   currentProjectId: string
-  recommendedTask: WorkbenchTask | null
+  recommendedTask: VideoListItem | null
   tasks: TaskPage
   claimPool: ClaimPoolItem[]
   summary: WorkbenchSummary
@@ -82,11 +118,27 @@ export interface WorkbenchSnapshot {
 
 export interface TaskQuery {
   projectId: string
+  operatorId: string
   tab: TaskTab
-  keyword?: string
-  node?: TaskNode | ''
   pageNo?: number
   pageSize?: number
+}
+
+export interface ProjectVideoQuery {
+  keyword?: string
+  status?: string
+  currentNode?: TaskNode | ''
+  storageStatus?: StorageStatus | ''
+  page?: number
+  pageSize?: number
+}
+
+export interface ProjectVideoPage {
+  items: VideoListItem[]
+  total: number
+  page: number
+  pageSize: number
+  pages: number
 }
 
 export interface SmsChallenge {

@@ -490,7 +490,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   useEffect(() => {
     let active = true
-    annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1').then((data) => {
+    annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1', searchParams.get('video_id') || '').then((data) => {
       if (!active) return
       undoStack.current = []
       redoStack.current = []
