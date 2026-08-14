@@ -57,7 +57,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   async function fleetSynced(message: string) { setFleetOpen(false); await loadVideos(); setToast(message) }
   function applySearch() { setPage(1); setKeyword(keywordInput.trim()) }
   function resetFilters() { setKeywordInput(''); setKeyword(''); setTaskStatus(''); setNode(''); setStorageStatus(''); setPage(1) }
-  function preview(video: VideoListItem) { navigate(`/annotation/${encodeURIComponent(video.taskId)}?video_id=${encodeURIComponent(video.id)}&readonly=1`) }
+  function preview(video: VideoListItem) { navigate(`/annotation/${encodeURIComponent(video.taskId)}?video_id=${encodeURIComponent(video.id)}&project_id=${encodeURIComponent(video.projectId || projectId)}&readonly=1`) }
 
   return <AppShell user={session.account}><section className="management-page"><section className="management-panel panel">
     <header className="management-toolbar annotation-data-heading"><div className="detail-title"><button className="icon-button bordered" type="button" onClick={() => navigate('/projects')} aria-label="返回项目管理"><ArrowLeft size={17} /></button><div><h2>{projectName}</h2><p>项目视频管理 · {projectId}</p></div></div><span>共 {total} 条视频，可按任务、节点和素材状态排查</span></header>

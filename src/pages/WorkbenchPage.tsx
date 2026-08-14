@@ -34,7 +34,7 @@ function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskT
     const action = actionFor(video, tab)
     if (action.disabled) return
     if (!action.readonly && !['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(video.taskId)
-    const params = new URLSearchParams({ video_id: video.id })
+    const params = new URLSearchParams({ video_id: video.id, project_id: video.projectId })
     if (action.readonly) params.set('readonly', '1')
     navigate(`/annotation/${encodeURIComponent(video.taskId)}?${params}`)
   }
@@ -126,7 +126,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     const action = actionFor(video, 'pending')
     if (action.disabled) return
     if (!['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(video.taskId)
-    navigate(`/annotation/${encodeURIComponent(video.taskId)}?video_id=${encodeURIComponent(video.id)}`)
+    navigate(`/annotation/${encodeURIComponent(video.taskId)}?video_id=${encodeURIComponent(video.id)}&project_id=${encodeURIComponent(video.projectId)}`)
   }
 
   return (

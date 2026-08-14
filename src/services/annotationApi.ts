@@ -7,6 +7,7 @@ const mockResults = new Map<string, AnnotationResult>()
 const mockRevisions = new Map<string, number>()
 const workspaceRequests = new Map<string, Promise<AnnotationWorkspace>>()
 const taskNodes = new Map<string, TaskNode>()
+const taskVideoIds = new Map<string, string>()
 
 function delay() {
   return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay))
@@ -45,6 +46,11 @@ function wireNode(value: unknown): TaskNode {
 
 function backendNode(value: TaskNode) {
   return ({ annotation: 'annotation', review: 'quality_check', quality: 'review', acceptance: 'acceptance' } as const)[value]
+}
+
+function videoQuery(taskId: string) {
+  const videoId = taskVideoIds.get(taskId)
+  return videoId ? `?video_id=${encodeURIComponent(videoId)}` : ''
 }
 
 function msToFrame(value: unknown, frameRate: number) { return Math.max(0, Math.round(Number(value || 0) / 1000 * frameRate)) }
@@ -123,23 +129,24 @@ async function loadTaskLabels(projectId: string) {
   return { labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0 }
 }
 
-function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, viewOnly: boolean): AnnotationWorkspace {
+function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, viewOnly: boolean, selectedProjectId = ''): AnnotationWorkspace {
   const task = (raw.task || raw) as Record<string, unknown>
+  const selectedVideo = (raw.selected_video || task.selected_video || {}) as Record<string, unknown>
   const project = (task.project || raw.project || {}) as Record<string, unknown>
-  const videoMeta = (task.video_meta || {}) as Record<string, unknown>
-  const revision = (raw.current_revision || {}) as Record<string, unknown>
-  const revisionPayload = (revision.payload || revision.annotation_data || revision.data || {}) as Record<string, unknown>
+  const videoMeta = (selectedVideo.video_meta || task.video_meta || {}) as Record<string, unknown>
+  const revision = (raw.annotation || raw.current_revision || {}) as Record<string, unknown>
+  const revisionPayload = (revision.payload || revision.annotation_data || revision.data || revision) as Record<string, unknown>
   const meta = (revisionPayload.meta || {}) as Record<string, unknown>
   const preserved = meta.frontend_result && typeof meta.frontend_result === 'object' ? meta.frontend_result as AnnotationResult : undefined
   const frameRate = Number(preserved?.frameRate || meta.frame_rate || videoMeta.frame_rate || 30)
   const mediaStartTime = Number(preserved?.mediaStartTime || meta.media_start_time || videoMeta.media_start_time || videoMeta.start_time_ms && Number(videoMeta.start_time_ms) / 1000 || 0)
-  const durationSeconds = Number(videoMeta.duration_ms || task.duration_ms || 0) / 1000
+  const durationSeconds = Number(videoMeta.duration_ms || selectedVideo.duration_ms || task.duration_ms || 0) / 1000
   const rawGoals = Array.isArray(revisionPayload.atomic_tasks) ? revisionPayload.atomic_tasks as Array<Record<string, unknown>> : []
   const goals = rawGoals.map((goal, index) => ({ id: String(goal.id || `goal-${goal.sequence ?? index + 1}`), sequence: Number(goal.sequence ?? index + 1), type: 'goal' as const, startFrame: goal.start_frame == null ? msToFrame(goal.start_ms, frameRate) : Number(goal.start_frame), endFrame: goal.end_frame == null ? msToFrame(goal.end_ms, frameRate) : Number(goal.end_frame), labelId: goal.label_id == null ? undefined : String(goal.label_id), labelCode: String(goal.label_code || ''), labelName: labels.find((label) => label.id === String(goal.label_id))?.name, color: labels.find((label) => label.id === String(goal.label_id))?.color || '#2563EB', descriptionZh: String(goal.description || '') }))
   const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => { const noAction = action.segment_type === 'no_action' || action.system_code === 'NO_ACTION'; return ({ id: String(action.id || `${parent.id}-A${String(action.sequence ?? index + 1).padStart(3, '0')}`), sequence: Number(action.sequence ?? index + 1), parentId: parent.id, type: noAction ? 'no_action' as const : 'action' as const, startFrame: action.start_frame == null ? msToFrame(action.start_ms, frameRate) : Number(action.start_frame), endFrame: action.end_frame == null ? msToFrame(action.end_ms, frameRate) : Number(action.end_frame), labelId: action.label_id == null ? undefined : String(action.label_id), labelCode: String(action.label_code || ''), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: noAction ? '#64748B' : labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: String(action.description_zh || action.description || (noAction ? '未执行有效动作' : '')), descriptionEn: String(action.description_en || (noAction ? 'No valid action is performed.' : '')), systemCode: noAction ? 'NO_ACTION' as const : undefined, descriptionSource: noAction ? 'system' as const : 'user' as const, modelDescriptionRequired: noAction ? false : undefined, keyFrames: Array.isArray(action.key_frames) ? action.key_frames as never[] : [] }) }) })
-  const node = wireNode(task.current_node)
-  const videoUri = String(task.video_url || task.video_uri || '')
-  const status = String(task.status || '')
+  const node = wireNode(selectedVideo.current_node || task.current_node)
+  const videoUri = String(selectedVideo.url || task.video_url || task.video_uri || '')
+  const status = String(selectedVideo.status || task.status || '')
   const baseResult = preserved || {
     schemaVersion: 'vla-video-hierarchy@11.0.0' as const, coordinateSystem: 'zero-based-frame' as const, intervalConvention: 'half-open' as const, frameRate,
     totalFrames: Math.round(durationSeconds * frameRate), mediaStartTime, goals, actions,
@@ -148,18 +155,18 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
   }
   return {
     taskId,
-    taskCode: String(task.external_task_id || task.id || taskId), dataId: String(task.external_task_id || task.id || ''), dataName: String(task.title || task.external_task_id || 'VLA 视频数据'),
-    projectId: String(task.project_id || project.id || ''), projectName: String(project.name || ''), node,
+    taskCode: String(task.external_task_id || task.id || taskId), dataId: String(selectedVideo.external_video_id || task.external_task_id || selectedVideo.id || task.id || ''), dataName: String(selectedVideo.filename || task.title || task.external_task_id || 'VLA 视频数据'),
+    projectId: String(task.project_id || project.id || selectedProjectId), projectName: String(project.name || ''), node,
     readonly: viewOnly || ['submitted', 'completed'].includes(status),
     videoUrl: /^https?:\/\//i.test(videoUri) ? videoUri : '',
     frameRate,
     durationSeconds, mediaStartTime,
-    currentRevision: Number(revision.id || revision.revision || revision.revision_no || 0), labels, labelLibraryBound, result: normalizeAnnotationResult(baseResult),
+    currentRevision: Number(revision.version || revision.revision || revision.revision_no || revision.id || 0), labels, labelLibraryBound, result: normalizeAnnotationResult(baseResult),
   }
 }
 
 export const annotationApi = {
-  async getWorkspace(taskId: string, viewOnly = false, videoId = ''): Promise<AnnotationWorkspace> {
+  async getWorkspace(taskId: string, viewOnly = false, videoId = '', projectId = '', forceLock = false): Promise<AnnotationWorkspace> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const task = mockTasks.find((item) => item.id === taskId) || mockTasks[0]
@@ -172,16 +179,20 @@ export const annotationApi = {
         labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), labelLibraryBound: true, result,
       }
     }
-    const requestKey = `${taskId}:${videoId}:${viewOnly ? 'view' : 'edit'}`
+    if (!videoId) throw new Error('缺少视频记录 ID，无法进入作业页')
+    const requestKey = `${taskId}:${videoId}:${forceLock ? 'force' : 'normal'}:${viewOnly ? 'view' : 'edit'}`
     const pending = workspaceRequests.get(requestKey)
     if (pending) return pending
     const workspaceRequest = (async () => {
-      const videoQuery = videoId ? `?video_id=${encodeURIComponent(videoId)}` : ''
-      const raw = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}${videoQuery}`)
+      const params = new URLSearchParams({ video_id: videoId })
+      if (forceLock) params.set('force_lock', '1')
+      const raw = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}?${params}`)
       const task = (raw.task || raw) as Record<string, unknown>
-      const labelSnapshot = await loadTaskLabels(String(task.project_id || (task.project as Record<string, unknown> | undefined)?.id || ''))
-      const workspace = normalizeWorkspace(taskId, raw, labelSnapshot.labels, labelSnapshot.bound, viewOnly)
+      const effectiveProjectId = String(task.project_id || (task.project as Record<string, unknown> | undefined)?.id || projectId)
+      const labelSnapshot = await loadTaskLabels(effectiveProjectId)
+      const workspace = normalizeWorkspace(taskId, raw, labelSnapshot.labels, labelSnapshot.bound, viewOnly, effectiveProjectId)
       taskNodes.set(taskId, workspace.node)
+      if (videoId) taskVideoIds.set(taskId, videoId)
       return workspace
     })()
     workspaceRequests.set(requestKey, workspaceRequest)
@@ -198,23 +209,24 @@ export const annotationApi = {
     if (runtimeConfig.apiMode === 'mock') {
       await delay(); mockResults.set(taskId, clone(result)); const revision = (mockRevisions.get(taskId) || 0) + 1; mockRevisions.set(taskId, revision); return revision
     }
-    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/annotation-draft`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
+    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/annotation-draft${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
     const revision = (response.revision || response.current_revision || response) as Record<string, unknown>
-    return Number(revision.id || revision.revision || revision.revision_no || baseRevision + 1)
+    return Number(response.version || revision.version || revision.revision || revision.revision_no || response.revision_id || revision.id || baseRevision + 1)
   },
 
   async submit(taskId: string, result: AnnotationResult, _revision: number) {
     void _revision
     if (runtimeConfig.apiMode === 'mock') { await delay(); mockResults.set(taskId, clone(result)); return }
     const node = taskNodes.get(taskId) || 'annotation'
-    if (node === 'annotation') await request(`/api/tasks/${encodeURIComponent(taskId)}/submit-annotation`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
-    else await request(`/api/tasks/${encodeURIComponent(taskId)}/decision`, { method: 'POST', body: JSON.stringify({ node: backendNode(node), decision: 'approved', opinion: '通过' }) })
+    if (node === 'annotation') await request(`/api/tasks/${encodeURIComponent(taskId)}/submit-annotation${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
+    else await request(`/api/tasks/${encodeURIComponent(taskId)}/decision${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify({ node: backendNode(node), decision: 'approved', opinion: '通过' }) })
   },
   async heartbeat(taskId: string) {
     void taskId
   },
   async release(taskId: string) {
     taskNodes.delete(taskId)
+    taskVideoIds.delete(taskId)
   },
   async invalidate(taskId: string, reason: string) {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return }
@@ -224,6 +236,6 @@ export const annotationApi = {
   async reject(taskId: string, reason: string) {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return }
     const node = taskNodes.get(taskId) || 'review'
-    await request(`/api/tasks/${encodeURIComponent(taskId)}/decision`, { method: 'POST', body: JSON.stringify({ node: backendNode(node), decision: 'rejected', opinion: reason }) })
+    await request(`/api/tasks/${encodeURIComponent(taskId)}/decision${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify({ node: backendNode(node), decision: 'rejected', opinion: reason }) })
   },
 }
