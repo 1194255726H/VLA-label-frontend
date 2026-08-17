@@ -1,13 +1,15 @@
 import {
-  ArrowRight, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Clock3,
+  ArrowRight, ChevronDown, CircleAlert, Clock3,
   Filter, ListFilter, Play, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
+import { PaginationJump } from '../components/PaginationJump'
 import { annotationApi } from '../services/annotationApi'
 import { workbenchApi } from '../services/api'
 import type { SessionResponse, TaskNode, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
+import { formatDateTime } from '../utils/date'
 
 const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const nodeTones: Record<TaskNode, string> = { annotation: 'cyan', review: 'blue', quality: 'amber', acceptance: 'green' }
@@ -56,7 +58,7 @@ function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskT
               <td><div className="video-status-stack"><span className={`status-tag ${displayedStatus}`}>{decisionLabels[displayedStatus] || statusLabels[displayedStatus] || displayedStatus}</span><small>当前视频：{statusLabels[video.videoStatus] || video.videoStatus || '-'}</small><small>任务：{statusLabels[video.taskStatus] || video.taskStatus || '-'}</small></div></td>
               <td><span className={`storage-tag ${video.storageStatus}`} title={video.storageError}>{storageLabels[video.storageStatus]}</span></td>
               <td>{formatSeconds(video.duration)}</td>
-              <td>{tab === 'pending' ? video.updatedAt || '-' : video.submittedAt || video.updatedAt || '-'}</td>
+              <td>{tab === 'pending' ? formatDateTime(video.updatedAt) : formatDateTime(video.submittedAt || video.updatedAt)}</td>
               <td><div className="row-actions"><button type="button" disabled={action.disabled} onClick={() => openVideo(video)}>{action.label}</button></div></td>
             </tr>
           })}
@@ -78,29 +80,42 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [claimingNode, setClaimingNode] = useState<TaskNode | null>(null)
   const [toast, setToast] = useState('')
 
-  const fetchSnapshot = useCallback(() => workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize: 10 }), [pageNo, projectId, session.account.id, tab])
+  const fetchWorkbenchData = useCallback(async () => {
+    const otherTab: TaskTab = tab === 'pending' ? 'submitted' : 'pending'
+    const [result, otherTabResult] = await Promise.all([
+      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize: 10 }),
+      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab: otherTab, pageNo: 1, pageSize: 1 }),
+    ])
+    return {
+      result,
+      totals: {
+        [tab]: result.tasks.page.total,
+        [otherTab]: otherTabResult.tasks.page.total,
+      } as Record<TaskTab, number>,
+    }
+  }, [pageNo, projectId, session.account.id, tab])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const result = await fetchSnapshot()
+      const { result, totals } = await fetchWorkbenchData()
       setSnapshot(result)
-      setTabTotals((current) => ({ ...current, [tab]: result.tasks.page.total }))
+      setTabTotals(totals)
       if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '工作台加载失败')
     } finally { setLoading(false) }
-  }, [fetchSnapshot, tab])
+  }, [fetchWorkbenchData])
 
   useEffect(() => {
     let active = true
-    fetchSnapshot()
-      .then((result) => { if (active) { setSnapshot(result); setTabTotals((current) => ({ ...current, [tab]: result.tasks.page.total })); if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId) } })
+    fetchWorkbenchData()
+      .then(({ result, totals }) => { if (active) { setSnapshot(result); setTabTotals(totals); if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId) } })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '工作台加载失败') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [fetchSnapshot, tab])
+  }, [fetchWorkbenchData])
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 2600)
@@ -141,7 +156,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
           </div>
           {snapshot?.recommendedTask ? <div className="recommended-task">
             <div className="recommended-icon"><Sparkles size={19} /></div>
-            <div><small>推荐优先处理</small><strong>{snapshot.recommendedTask.filename}</strong><span>{nodeLabels[snapshot.recommendedTask.currentNode]} · {statusLabels[snapshot.recommendedTask.videoStatus] || snapshot.recommendedTask.videoStatus} · 更新于 {snapshot.recommendedTask.updatedAt.slice(11)}</span></div>
+            <div><small>推荐优先处理</small><strong>{snapshot.recommendedTask.filename}</strong><span>{nodeLabels[snapshot.recommendedTask.currentNode]} · {statusLabels[snapshot.recommendedTask.videoStatus] || snapshot.recommendedTask.videoStatus} · 更新于 {formatDateTime(snapshot.recommendedTask.updatedAt).slice(11)}</span></div>
             <button className="primary-button" type="button" disabled={snapshot.recommendedTask.storageStatus === 'missing'} onClick={openRecommendedTask}><Play size={16} />{['in_progress', 'processing'].includes(snapshot.recommendedTask.videoStatus) ? '继续处理' : '开始处理'}</button>
           </div> : tab === 'pending' ? <button className="primary-button claim-random-button" type="button" onClick={() => claimTask('annotation')}>随机领取</button> : null}
         </section>
@@ -157,7 +172,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
               <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
             </div>
             <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} />
-            <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><div className="pagination"><button type="button" disabled={pageNo === 1} onClick={() => setPageNo((value) => value - 1)}><ChevronLeft size={16} /></button><strong>{pageNo}</strong><span>/ {totalPages}</span><button type="button" disabled={pageNo === totalPages} onClick={() => setPageNo((value) => value + 1)}><ChevronRight size={16} /></button></div></footer>
+            <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={setPageNo} /></footer>
           </section>
 
           <aside className="workbench-side">

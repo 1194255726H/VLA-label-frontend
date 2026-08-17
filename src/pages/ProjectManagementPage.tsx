@@ -1,7 +1,8 @@
-import { Archive, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Edit3, Eye, Pause, Play, Plus, RotateCcw, Search, Square, Trash2 } from 'lucide-react'
+import { Archive, ChevronDown, CircleAlert, Edit3, Eye, Pause, Play, Plus, RotateCcw, Search, Square, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { AppShell } from '../components/AppShell'
 import { Modal } from '../components/Modal'
+import { PaginationJump } from '../components/PaginationJump'
 import { fleetApi, labelApi, projectApi, teamApi } from '../services/managementApi'
 import type { FleetScene, FleetTask, LabelLibrary, ManagedProject, Member, ProjectPayload, ProjectStatus, SessionResponse, Team } from '../types/api'
 
@@ -55,6 +56,8 @@ export function FleetSyncModal({ projectId, projectName, onClose, onSynced }: { 
 
   const sceneHasNext = sceneTotal == null ? scenes.length === pageSize : scenePage * pageSize < sceneTotal
   const taskHasNext = taskTotal == null ? tasks.length === pageSize : taskPage * pageSize < taskTotal
+  const scenePages = sceneTotal == null ? (sceneHasNext ? scenePage + 1 : scenePage) : Math.max(1, Math.ceil(sceneTotal / pageSize))
+  const taskPages = taskTotal == null ? (taskHasNext ? taskPage + 1 : taskPage) : Math.max(1, Math.ceil(taskTotal / pageSize))
   const selectableTasks = tasks.filter((task) => task.availableCount > 0)
   const currentPageSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id))
   const selectedTasks = [...selectedTaskDetails.values()]
@@ -92,11 +95,11 @@ export function FleetSyncModal({ projectId, projectName, onClose, onSynced }: { 
       {view === 'scenes' ? <>
         <div className="fleet-dialog-heading"><div><h3>选择场景</h3><p>从 Fleet 场景中选择整场同步，或进入任务列表选择部分任务</p></div><form className="fleet-search" onSubmit={(event) => { event.preventDefault(); startLoading(); setSelectedScene(''); setScenePage(1); setSceneKeyword(sceneKeywordInput.trim()) }}><Search size={16} /><input value={sceneKeywordInput} onChange={(event) => setSceneKeywordInput(event.target.value)} placeholder="搜索场景名称" /><button type="submit">查询</button></form></div>
         <div className="fleet-scene-grid">{loading ? <div className="fleet-dialog-empty">正在读取 Fleet 场景...</div> : scenes.map((scene) => <button type="button" className={selectedScene === scene.scene ? 'selected' : ''} key={scene.scene} onClick={() => setSelectedScene(scene.scene)}><i className="fleet-radio" /><span><strong>{scene.scene}</strong><small>{scene.taskCount} 个任务 · {scene.videoCount} 个视频 · {duration(scene.totalDuration)}</small></span></button>)}{!loading && !scenes.length && <div className="fleet-dialog-empty">未找到可同步场景</div>}</div>
-        <div className="fleet-dialog-pagination"><span>{sceneTotal == null ? `第 ${scenePage} 页` : `共 ${sceneTotal} 个场景`}</span><button type="button" disabled={scenePage <= 1 || loading} onClick={() => { startLoading(); setSelectedScene(''); setScenePage((page) => page - 1) }}><ChevronLeft size={15} /></button><b>{scenePage}</b><button type="button" disabled={!sceneHasNext || loading} onClick={() => { startLoading(); setSelectedScene(''); setScenePage((page) => page + 1) }}><ChevronRight size={15} /></button></div>
+        <div className="fleet-dialog-pagination"><span>{sceneTotal == null ? `第 ${scenePage} 页` : `共 ${sceneTotal} 个场景`}</span><PaginationJump page={scenePage} pages={scenePages} disabled={loading} onChange={(next) => { startLoading(); setSelectedScene(''); setScenePage(next) }} /></div>
       </> : <>
         <div className="fleet-dialog-heading"><div><h3>{selectedScene}</h3><p>选择需要同步的 Fleet 任务</p></div><form className="fleet-search" onSubmit={(event) => { event.preventDefault(); startLoading(); setTaskPage(1); setTaskKeyword(taskKeywordInput.trim()) }}><Search size={16} /><input value={taskKeywordInput} onChange={(event) => setTaskKeywordInput(event.target.value)} placeholder="搜索任务 ID、名称、设备或人员" /><button type="submit">查询</button></form></div>
         <div className="fleet-task-table-wrap"><table className="fleet-task-table"><thead><tr><th><input type="checkbox" checked={currentPageSelected} disabled={!selectableTasks.length} onChange={togglePage} aria-label="选择当前页可同步任务" /></th><th>任务编号 / 任务路径</th><th>设备 / 人员</th><th>视频数</th><th>当前项目已同步</th><th>可同步</th></tr></thead><tbody>{loading ? <tr><td colSpan={6}><div className="fleet-dialog-empty">正在读取 Fleet 任务...</div></td></tr> : tasks.map((task) => <tr key={task.id}><td><input type="checkbox" checked={selectedTaskIds.has(task.id)} disabled={!task.availableCount} onChange={() => toggleTask(task.id)} aria-label={`选择 ${task.externalTaskId}`} /></td><td><strong>{task.externalTaskId}</strong><small>{task.path || task.name || '-'}</small></td><td><span>{[task.device, task.operator].filter(Boolean).join(' / ') || '-'}</span></td><td>{task.videoCount}</td><td>{task.syncedCount}</td><td><b className={task.availableCount ? 'available' : ''}>{task.availableCount}</b></td></tr>)}{!loading && !tasks.length && <tr><td colSpan={6}><div className="fleet-dialog-empty">未找到匹配任务</div></td></tr>}</tbody></table></div>
-        <div className="fleet-task-summary"><span>已选 <b>{selectedTaskIds.size}</b> 个任务</span><span>预计同步 <b>{selectedAvailable}</b> 个视频</span><span>总时长 <b>{duration(selectedDuration)}</b></span><div className="fleet-dialog-pagination"><button type="button" disabled={taskPage <= 1 || loading} onClick={() => { startLoading(); setTaskPage((page) => page - 1) }}><ChevronLeft size={15} /></button><b>{taskPage}</b><button type="button" disabled={!taskHasNext || loading} onClick={() => { startLoading(); setTaskPage((page) => page + 1) }}><ChevronRight size={15} /></button></div></div>
+        <div className="fleet-task-summary"><span>已选 <b>{selectedTaskIds.size}</b> 个任务</span><span>预计同步 <b>{selectedAvailable}</b> 个视频</span><span>总时长 <b>{duration(selectedDuration)}</b></span><PaginationJump page={taskPage} pages={taskPages} disabled={loading} onChange={(next) => { startLoading(); setTaskPage(next) }} /></div>
       </>}
       {error && <p className="inline-error fleet-sync-error">{error}</p>}
     </div>

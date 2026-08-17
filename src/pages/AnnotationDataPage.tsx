@@ -1,11 +1,13 @@
-import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Database, Eye, Search } from 'lucide-react'
+import { ArrowLeft, ChevronDown, CircleAlert, Database, Eye, Search } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
+import { PaginationJump } from '../components/PaginationJump'
 import { annotationDataApi } from '../services/annotationDataApi'
 import { projectApi } from '../services/managementApi'
 import type { SessionResponse, StorageStatus, TaskNode, VideoListItem } from '../types/api'
 import { FleetSyncModal } from './ProjectManagementPage'
+import { formatDateTime } from '../utils/date'
 
 const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const taskStatuses = [{ value: '', label: '全部状态' }, { value: 'pending', label: '待处理' }, { value: 'assigned', label: '已分配' }, { value: 'in_progress', label: '处理中' }, { value: 'submitted', label: '已提交' }, { value: 'completed', label: '已完成' }]
@@ -77,11 +79,11 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
         <td><span className={`status-tag ${video.taskStatus}`}>{statusLabels[video.taskStatus] || video.taskStatus || '-'}</span></td>
         <td><span className="node-tag blue">{nodeLabels[video.currentNode]}</span></td><td>{video.currentAssigneeId || '未分配'}</td>
         <td><span className={`storage-tag ${video.storageStatus}`} title={video.storageError}>{storageTabs.find((item) => item.value === video.storageStatus)?.label}</span>{video.storageError && <small className="storage-error" title={video.storageError}>{video.storageError}</small>}</td>
-        <td>{duration(video.duration)}</td><td>{fileSize(video.fileSize)}</td><td><code title={video.uri}>{video.ossBucket && video.ossKey ? `${video.ossBucket}/${video.ossKey}` : video.uri || '—'}</code></td><td>{video.updatedAt || '-'}</td>
+        <td>{duration(video.duration)}</td><td>{fileSize(video.fileSize)}</td><td><code title={video.uri}>{video.ossBucket && video.ossKey ? `${video.ossBucket}/${video.ossKey}` : video.uri || '—'}</code></td><td>{formatDateTime(video.updatedAt)}</td>
         <td><div className="row-actions"><button type="button" disabled={!video.taskId || video.storageStatus === 'missing'} onClick={() => preview(video)}><Eye size={15} />预览</button></div></td>
       </tr>)}
       {!loading && !items.length && <tr><td colSpan={12}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
     </tbody></table></div>
-    <footer className="management-footer"><span>共 {total} 条</span><div className="pagination"><button disabled={page <= 1 || loading} type="button" onClick={() => setPage((value) => value - 1)}><ChevronLeft size={15} /></button><strong>{page}</strong><span>/ {pages}</span><button disabled={page >= pages || loading} type="button" onClick={() => setPage((value) => value + 1)}><ChevronRight size={15} /></button><span>{pageSize}条/页</span></div></footer>
+    <footer className="management-footer"><span>共 {total} 条</span><div className="pagination-with-size"><PaginationJump page={page} pages={pages} disabled={loading} onChange={setPage} /><span>{pageSize}条/页</span></div></footer>
   </section></section>{fleetOpen && <FleetSyncModal projectId={projectId} projectName={projectName} onClose={() => setFleetOpen(false)} onSynced={fleetSynced} />}{toast && <div className="toast">{toast}</div>}</AppShell>
 }
