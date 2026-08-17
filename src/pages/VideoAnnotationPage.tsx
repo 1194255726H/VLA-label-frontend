@@ -10,6 +10,7 @@ import { annotationApi, normalizeAnnotationResult } from '../services/annotation
 import type { AnnotationResult, AnnotationSegment, AnnotationWorkspace, SessionResponse } from '../types/api'
 
 const nodeLabels = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
+const TIMELINE_FRAME_WIDTH = 6
 
 const keyboardShortcuts = [
   { keys: ['Space'], title: '播放 / 暂停', description: '切换当前视频的播放状态' },
@@ -25,13 +26,13 @@ const keyboardShortcuts = [
 ]
 
 const timelineShortcuts = [
-  { keys: ['单击', '双击'], title: '预览 / 定位片段', description: '单击片段进入预览；双击跳到片段内的点击位置' },
+  { keys: ['点击顶部定位带'], title: '定位当前帧', description: '点击红色播放头三角形所在的顶部区域移动当前帧；下方轨道主体用于拖动' },
   { keys: ['拖动色块'], title: '移动 / 调整区间', description: '普通片段按所在轨道编辑；红色无效区间统一在第三行小目标详情轨道移动或调整两侧边缘' },
   { keys: ['两层回显'], title: '一份无效区间', description: '单次任务行显示只读投影，小目标详情行显示可编辑完整色块；全局行不重复展示' },
   { keys: ['拖动播放头'], title: '逐帧定位', description: '拖动红色播放头预览，松开后定位视频画面' },
   { keys: ['滚轮'], title: '平移时间轴', description: '鼠标放在单次任务或小目标轨道：向上前移，向下后移' },
   { keys: ['Alt + 滚轮'], title: '缩放时间轴', description: '在单次任务或小目标轨道以鼠标位置为中心：向上放大，向下缩小' },
-  { keys: ['切换单次任务'], title: '恢复小目标视图', description: '每个单次任务分别记忆小目标轨道的缩放和平移；首次进入自动适配，切回恢复上次视图' },
+  { keys: ['切换单次任务'], title: '恢复小目标视图', description: '进入或切换单次任务时，小目标轨道自动恢复为当前单次任务的完整范围（100%）' },
   { keys: ['拖动蓝色框'], title: '查看前后时间', description: '第一行只读显示单次任务色块分布；拖动蓝色框切换单次任务时间轴当前显示范围' },
   { keys: ['拖动两侧', '双击'], title: '调整范围 / 恢复全部', description: '拖动蓝色框两侧调整显示范围；双击蓝色框恢复完整时间轴（100%）' },
   { keys: ['双击轨道空白'], title: '恢复当前轨道', description: '单次任务轨道恢复整段视频；小目标轨道恢复当前单次任务片段的完整范围' },
@@ -159,8 +160,7 @@ function viewportFromWheel(domainStart: number, domainEnd: number, viewport: Tim
   return clampViewport(domainStart, domainEnd, nextStart, nextStart + nextSpan, minimumFrames)
 }
 
-function frameFromPointer(clientX: number, rect: Pick<DOMRect, 'left' | 'width' | 'right'>, viewport: TimelineViewport) {
-  if (clientX >= rect.right - 24) return viewport.endFrame
+function frameFromPointer(clientX: number, rect: Pick<DOMRect, 'left' | 'width'>, viewport: TimelineViewport) {
   const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)))
   return Math.max(viewport.startFrame, Math.min(viewport.endFrame, Math.round(viewport.startFrame + ratio * (viewport.endFrame - viewport.startFrame))))
 }
@@ -197,14 +197,13 @@ function segmentNumber(item: AnnotationSegment, fallbackIndex: number) {
   return item.type === 'goal' ? sequence : `A${sequence}`
 }
 
-function TimelineLane({ level, label, items, childItems = [], draft, totalFrames, rangeStartFrame = 0, rangeEndFrame = totalFrames, viewport, frameRate, currentFrame, selectedId, invalidRanges, readonly, showPlayhead, onSeek, onScrubStart, onScrubPreview, onScrubEnd, onSelect, onSelectInvalid, onClearSelection, onPreciseSeek, onHover, onEditStart, onSegmentPreview, onInvalidPreview, onEditFinish, onViewportChange }: {
+function TimelineLane({ level, label, items, childItems = [], draft, totalFrames, rangeStartFrame = 0, rangeEndFrame = totalFrames, viewport, frameRate, currentFrame, selectedId, invalidRanges, readonly, showPlayhead, onSeek, onScrubStart, onScrubPreview, onScrubEnd, onSelect, onSelectInvalid, onPreciseSeek, onHover, onEditStart, onSegmentPreview, onInvalidPreview, onEditFinish, onViewportChange }: {
   level: 'goal' | 'action'
   label: string; items: AnnotationSegment[]; totalFrames: number; rangeStartFrame?: number; rangeEndFrame?: number; currentFrame: number; selectedId?: string
   childItems?: AnnotationSegment[]; draft?: TimelineDraft
   viewport?: TimelineViewport
   frameRate: number; invalidRanges?: AnnotationResult['invalidRanges']; readonly?: boolean; onSeek: (frame: number) => void; onSelect: (item: AnnotationSegment, clickedFrame?: number) => void
   onSelectInvalid?: (range: AnnotationResult['invalidRanges'][number]) => void
-  onClearSelection?: (level: 'goal' | 'action', frame: number) => void
   onPreciseSeek?: (level: 'goal' | 'action', frame: number) => void
   onScrubStart?: () => boolean; onScrubPreview?: (frame: number) => void; onScrubEnd?: (frame: number, restorePlayback: boolean) => void
   onHover?: (frame?: number) => void
@@ -222,14 +221,15 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
   const [panning, setPanning] = useState(false)
   const domainStart = Math.max(0, Math.min(totalFrames, rangeStartFrame))
   const domainEnd = Math.max(domainStart, Math.min(totalFrames, rangeEndFrame))
-  const minimumFrames = level === 'goal' ? Math.max(Math.round((domainEnd - domainStart) * .08), Math.round(frameRate * 2)) : 1
+  const minimumFrames = Math.max(1, Math.floor(trackWidth / TIMELINE_FRAME_WIDTH))
   const normalizedViewport = clampViewport(domainStart, domainEnd, viewport?.startFrame ?? domainStart, viewport?.endFrame ?? domainEnd, minimumFrames)
   const safeStart = normalizedViewport.startFrame
   const safeEnd = normalizedViewport.endFrame
   const safeSpan = Math.max(1, safeEnd - safeStart)
   const domainSpan = Math.max(1, domainEnd - domainStart)
   const zoomRatio = Math.max(1, domainSpan / safeSpan)
-  const { major: majorRulerStep, minor: minorRulerStep } = frameRulerSteps(safeSpan, trackWidth, level === 'goal' ? 8 : 5)
+  const pixelsPerFrame = trackWidth / safeSpan
+  const { major: majorRulerStep, minor: minorRulerStep } = frameRulerSteps(safeSpan, trackWidth, TIMELINE_FRAME_WIDTH)
   const firstTick = Math.ceil(safeStart / minorRulerStep) * minorRulerStep
   const rulerFrames: number[] = []
   for (let frame = firstTick; frame <= safeEnd; frame += minorRulerStep) rulerFrames.push(frame)
@@ -303,7 +303,6 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
     const moveAnchorOffset = moveAnchorFrame - originStart
     let changed = false
     onEditStart?.(`${mode === 'move' ? '移动' : mode === 'start' ? '调整起点' : '调整终点'} ${item.code || ''}`)
-    onSeek(mode === 'move' ? moveAnchorFrame : mode === 'start' ? originStart : originEnd)
     function move(pointer: PointerEvent) {
       const delta = Math.round((pointer.clientX - originX) / trackWidth * safeSpan)
       if (mode === 'move' && Math.abs(pointer.clientX - originX) <= 5) return
@@ -316,7 +315,11 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
       onSeek(mode === 'move' ? actualStart + moveAnchorOffset : mode === 'start' ? actualStart : actualEnd)
     }
     function cleanup() { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel); window.removeEventListener('blur', cancel); window.removeEventListener('keydown', keydown) }
-    function end() { suppressClickRef.current = changed; cleanup(); onEditFinish?.(changed) }
+    function end() {
+      suppressClickRef.current = changed
+      cleanup()
+      onEditFinish?.(changed)
+    }
     function cancel() { cleanup(); onEditFinish?.(false) }
     function keydown(key: KeyboardEvent) { if (key.key === 'Escape') cancel() }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel); window.addEventListener('blur', cancel); window.addEventListener('keydown', keydown)
@@ -360,15 +363,15 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
     function cancel() { cleanup(); onScrubEnd?.(currentFrame, restorePlayback) }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel)
   }
-  return <div className={`annotation-lane ${level}-lane`}><span className="annotation-lane-label">{label}</span><div ref={trackRef} className={`annotation-track${panning ? ' panning' : ''}`} title={`${label}时间轴 · ${zoomRatio.toFixed(2)} 倍 · F${safeStart} - F${safeEnd}`} onWheel={handleWheel} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('.timeline-block,.invalid-block')) onViewportChange?.({ startFrame: domainStart, endFrame: domainEnd }) }} onPointerMove={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onHover?.(frameFromPointer(event.clientX, rect, normalizedViewport)) }} onPointerLeave={() => onHover?.()} onClick={(event) => {
+  return <div className={`annotation-lane ${level}-lane`}><span className="annotation-lane-label">{label}</span><div ref={trackRef} className={`annotation-track${panning ? ' panning' : ''}`} title={`${label}时间轴 · ${zoomRatio.toFixed(2)} 倍 · F${safeStart} - F${safeEnd}`} onWheel={handleWheel} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('.timeline-block,.invalid-block')) onViewportChange?.({ startFrame: domainStart, endFrame: domainEnd }) }} onPointerMove={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onHover?.(frameFromPointer(event.clientX, rect, normalizedViewport)) }} onPointerLeave={() => onHover?.()} onClick={() => {
     if (suppressClickRef.current) { suppressClickRef.current = false; return }
-    const rect = event.currentTarget.getBoundingClientRect(); const frame = frameFromPointer(event.clientX, rect, normalizedViewport); onClearSelection?.(level, frame); onSeek(frame)
   }} onPointerDown={(event) => {
     if ((event.target as HTMLElement).closest('.timeline-block,.invalid-block')) return
     startViewportPan(event)
   }}>
+    <button type="button" className="timeline-seek-strip" aria-label={`${label}时间定位区域`} title="点击定位当前帧" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); const rect = trackRef.current?.getBoundingClientRect(); if (rect) onSeek(frameFromPointer(event.clientX, rect, normalizedViewport)) }} onDoubleClick={(event) => event.stopPropagation()} />
     {(level === 'action' || zoomRatio >= 2) && <div className="timeline-ruler" aria-hidden="true">{rulerFrames.map((frame) => { const major = frame === safeStart || frame === safeEnd || frame % majorRulerStep === 0; const onDark = invalidRanges?.some((range) => frame >= range.startFrame && frame < range.endFrame) || items.some((item) => selectedId === item.id && frame >= item.startFrame && frame < item.endFrame); const pixel = Math.min(trackWidth - 1, Math.max(0, Math.round((frame - safeStart) / safeSpan * trackWidth))); return <i className={`${major ? 'major' : 'minor'}${onDark ? ' on-dark' : ''}`} key={frame} style={{ left: pixel }} /> })}</div>}
-    <span className="timeline-zoom-readout">{zoomRatio.toFixed(zoomRatio < 10 ? 2 : 1)}x · {safeSpan}帧</span>
+    <span className="timeline-zoom-readout">{zoomRatio.toFixed(zoomRatio < 10 ? 2 : 1)}x · {safeSpan}帧 · {pixelsPerFrame.toFixed(1)}px/帧</span>
     {level === 'action' && invalidRanges?.flatMap((range) => {
       const visibleStart = Math.max(safeStart, range.startFrame)
       const visibleEnd = Math.min(safeEnd, range.endFrame)
@@ -409,7 +412,7 @@ function GlobalTimeline({ goals, invalidRanges, draft, selectedRange, totalFrame
     const originX = event.clientX; const origin = normalized; const span = origin.endFrame - origin.startFrame
     function move(pointer: PointerEvent) {
       const delta = Math.round((pointer.clientX - originX) / trackWidth * safeTotal)
-      const minimum = Math.max(Math.round(totalFrames * .08), Math.round(frameRate * 2))
+      const minimum = Math.max(1, Math.floor(trackWidth / TIMELINE_FRAME_WIDTH))
       if (mode === 'start') onViewportChange(clampViewport(0, totalFrames, origin.startFrame + delta, origin.endFrame, minimum))
       else if (mode === 'end') onViewportChange(clampViewport(0, totalFrames, origin.startFrame, origin.endFrame + delta, minimum))
       else onViewportChange(clampViewport(0, totalFrames, origin.startFrame + delta, origin.startFrame + delta + span, minimum))
@@ -487,7 +490,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [goalViewport, setGoalViewport] = useState<TimelineViewport>({ startFrame: 0, endFrame: 0 })
   const [atomicViewports, setAtomicViewports] = useState<Record<string, TimelineViewport>>({})
   const [editing, setEditing] = useState<string>()
-  const [localPlayheadLevel, setLocalPlayheadLevel] = useState<'goal' | 'action'>()
   const [scrubbing, setScrubbing] = useState(false)
   const videoId = searchParams.get('video_id') || ''
   const forceLock = Boolean(videoId && forceLockVideoId === videoId)
@@ -542,7 +544,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     : result?.goals.find((item) => item.id === selected?.parentId || item.id === activeGoalId || (selectedInvalidRange && item.startFrame <= selectedInvalidRange.startFrame && item.endFrame >= selectedInvalidRange.endFrame))
   const visibleActions = selectedGoal ? result?.actions.filter((item) => item.parentId === selectedGoal.id) || [] : []
   const goalTimelineViewport = useMemo(() => result && goalViewport.endFrame > goalViewport.startFrame
-    ? clampViewport(0, result.totalFrames, goalViewport.startFrame, goalViewport.endFrame, Math.max(Math.round(result.totalFrames * .08), Math.round(result.frameRate * 2)))
+    ? clampViewport(0, result.totalFrames, goalViewport.startFrame, goalViewport.endFrame)
     : { startFrame: 0, endFrame: result?.totalFrames || 0 }, [goalViewport, result])
   const atomicTimelineViewport = useMemo(() => selectedGoal
     ? clampViewport(selectedGoal.startFrame, selectedGoal.endFrame, atomicViewports[selectedGoal.id]?.startFrame ?? selectedGoal.startFrame, atomicViewports[selectedGoal.id]?.endFrame ?? selectedGoal.endFrame)
@@ -575,15 +577,22 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     setCurrentFrame(next)
   }, [result, workspace?.videoUrl])
 
+  function resetAtomicViewport(goal: AnnotationSegment) {
+    setAtomicViewports((current) => ({
+      ...current,
+      [goal.id]: { startFrame: goal.startFrame, endFrame: goal.endFrame },
+    }))
+  }
+
   function selectSegment(item: AnnotationSegment, clickedFrame?: number) {
     videoRef.current?.pause()
+    const nextGoal = item.type === 'goal' ? item : result?.goals.find((goal) => goal.id === item.parentId)
+    if (nextGoal && (item.type === 'goal' || nextGoal.id !== selectedGoal?.id)) resetAtomicViewport(nextGoal)
     setSelectedId(item.id)
     setActiveGoalId(item.type === 'goal' ? item.id : item.parentId)
-    setLocalPlayheadLevel(undefined)
-    seek(item.type === 'goal' && clickedFrame !== undefined ? clickedFrame : item.startFrame)
+    if (clickedFrame === undefined) seek(item.startFrame)
     if (item.type === 'goal') {
-      const minimum = result ? Math.max(Math.round(result.totalFrames * .08), Math.round(result.frameRate * 2)) : 1
-      if (result) setGoalViewport(revealRange(0, result.totalFrames, goalTimelineViewport, item.startFrame, item.endFrame, minimum))
+      if (result) setGoalViewport(revealRange(0, result.totalFrames, goalTimelineViewport, item.startFrame, item.endFrame))
     } else {
       const parent = result?.goals.find((goal) => goal.id === item.parentId)
       if (parent) setAtomicViewports((current) => ({ ...current, [parent.id]: revealRange(parent.startFrame, parent.endFrame, current[parent.id] || { startFrame: parent.startFrame, endFrame: parent.endFrame }, item.startFrame, item.endFrame) }))
@@ -633,15 +642,14 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   function handleVideoTimeUpdate(media: HTMLVideoElement) {
     const frame = Math.max(0, Math.min(result?.totalFrames || 0, Math.floor((media.currentTime - (result?.mediaStartTime || 0)) * (result?.frameRate || 30) + 1e-7)))
-    if (selected && frame >= selected.endFrame) {
+    if (selected && !media.paused && frame >= selected.endFrame) {
       media.pause()
       seek(selected.endFrame)
       return
     }
     setCurrentFrame(frame)
     if (!playing || !result) return
-    const minimum = Math.max(Math.round(result.totalFrames * .08), Math.round(result.frameRate * 2))
-    const nextGoalViewport = followFrame(0, result.totalFrames, goalTimelineViewport, frame, minimum)
+    const nextGoalViewport = followFrame(0, result.totalFrames, goalTimelineViewport, frame)
     if (!sameViewport(nextGoalViewport, goalTimelineViewport)) setGoalViewport(nextGoalViewport)
     if (selectedGoal && atomicTimelineViewport) {
       const nextAtomicViewport = followFrame(selectedGoal.startFrame, selectedGoal.endFrame, atomicTimelineViewport, frame)
@@ -665,11 +673,9 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   function clearSelection(level?: 'goal' | 'action') {
     setSelectedId(undefined)
     if (!level || level === 'goal') setActiveGoalId(undefined)
-    setLocalPlayheadLevel(level)
   }
 
-  function preciseSeek(level: 'goal' | 'action', frame: number) {
-    setLocalPlayheadLevel(level)
+  function preciseSeek(_level: 'goal' | 'action', frame: number) {
     seek(frame)
   }
 
@@ -733,7 +739,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       const sequence = result.nextGoalSequence
       const id = `${workspace?.dataName || 'VLA'}-${String(sequence).padStart(3, '0')}`
       const item: AnnotationSegment = { id, sequence, code: id, labelCode: '', type: 'goal', segmentType: 'goal', startFrame, endFrame, color: '#2563EB', descriptionZh: '', descriptionSource: 'user', nextAtomicSequence: 1, atomicActions: [] }
-      mutate({ ...result, nextGoalSequence: sequence + 1, nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [item.id]: 1 }, goals: [...result.goals, item].sort((a, b) => a.startFrame - b.startFrame) }); setSelectedId(item.id); return
+      mutate({ ...result, nextGoalSequence: sequence + 1, nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [item.id]: 1 }, goals: [...result.goals, item].sort((a, b) => a.startFrame - b.startFrame) }); resetAtomicViewport(item); setSelectedId(item.id); return
     }
     if (!selectedGoal) return setToast('请先选择一个单次任务')
     const siblings = result.actions.filter((item) => item.parentId === selectedGoal.id)
@@ -930,11 +936,11 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       if (!readonly && event.key.toLowerCase() === 'q' && !mark) setMark({ kind: hoverPoint?.level === 'action' || (!hoverPoint && selectedGoal) ? 'action' : 'goal', frame: pointerFrame })
       if (!readonly && event.key.toLowerCase() === 'w' && !mark) {
         const hoveredGoal = hoverPoint?.level === 'goal' ? result?.goals.find((goal) => pointerFrame >= goal.startFrame && pointerFrame < goal.endFrame) : selectedGoal
-        if (hoveredGoal) { setActiveGoalId(hoveredGoal.id); if (hoveredGoal.id !== selectedGoal?.id) setSelectedId(hoveredGoal.id); setMark({ kind: 'no_action', frame: pointerFrame }) }
+        if (hoveredGoal) { setActiveGoalId(hoveredGoal.id); if (hoveredGoal.id !== selectedGoal?.id) { resetAtomicViewport(hoveredGoal); setSelectedId(hoveredGoal.id) }; setMark({ kind: 'no_action', frame: pointerFrame }) }
       }
       if (!readonly && event.key.toLowerCase() === 'x' && !mark) {
         const parent = result?.goals.find((goal) => pointerFrame >= goal.startFrame && pointerFrame < goal.endFrame)
-        if (parent) { setActiveGoalId(parent.id); if (parent.id !== selectedGoal?.id) setSelectedId(parent.id); setMark({ kind: 'invalid', frame: pointerFrame }) }
+        if (parent) { setActiveGoalId(parent.id); if (parent.id !== selectedGoal?.id) { resetAtomicViewport(parent); setSelectedId(parent.id) }; setMark({ kind: 'invalid', frame: pointerFrame }) }
       }
       if ((event.key === 'Backspace' || event.key === 'Delete') && result && (selected || selectedId?.startsWith('invalid:'))) {
         event.preventDefault()
@@ -1020,8 +1026,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <header><div><strong>{draftRange ? `正在创建：${draftRange.level === 'goal' ? '单次任务' : draftRange.level === 'invalid' ? '视频无效区间' : '小目标'}` : selectedGoal ? `当前单次任务：${selectedGoal.labelName || selectedGoal.code || '未选择标签'}` : '当前创建：单次任务'}</strong><span>{draftRange ? `${timeText(draftRange.startFrame / result.frameRate)} - ${timeText(draftRange.endFrame / result.frameRate)} · 松开 ${mark?.kind === 'no_action' ? 'W' : mark?.kind === 'invalid' ? 'X' : 'Q'} 完成，Esc 取消` : 'Q 普通片段 · W 无动作 · X 视频无效区间'}</span></div><div>{selected && <button type="button" onClick={() => clearSelection()}>退出预览</button>}<button type="button" disabled={readonly || !history.undo} onClick={undo} title="撤销"><Undo2 size={14} />撤销</button><button type="button" disabled={readonly || !history.redo} onClick={redo} title="重做"><Redo2 size={14} />重做</button></div></header>
       <div className="timeline-body">
         <GlobalTimeline goals={result.goals} invalidRanges={result.invalidRanges} draft={draftRange} selectedRange={selected || selectedInvalidRange} totalFrames={result.totalFrames} frameRate={result.frameRate} currentFrame={currentFrame} viewport={goalTimelineViewport} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onClearSelection={() => clearSelection()} />
-        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onClearSelection={clearSelection} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onEditFinish={finishEdit} onSelect={selectSegment} />
-        {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead={!selectedId || localPlayheadLevel === 'action'} onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onClearSelection={clearSelection} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`); setLocalPlayheadLevel(undefined) }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
+        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onEditFinish={finishEdit} onSelect={selectSegment} />
+        {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`) }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
     {shortcutsOpen && <Modal title="快捷键与操作" onClose={() => setShortcutsOpen(false)}><div className="shortcut-guide"><ShortcutColumn title="键盘快捷键" items={keyboardShortcuts} /><ShortcutColumn title="时间轴操作" items={timelineShortcuts} /></div></Modal>}
