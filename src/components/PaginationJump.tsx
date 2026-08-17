@@ -20,7 +20,7 @@ export function PaginationJump({ page, pages, disabled = false, onChange }: Pagi
     }
     const next = Math.min(maxPage, Math.max(1, requested))
     if (inputRef.current) inputRef.current.value = String(next)
-    onChange(next)
+    if (next !== page) onChange(next)
   }
 
   function move(next: number) {

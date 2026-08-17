@@ -7,6 +7,8 @@ export interface User {
   avatar?: string
   roles: string[]
   roleLabels: string[]
+  isStaff?: boolean
+  isSuperuser?: boolean
   defaultRoute: string
 }
 

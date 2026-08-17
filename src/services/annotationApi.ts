@@ -9,6 +9,9 @@ const workspaceRequests = new Map<string, Promise<AnnotationWorkspace>>()
 const taskNodes = new Map<string, TaskNode>()
 const taskVideoIds = new Map<string, string>()
 
+export type VideoUnlockScope = { videoId: string } | { taskId: string } | { projectId: string }
+export interface VideoUnlockResult { unlockedCount: number; scope: 'video_id' | 'task_id' | 'project_id'; scopeId: number }
+
 function delay() {
   return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay))
 }
@@ -166,6 +169,30 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
 }
 
 export const annotationApi = {
+  async nextVideo(projectId: string, node: TaskNode): Promise<string | null> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return null }
+    if (!projectId) throw new Error('缺少项目 ID，无法获取下一条视频')
+    const params = new URLSearchParams({ node: backendNode(node) })
+    const response = await request<{ video_id: number | null }>(`/api/projects/${encodeURIComponent(projectId)}/workbench/next-video?${params}`)
+    return response.video_id === null || response.video_id === undefined ? null : String(response.video_id)
+  },
+
+  async unlockVideos(scope: VideoUnlockScope): Promise<VideoUnlockResult> {
+    const [scopeKey, rawId] = 'videoId' in scope
+      ? ['video_id', scope.videoId] as const
+      : 'taskId' in scope
+        ? ['task_id', scope.taskId] as const
+        : ['project_id', scope.projectId] as const
+    const scopeId = Number(rawId)
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return { unlockedCount: 0, scope: scopeKey, scopeId: Number.isInteger(scopeId) ? scopeId : 0 } }
+    if (!Number.isInteger(scopeId)) throw new Error('解锁范围 ID 必须是整数')
+    const response = await request<{ unlocked_count: number; scope: VideoUnlockResult['scope']; scope_id: number }>('/api/tasks/unlock-videos', {
+      method: 'POST',
+      body: JSON.stringify({ [scopeKey]: scopeId }),
+    })
+    return { unlockedCount: Number(response.unlocked_count || 0), scope: response.scope, scopeId: Number(response.scope_id) }
+  },
+
   async getWorkspace(taskId: string, viewOnly = false, videoId = '', projectId = '', forceLock = false): Promise<AnnotationWorkspace> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()

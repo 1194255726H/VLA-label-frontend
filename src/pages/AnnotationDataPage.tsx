@@ -84,6 +84,6 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       </tr>)}
       {!loading && !items.length && <tr><td colSpan={12}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
     </tbody></table></div>
-    <footer className="management-footer"><span>共 {total} 条</span><div className="pagination-with-size"><PaginationJump page={page} pages={pages} disabled={loading} onChange={setPage} /><span>{pageSize}条/页</span></div></footer>
+    <footer className="management-footer"><span>共 {total} 条</span><div className="pagination-with-size"><PaginationJump page={page} pages={pages} disabled={loading} onChange={(next) => { setLoading(true); setPage(next) }} /><span>{pageSize}条/页</span></div></footer>
   </section></section>{fleetOpen && <FleetSyncModal projectId={projectId} projectName={projectName} onClose={() => setFleetOpen(false)} onSynced={fleetSynced} />}{toast && <div className="toast">{toast}</div>}</AppShell>
 }

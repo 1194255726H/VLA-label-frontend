@@ -480,7 +480,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
   const [errorCode, setErrorCode] = useState('')
-  const [forceLockVideoId, setForceLockVideoId] = useState('')
+  const [workspaceReloadKey, setWorkspaceReloadKey] = useState(0)
+  const [unlockingVideo, setUnlockingVideo] = useState(false)
   const [toast, setToast] = useState('')
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
@@ -492,12 +493,15 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [editing, setEditing] = useState<string>()
   const [scrubbing, setScrubbing] = useState(false)
   const videoId = searchParams.get('video_id') || ''
-  const forceLock = Boolean(videoId && forceLockVideoId === videoId)
-  const isAdmin = session.account.roles.some((role) => ['admin', 'administrator', 'super_admin'].includes(role.toLowerCase())) || session.account.roleLabels.includes('管理员')
+  const adminIdentities = [...session.account.roles, ...session.account.roleLabels, session.account.account]
+    .map((value) => value.toLowerCase().replace(/[\s_-]/g, ''))
+  const isAdmin = Boolean(session.account.isStaff || session.account.isSuperuser
+    || adminIdentities.some((value) => ['admin', 'systemadmin', 'superadmin', 'administrator', 'superuser', '管理员', '超级管理员'].includes(value)))
+  const isVideoLockedError = errorCode === 'video_locked' || /video.*lock|lock.*video/i.test(errorCode) || /视频.*(?:锁|占用|其他人处理)/.test(error)
 
   useEffect(() => {
     let active = true
-    annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1', videoId, searchParams.get('project_id') || '', forceLock).then((data) => {
+    annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1', videoId, searchParams.get('project_id') || '').then((data) => {
       if (!active) return
       undoStack.current = []
       redoStack.current = []
@@ -506,6 +510,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       setActiveGoalId(undefined)
       setAtomicViewports({})
       setEditing(undefined)
+      setDirty(false)
+      setSubmitted(false)
       setWorkspace(data)
       setResult(data.result)
       setRevision(data.currentRevision)
@@ -518,7 +524,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       setErrorCode(apiError.code || '')
     })
     return () => { active = false }
-  }, [forceLock, searchParams, taskId, videoId])
+  }, [searchParams, taskId, videoId, workspaceReloadKey])
 
   useEffect(() => {
     if (!workspace?.session) return
@@ -868,7 +874,42 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (missingSkill) { setSelectedId(missingSkill.id); seek(missingSkill.startFrame); return setToast('普通小目标必须选择项目原子技能') }
     const fullyInvalid = result.actions.find((item) => result.invalidRanges.some((range) => range.startFrame <= item.startFrame && range.endFrame >= item.endFrame))
     if (fullyInvalid) { setSelectedId(fullyInvalid.id); return setToast('小目标被无效区间完全覆盖，请调整或删除') }
-    try { const nextRevision = dirty ? await save(false) : revision; await annotationApi.submit(taskId, result, nextRevision); setSubmitted(true); setToast('任务提交成功') } catch { /* save and submit report their own errors */ }
+    try {
+      const nextRevision = dirty ? await save(false) : revision
+      await annotationApi.submit(taskId, result, nextRevision)
+      setSubmitted(true)
+      try {
+        await annotationApi.unlockVideos({ taskId })
+        const nextVideoId = await annotationApi.nextVideo(workspace?.projectId || searchParams.get('project_id') || '', workspace?.node || 'annotation')
+        if (nextVideoId) {
+          setToast('任务提交并解锁成功，正在进入下一条')
+          const params = new URLSearchParams({ video_id: nextVideoId, project_id: workspace?.projectId || searchParams.get('project_id') || '' })
+          navigate(`/annotation/${encodeURIComponent(taskId)}?${params}`, { replace: true })
+        } else {
+          setToast('任务提交并解锁成功，当前暂无下一条')
+          window.setTimeout(() => navigate('/workbench'), 700)
+        }
+      } catch (unlockError) {
+        setToast(`任务已提交，但解锁或获取下一条失败：${unlockError instanceof Error ? unlockError.message : '未知错误'}`)
+      }
+    } catch (reason) {
+      setToast(reason instanceof Error ? reason.message : '任务提交失败')
+    }
+  }
+
+  async function unlockVideoAndReload() {
+    if (!videoId || unlockingVideo) return
+    setUnlockingVideo(true)
+    try {
+      await annotationApi.unlockVideos({ videoId })
+      setError('')
+      setErrorCode('')
+      setWorkspaceReloadKey((value) => value + 1)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '视频解锁失败')
+    } finally {
+      setUnlockingVideo(false)
+    }
   }
 
   function addComment() {
@@ -969,7 +1010,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', cancelTemporary) }
   })
 
-  if (error) return <main className="annotation-load-state"><CircleAlert size={38} /><h1>无法打开视频标注工作台</h1><p>{error}</p>{errorCode === 'video_locked' && isAdmin && !forceLock && <button className="primary-button" type="button" onClick={() => { setError(''); setErrorCode(''); setForceLockVideoId(videoId) }}>接管并打开</button>}<button className={errorCode === 'video_locked' && isAdmin ? 'secondary-button' : 'primary-button'} type="button" onClick={() => navigate('/workbench')}>返回工作台</button></main>
+  if (error) return <main className="annotation-load-state"><CircleAlert size={38} /><h1>无法打开视频标注工作台</h1><p>{error}</p>{isVideoLockedError && isAdmin && <button className="primary-button" type="button" disabled={unlockingVideo} onClick={unlockVideoAndReload}>{unlockingVideo ? '正在解锁...' : '解锁并打开'}</button>}<button className={isVideoLockedError && isAdmin ? 'secondary-button' : 'primary-button'} type="button" onClick={() => navigate('/workbench')}>返回工作台</button></main>
   if (!workspace || !result) return <main className="annotation-load-state"><RotateCcw className="spinning" size={34} /><p>正在加载任务和标注结果...</p></main>
 
   function segmentListButton(item: AnnotationSegment, title: string) {

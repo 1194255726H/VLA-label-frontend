@@ -54,6 +54,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 function normalizeUser(payload: Record<string, unknown>): SessionResponse {
   const raw = (payload.account || payload) as Record<string, unknown>
+  const booleanValue = (...values: unknown[]) => values.some((value) => value === true || value === 1 || value === '1' || value === 'true')
   const account = {
     id: String(raw.id || raw.userCode || ''),
     account: String(raw.account || raw.username || ''),
@@ -61,6 +62,8 @@ function normalizeUser(payload: Record<string, unknown>): SessionResponse {
     avatar: raw.avatar ? String(raw.avatar) : undefined,
     roles: Array.isArray(raw.roles) ? raw.roles.map((role) => String((role as Record<string, unknown>).code || role)) : Array.isArray(raw.roleIds) ? raw.roleIds.map(String) : [],
     roleLabels: Array.isArray(raw.roles) ? raw.roles.map((role) => String((role as Record<string, unknown>).name || role)) : Array.isArray(raw.roleLabels) ? raw.roleLabels.map(String) : [],
+    isStaff: booleanValue(raw.is_staff, raw.isStaff, payload.is_staff, payload.isStaff),
+    isSuperuser: booleanValue(raw.is_superuser, raw.isSuperuser, payload.is_superuser, payload.isSuperuser),
     defaultRoute: '/workbench',
   }
   return { account, csrfToken: String(payload.csrfToken || ''), defaultRoute: '/workbench' }

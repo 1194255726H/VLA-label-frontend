@@ -48,7 +48,7 @@ function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskT
           <th>素材状态</th><th>时长</th><th>{tab === 'pending' ? '最后更新时间' : '提交时间'}</th><th className="action-column">操作</th>
         </tr></thead>
         <tbody>
-          {loading ? <tr><td colSpan={8}><div className="table-state"><RefreshCw className="spinning" size={25} /><span>正在加载视频...</span></div></td></tr> : items.length === 0 ? <tr><td colSpan={8}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video) => {
+          {!loading && (items.length === 0 ? <tr><td colSpan={8}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video) => {
             const action = actionFor(video, tab)
             const displayedStatus = tab === 'submitted' ? video.submittedDecision || 'submitted' : video.videoStatus
             return <tr key={video.id}>
@@ -61,9 +61,10 @@ function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskT
               <td>{tab === 'pending' ? formatDateTime(video.updatedAt) : formatDateTime(video.submittedAt || video.updatedAt)}</td>
               <td><div className="row-actions"><button type="button" disabled={action.disabled} onClick={() => openVideo(video)}>{action.label}</button></div></td>
             </tr>
-          })}
+          }))}
         </tbody>
       </table>
+      {loading && <div className="table-state table-loading-layer"><RefreshCw className="spinning" size={25} /><span>加载中...</span></div>}
     </div>
   )
 }
@@ -172,7 +173,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
               <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
             </div>
             <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} />
-            <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={setPageNo} /></footer>
+            <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={(next) => { setLoading(true); setPageNo(next) }} /></footer>
           </section>
 
           <aside className="workbench-side">
