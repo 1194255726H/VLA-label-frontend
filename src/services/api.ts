@@ -2,7 +2,6 @@ import { runtimeConfig } from '../config/runtime'
 import { mockClaimPool, mockProjects, mockTasks, mockUser } from '../mocks/data'
 import type {
   PasswordResetChallenge,
-  ClaimPoolItem,
   Project,
   SessionResponse,
   SmsChallenge,
@@ -14,12 +13,23 @@ import type {
 } from '../types/api'
 
 const SESSION_KEY = 'ilabel.session'
-const nodeLabelsForApi: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 let mutableTasks = mockTasks.map((item) => ({ ...item }))
 const mutablePool = mockClaimPool.map((item) => ({ ...item }))
+let pendingWorkbenchProjects: Promise<{ items: Array<Record<string, unknown>> }> | undefined
 
 function sleep() {
   return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay))
+}
+
+async function loadWorkbenchProjects() {
+  if (pendingWorkbenchProjects) return pendingWorkbenchProjects
+  const requestPromise = request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100')
+  pendingWorkbenchProjects = requestPromise
+  try {
+    return await requestPromise
+  } finally {
+    if (pendingWorkbenchProjects === requestPromise) pendingWorkbenchProjects = undefined
+  }
 }
 
 function getCsrfToken() {
@@ -270,14 +280,13 @@ export const workbenchApi = {
         summary: { todayObjects: 3008, validDuration: 972, goalCount: 68, actionCount: 214 },
       }
     }
-    const projects = await request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100')
+    const projects = await loadWorkbenchProjects()
     const effectiveProjectId = query.projectId || String(projects.items[0]?.id || '')
     const pageNo = query.pageNo || 1; const pageSize = query.pageSize || 10
     const params = new URLSearchParams({ operator_id: query.operatorId, tab: query.tab, page: String(pageNo), page_size: String(pageSize) })
-    const [rawVideos, pool] = effectiveProjectId ? await Promise.all([
-      request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/workbench/videos?${params}`),
-      request<{ items: Array<Record<string, unknown>> }>('/api/tasks/pool?page_size=100'),
-    ]) : [{ items: [], total: 0, page: pageNo, page_size: pageSize, pages: 0 }, { items: [] }]
+    const rawVideos = effectiveProjectId
+      ? await request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/workbench/videos?${params}`)
+      : { items: [], total: 0, page: pageNo, page_size: pageSize, pages: 0 }
     const videoItems = rawVideos.items.map(normalizeVideo)
     const tasks: WorkbenchSnapshot['tasks'] = { items: videoItems, page: { pageNo: rawVideos.page || pageNo, pageSize: rawVideos.page_size || pageSize, total: rawVideos.total || 0 }, pages: rawVideos.pages || 1, viewMode: 'personal', selfClaimEnabled: true }
     return {
@@ -285,7 +294,7 @@ export const workbenchApi = {
       currentProjectId: effectiveProjectId,
       recommendedTask: query.tab === 'pending' ? videoItems[0] || null : null,
       tasks,
-      claimPool: Object.values(pool.items.filter((item) => !effectiveProjectId || String(item.project_id || (item.project as Record<string, unknown> | undefined)?.id || '') === effectiveProjectId).map(normalizeTask).reduce<Record<string, ClaimPoolItem>>((groups, task) => { const current = groups[task.node] || { node: task.node, label: `${nodeLabelsForApi[task.node]}数据`, count: 0 }; current.count += 1; groups[task.node] = current; return groups }, {})),
+      claimPool: [],
       summary: { todayObjects: 0, validDuration: 0, goalCount: 0, actionCount: 0 },
     }
   },

@@ -155,11 +155,11 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
             <div className="project-title-row"><h1>{currentProject?.name || '加载中...'}</h1><div className="project-select-wrap"><select value={projectId} onChange={(event) => { setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{snapshot?.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
             <p>{currentProject?.batchName} <span /> {tab === 'pending' ? '待处理' : '已提交'} {snapshot?.tasks.page.total || 0} 条 <span /> 当前任务额度 {currentProject?.pendingCount || 0}/{currentProject?.claimLimit || 10}</p>
           </div>
-          {snapshot?.recommendedTask ? <div className="recommended-task">
+          {!loading && snapshot && (snapshot.recommendedTask ? <div className="recommended-task">
             <div className="recommended-icon"><Sparkles size={19} /></div>
             <div><small>推荐优先处理</small><strong>{snapshot.recommendedTask.filename}</strong><span>{nodeLabels[snapshot.recommendedTask.currentNode]} · {statusLabels[snapshot.recommendedTask.videoStatus] || snapshot.recommendedTask.videoStatus} · 更新于 {formatDateTime(snapshot.recommendedTask.updatedAt).slice(11)}</span></div>
             <button className="primary-button" type="button" disabled={snapshot.recommendedTask.storageStatus === 'missing'} onClick={openRecommendedTask}><Play size={16} />{['in_progress', 'processing'].includes(snapshot.recommendedTask.videoStatus) ? '继续处理' : '开始处理'}</button>
-          </div> : tab === 'pending' ? <button className="primary-button claim-random-button" type="button" onClick={() => claimTask('annotation')}>随机领取</button> : null}
+          </div> : tab === 'pending' ? <button className="primary-button claim-random-button" type="button" onClick={() => claimTask('annotation')}>随机领取</button> : null)}
         </section>
 
         <div className="workbench-grid">
@@ -169,8 +169,8 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
               <button className="icon-button bordered" type="button" onClick={load} aria-label="刷新"><RefreshCw size={17} /></button>
             </header>
             <div className="task-tabs">
-              <button className={tab === 'pending' ? 'active' : ''} type="button" onClick={() => { setTab('pending'); setPageNo(1) }}>待处理<span>{tabTotals.pending}</span></button>
-              <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
+              <button className={tab === 'pending' ? 'active' : ''} type="button" onClick={() => { if (tab === 'pending') return; setLoading(true); setTab('pending'); setPageNo(1) }}>待处理<span>{tabTotals.pending}</span></button>
+              <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { if (tab === 'submitted') return; setLoading(true); setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
             </div>
             <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} />
             <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={(next) => { setLoading(true); setPageNo(next) }} /></footer>
