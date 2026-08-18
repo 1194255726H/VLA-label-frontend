@@ -218,6 +218,7 @@ function normalizeVideo(item: Record<string, unknown>): VideoListItem {
     taskCurrentAssigneeId: optionalString(item.task_current_assignee_id),
     currentNode: normalizeNode(item.current_node),
     currentAssigneeId: optionalString(item.current_assignee_id),
+    currentAssigneeName: optionalString(item.video_current_assignee_name),
     videoStatus: String(item.video_status || item.task_status || 'pending'),
     assignmentSource: String(item.assignment_source || ''),
     videoIndex: numberValue(item.video_index),

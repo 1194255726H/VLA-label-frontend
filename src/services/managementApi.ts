@@ -7,6 +7,7 @@ let projects = mockManagedProjects.map((item) => ({ ...item, teams: [...item.tea
 let libraries = mockLabelLibraries.map((item) => ({ ...item, tags: item.tags.map((tag) => ({ ...tag })) }))
 let teams = mockTeams.map((item) => ({ ...item }))
 let members = mockMembers.map((item) => ({ ...item, roles: [...item.roles], projects: [...item.projects] }))
+let pendingProjectList: Promise<ManagedProject[]> | undefined
 const mockFleetTasks: Record<string, FleetTask[]> = {
   '合肥创运': Array.from({ length: 12 }, (_, index) => ({ id: 52 + index, externalTaskId: `TASK-20260716-G${String(index + 1).padStart(3, '0')}-01`, name: `合肥创运采集任务 ${index + 1}`, path: `合肥创运 / 路线 ${index + 1}`, device: `VLA-${String(index % 4 + 1).padStart(2, '0')}`, operator: ['王龙', '李明', '张伟'][index % 3], videoCount: 3, syncedCount: index < 2 ? 1 : 0, availableCount: index < 2 ? 2 : 3, totalDuration: 27000 })),
   '工厂电脑装配': Array.from({ length: 4 }, (_, index) => ({ id: 101 + index, externalTaskId: `TASK-20260716-G004-0${index + 1}`, name: ['整机装配', '部件装配', '硬盘安装', '线缆连接'][index], path: `工厂电脑装配 / ${['主板安装 / 固定主板', '内存安装 / 插装内存', '硬盘安装 / 固定硬盘', '线缆连接 / 连接电源线'][index]}`, device: `工位 ${index + 1}`, operator: ['王龙', '李明'][index % 2], videoCount: [5, 7, 4, 3][index], syncedCount: [1, 2, 0, 0][index], availableCount: [4, 5, 4, 3][index], totalDuration: [15600, 22400, 12800, 9600][index] })),
@@ -49,8 +50,14 @@ function normalizeProject(item: Record<string, unknown>): ManagedProject {
 export const projectApi = {
   async list(): Promise<ManagedProject[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(projects) }
-    const result = await request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100')
-    return result.items.map(normalizeProject)
+    if (pendingProjectList) return pendingProjectList
+    const requestPromise = request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100').then((result) => result.items.map(normalizeProject))
+    pendingProjectList = requestPromise
+    try {
+      return await requestPromise
+    } finally {
+      if (pendingProjectList === requestPromise) pendingProjectList = undefined
+    }
   },
   async save(payload: ProjectPayload): Promise<ManagedProject[]> {
     if (runtimeConfig.apiMode === 'mock') {
@@ -195,12 +202,12 @@ export const labelApi = {
 }
 
 export const teamApi = {
-  async getData(): Promise<TeamMembersData> {
+  async getData(includeProjects = true): Promise<TeamMembersData> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone({ teams, members, projects: mockProjectDistribution }) }
     const [rawTeams, rawMembers, rawProjects] = await Promise.all([
       request<{ items: Array<Record<string, unknown>> }>('/api/auth/teams?page_size=100'),
       request<{ items: Array<Record<string, unknown>> }>('/api/auth/members?page_size=100'),
-      request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100'),
+      includeProjects ? request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100') : Promise.resolve({ items: [] }),
     ])
     const normalizedTeams: Team[] = rawTeams.items.map((item) => ({ id: String(item.id), name: String(item.name || ''), desc: String(item.description || ''), enabled: item.status !== 'disabled', memberCount: num(item.member_count) }))
     const normalizedMembers: Member[] = rawMembers.items.map((item) => { const team = record(item.team); return { accountId: String(item.id), account: String(item.username || ''), name: String(item.display_name || item.username || ''), email: String(item.email || ''), team: String(team.name || ''), teamId: String(team.id || ''), roles: itemsOf(item.roles).map((role) => String(role.name || role.code || '')), projects: [], enabled: item.is_active_member !== false, joinedAt: String(item.created_at || '') } })

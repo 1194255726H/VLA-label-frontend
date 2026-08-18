@@ -67,6 +67,7 @@ export interface VideoListItem {
   taskCurrentAssigneeId?: string
   currentNode: TaskNode
   currentAssigneeId?: string
+  currentAssigneeName?: string
   videoStatus: string
   assignmentSource: string
   videoIndex: number

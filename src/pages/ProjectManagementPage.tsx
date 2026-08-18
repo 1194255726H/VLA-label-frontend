@@ -123,7 +123,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   const [members, setMembers] = useState<Member[]>([])
   const [labelLibraries, setLabelLibraries] = useState<LabelLibrary[]>([])
 
-  useEffect(() => { Promise.all([projectApi.list(), teamApi.getData(), labelApi.list()]).then(([projects, teamData, libraries]) => { setItems(projects); setTeams(teamData.teams); setMembers(teamData.members); setLabelLibraries(libraries) }).finally(() => setLoading(false)) }, [])
+  useEffect(() => { Promise.all([projectApi.list(), teamApi.getData(false), labelApi.list()]).then(([projects, teamData, libraries]) => { setItems(projects); setTeams(teamData.teams); setMembers(teamData.members); setLabelLibraries(libraries) }).finally(() => setLoading(false)) }, [])
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2500); return () => clearTimeout(timer) }, [toast])
 
   const counts = useMemo(() => Object.fromEntries(Object.keys(statusLabels).map((key) => [key, items.filter((item) => item.status === key).length])), [items])

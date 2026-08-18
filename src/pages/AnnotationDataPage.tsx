@@ -77,7 +77,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
         <td><div className="entity-name"><strong title={video.taskTitle}>{video.taskTitle || '-'}</strong><small>{video.taskExternalTaskId || video.taskId}</small></div></td>
         <td><span className={`status-tag ${video.videoStatus}`}>{statusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
         <td><span className={`status-tag ${video.taskStatus}`}>{statusLabels[video.taskStatus] || video.taskStatus || '-'}</span></td>
-        <td><span className="node-tag blue">{nodeLabels[video.currentNode]}</span></td><td>{video.currentAssigneeId || '未分配'}</td>
+        <td><span className="node-tag blue">{nodeLabels[video.currentNode]}</span></td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td>
         <td><span className={`storage-tag ${video.storageStatus}`} title={video.storageError}>{storageTabs.find((item) => item.value === video.storageStatus)?.label}</span>{video.storageError && <small className="storage-error" title={video.storageError}>{video.storageError}</small>}</td>
         <td>{duration(video.duration)}</td><td>{fileSize(video.fileSize)}</td><td><code title={video.uri}>{video.ossBucket && video.ossKey ? `${video.ossBucket}/${video.ossKey}` : video.uri || '—'}</code></td><td>{formatDateTime(video.updatedAt)}</td>
         <td><div className="row-actions"><button type="button" disabled={!video.taskId || video.storageStatus === 'missing'} onClick={() => preview(video)}><Eye size={15} />预览</button></div></td>

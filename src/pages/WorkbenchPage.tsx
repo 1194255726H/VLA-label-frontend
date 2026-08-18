@@ -44,17 +44,18 @@ function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskT
     <div className="table-scroll">
       <table className="task-table workbench-video-table">
         <thead><tr>
-          <th>视频名称</th><th>所属任务</th><th>当前节点</th><th>{tab === 'pending' ? '处理状态' : '提交状态'}</th>
+          <th>视频名称</th><th>所属任务</th><th>当前节点</th><th>当前处理人</th><th>{tab === 'pending' ? '处理状态' : '提交状态'}</th>
           <th>素材状态</th><th>时长</th><th>{tab === 'pending' ? '最后更新时间' : '提交时间'}</th><th className="action-column">操作</th>
         </tr></thead>
         <tbody>
-          {!loading && (items.length === 0 ? <tr><td colSpan={8}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video) => {
+          {!loading && (items.length === 0 ? <tr><td colSpan={9}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video) => {
             const action = actionFor(video, tab)
             const displayedStatus = tab === 'submitted' ? video.submittedDecision || 'submitted' : video.videoStatus
             return <tr key={video.id}>
               <td><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.videoId || video.uri || `#${video.id}`}</small></div></td>
               <td><div className="data-name"><strong title={video.taskTitle}>{video.taskTitle || '-'}</strong><small>{video.taskExternalTaskId || video.taskId}</small></div></td>
               <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>
+              <td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td>
               <td><div className="video-status-stack"><span className={`status-tag ${displayedStatus}`}>{decisionLabels[displayedStatus] || statusLabels[displayedStatus] || displayedStatus}</span><small>当前视频：{statusLabels[video.videoStatus] || video.videoStatus || '-'}</small><small>任务：{statusLabels[video.taskStatus] || video.taskStatus || '-'}</small></div></td>
               <td><span className={`storage-tag ${video.storageStatus}`} title={video.storageError}>{storageLabels[video.storageStatus]}</span></td>
               <td>{formatSeconds(video.duration)}</td>
