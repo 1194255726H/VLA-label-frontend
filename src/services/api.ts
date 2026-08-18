@@ -43,7 +43,7 @@ function getCsrfToken() {
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   headers.set('Accept', 'application/json')
-  if (init?.body) headers.set('Content-Type', 'application/json')
+  if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   const csrfToken = getCsrfToken()
   if (csrfToken) headers.set('X-CSRF-Token', csrfToken)
   const response = await fetch(`${runtimeConfig.apiBaseUrl}${path}`, {

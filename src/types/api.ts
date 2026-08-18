@@ -173,13 +173,27 @@ export interface ManagedProject {
   goalCount: number
   actionCount: number
   completionNode: '质检' | '审核' | '验收'
+  modelGenerationNode?: '标注' | '质检' | '审核' | '验收'
   progress: number
   owner: string
   ownerId?: string
   createdAt: string
   deliveryAt: string
   labelLibraryIds: string[]
-  assignmentStrategy?: 'manual_claim' | 'load_balance' | 'round_robin'
+  assignmentStrategy?: 'manual_claim' | 'load_balance' | 'average'
+  annotationGuideline?: AnnotationGuideline | null
+}
+
+export type AnnotationGuideline =
+  | { type: 'link'; displayName: string; url: string }
+  | { type: 'file'; displayName: string; url: string }
+
+export interface MediaUploadResult {
+  key: string
+  url: string
+  displayName: string
+  mimeType: string
+  byteSize: number
 }
 
 export interface ProjectPayload {
@@ -190,8 +204,10 @@ export interface ProjectPayload {
   owner: string
   deliveryAt: string
   completionNode: ManagedProject['completionNode']
-  assignmentStrategy: 'manual_claim' | 'load_balance' | 'round_robin'
+  modelGenerationNode: NonNullable<ManagedProject['modelGenerationNode']>
+  assignmentStrategy: 'manual_claim' | 'load_balance' | 'average'
   labelLibraryIds: string[]
+  annotationGuideline: AnnotationGuideline | null
 }
 
 export interface FleetScene {

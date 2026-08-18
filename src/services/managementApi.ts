@@ -1,6 +1,6 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
-import type { FleetPage, FleetScene, FleetSyncResult, FleetTask, LabelItem, LabelLibrary, ManagedProject, Member, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
+import type { FleetPage, FleetScene, FleetSyncResult, FleetTask, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
 import { request } from './api'
 
 let projects = mockManagedProjects.map((item) => ({ ...item, teams: [...item.teams], labelLibraryIds: [...item.labelLibraryIds] }))
@@ -37,13 +37,21 @@ function normalizeProject(item: Record<string, unknown>): ManagedProject {
   const workConfig = record(item.work_config || item.workConfig)
   const rawLabelLibraryIds = workConfig.label_library_ids || item.labelLibraryIds
   const completionLabels: Record<string, ManagedProject['completionNode']> = { quality_check: '质检', review: '审核', acceptance: '验收' }
+  const modelGenerationLabels: Record<string, NonNullable<ManagedProject['modelGenerationNode']>> = { annotation: '标注', quality_check: '质检', review: '审核', acceptance: '验收' }
+  const rawGuideline = record(item.annotation_guideline || item.annotationGuideline)
+  const annotationGuideline = rawGuideline.type === 'link'
+    ? { type: 'link' as const, displayName: String(rawGuideline.display_name || rawGuideline.displayName || ''), url: String(rawGuideline.url || '') }
+    : rawGuideline.type === 'file'
+      ? { type: 'file' as const, displayName: String(rawGuideline.display_name || rawGuideline.displayName || ''), url: String(rawGuideline.url || '') }
+      : null
   return {
     id: String(item.id || item.projectId || ''), code: String(item.code || item.projectCode || ''), name: String(item.name || item.projectName || ''), desc: String(item.desc || item.description || ''),
     status: statusMap[String(item.status)] || 'not-started', teams: rawTeams.map((team) => String(team.name || '')), teamIds: rawTeams.map((team) => String(team.id || '')), memberCount: num(item.annotator_count ?? item.memberCount), dataCount: num(item.data_count ?? item.task_count ?? item.dataCount),
     selectedDuration: num(item.selected_duration_ms ?? item.selectedDuration) / (item.selected_duration_ms == null ? 1 : 1000), validDuration: num(item.effective_duration_ms ?? item.validDuration) / (item.effective_duration_ms == null ? 1 : 1000), invalidDuration: num(item.invalid_duration_ms ?? item.invalidDuration) / (item.invalid_duration_ms == null ? 1 : 1000), unselectedDuration: num(item.unselected_duration_ms ?? item.unselectedDuration) / (item.unselected_duration_ms == null ? 1 : 1000), goalCount: num(item.atomic_task_count ?? item.goalCount), actionCount: num(item.atomic_action_count ?? item.actionCount),
-    completionNode: completionLabels[String(workConfig.completion_node || item.completionNode)] || '验收', progress: num(item.progress_percent ?? item.progress), owner: String(owner.display_name || owner.username || item.owner || '-'), ownerId: String(owner.id || item.owner_id || ''), createdAt: String(item.created_at || item.createdAt || ''), deliveryAt: String(item.delivery_at || item.deliveryAt || ''),
+    completionNode: completionLabels[String(workConfig.completion_node || item.completionNode)] || '验收', modelGenerationNode: modelGenerationLabels[String(workConfig.model_generation_node || item.modelGenerationNode)] || '标注', progress: num(item.progress_percent ?? item.progress), owner: String(owner.display_name || owner.username || item.owner || '-'), ownerId: String(owner.id || item.owner_id || ''), createdAt: String(item.created_at || item.createdAt || ''), deliveryAt: String(item.delivery_at || item.deliveryAt || ''),
     labelLibraryIds: Array.isArray(rawLabelLibraryIds) ? rawLabelLibraryIds.map(String) : [],
-    assignmentStrategy: ['manual_claim', 'load_balance', 'round_robin'].includes(String(workConfig.assignment_strategy)) ? String(workConfig.assignment_strategy) as ManagedProject['assignmentStrategy'] : 'manual_claim',
+    assignmentStrategy: workConfig.assignment_strategy === 'round_robin' ? 'average' : ['manual_claim', 'load_balance', 'average'].includes(String(workConfig.assignment_strategy)) ? String(workConfig.assignment_strategy) as ManagedProject['assignmentStrategy'] : 'manual_claim',
+    annotationGuideline,
   }
 }
 
@@ -59,6 +67,16 @@ export const projectApi = {
       if (pendingProjectList === requestPromise) pendingProjectList = undefined
     }
   },
+  async detail(projectId: string): Promise<ManagedProject> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const project = projects.find((item) => item.id === projectId)
+      if (!project) throw new Error('项目不存在')
+      return clone(project)
+    }
+    const result = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}`)
+    return normalizeProject(record(result.project || result))
+  },
   async save(payload: ProjectPayload): Promise<ManagedProject[]> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
@@ -70,8 +88,13 @@ export const projectApi = {
       }
       return clone(projects)
     }
-    const completionNodes = { '质检': 'quality_check', '审核': 'review', '验收': 'acceptance' }
-    const body = { name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : null, delivery_at: payload.deliveryAt || null, completion_node: completionNodes[payload.completionNode], model_generation_node: 'annotation', assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number) }
+    const nodeValues = { '标注': 'annotation', '质检': 'quality_check', '审核': 'review', '验收': 'acceptance' }
+    const annotationGuideline = payload.annotationGuideline?.type === 'link'
+      ? { type: 'link', display_name: payload.annotationGuideline.displayName, url: payload.annotationGuideline.url }
+      : payload.annotationGuideline?.type === 'file'
+        ? { type: 'file', display_name: payload.annotationGuideline.displayName, url: payload.annotationGuideline.url }
+        : null
+    const body = { name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : null, delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
     await request(payload.projectId ? `/api/projects/${encodeURIComponent(payload.projectId)}` : '/api/projects/', { method: payload.projectId ? 'PATCH' : 'POST', body: JSON.stringify(body) })
     return this.list()
   },
@@ -85,6 +108,19 @@ export const projectApi = {
     if (runtimeConfig.apiMode === 'mock') { await delay(); projects = projects.filter((item) => item.id !== projectId); return clone(projects) }
     await request(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' })
     return this.list()
+  },
+}
+
+export const mediaApi = {
+  async upload(file: File): Promise<MediaUploadResult> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      return { key: `uploads/guidelines/mock/${encodeURIComponent(file.name)}`, url: `/api/media/files/uploads/guidelines/mock/${encodeURIComponent(file.name)}`, displayName: file.name, mimeType: file.type || 'application/octet-stream', byteSize: file.size }
+    }
+    const formData = new FormData()
+    formData.append('file', file)
+    const result = await request<{ key: string; url: string; display_name: string; mime_type: string; byte_size: number }>('/api/media/upload', { method: 'POST', body: formData })
+    return { key: result.key, url: result.url, displayName: result.display_name, mimeType: result.mime_type, byteSize: result.byte_size }
   },
 }
 

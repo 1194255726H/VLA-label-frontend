@@ -541,6 +541,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2400); return () => clearTimeout(timer) }, [toast])
 
   const approvalStage = Boolean(workspace && workspace.node !== 'annotation')
+  const submitButtonLabel = workspace?.node === 'quality' ? '提交审核' : workspace?.node === 'acceptance' ? '提交验收' : '提交'
   const hardReadonly = Boolean(workspace?.readonly || searchParams.get('readonly') === '1' || submitted)
   const readonly = Boolean(hardReadonly || approvalStage)
   const selected = useMemo(() => result && [...result.goals, ...result.actions].find((item) => item.id === selectedId), [result, selectedId])
@@ -1043,7 +1044,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
         {/* <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button> */}
         {approvalStage && <button className="secondary-button return-button" type="button" disabled={workspace.readonly || submitted} onClick={returnTask}>退回</button>}
-        <button className="primary-button" type="button" disabled={hardReadonly || saving || Boolean(editing)} onClick={submit}><Check size={16} />提交</button>
+        <button className="primary-button" type="button" disabled={hardReadonly || saving || Boolean(editing)} onClick={submit}><Check size={16} />{submitButtonLabel}</button>
       </div>
     </header>
 
