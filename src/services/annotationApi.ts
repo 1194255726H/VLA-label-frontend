@@ -9,8 +9,7 @@ const workspaceRequests = new Map<string, Promise<AnnotationWorkspace>>()
 const taskNodes = new Map<string, TaskNode>()
 const taskVideoIds = new Map<string, string>()
 
-export type VideoUnlockScope = { videoId: string } | { taskId: string } | { projectId: string }
-export interface VideoUnlockResult { unlockedCount: number; scope: 'video_id' | 'task_id' | 'project_id'; scopeId: number }
+export interface VideoHeartbeatResult { locked: boolean; lockedById: string | null }
 
 function delay() {
   return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay))
@@ -54,6 +53,12 @@ function backendNode(value: TaskNode) {
 function videoQuery(taskId: string) {
   const videoId = taskVideoIds.get(taskId)
   return videoId ? `?video_id=${encodeURIComponent(videoId)}` : ''
+}
+
+function decisionVideoId(taskId: string) {
+  const videoId = Number(taskVideoIds.get(taskId))
+  if (!Number.isInteger(videoId)) throw new Error('video_id 必须传入有效的视频 ID')
+  return videoId
 }
 
 function msToFrame(value: unknown, frameRate: number) { return Math.max(0, Math.round(Number(value || 0) / 1000 * frameRate)) }
@@ -177,23 +182,14 @@ export const annotationApi = {
     return response.video_id === null || response.video_id === undefined ? null : String(response.video_id)
   },
 
-  async unlockVideos(scope: VideoUnlockScope): Promise<VideoUnlockResult> {
-    const [scopeKey, rawId] = 'videoId' in scope
-      ? ['video_id', scope.videoId] as const
-      : 'taskId' in scope
-        ? ['task_id', scope.taskId] as const
-        : ['project_id', scope.projectId] as const
-    const scopeId = Number(rawId)
-    if (runtimeConfig.apiMode === 'mock') { await delay(); return { unlockedCount: 0, scope: scopeKey, scopeId: Number.isInteger(scopeId) ? scopeId : 0 } }
-    if (!Number.isInteger(scopeId)) throw new Error('解锁范围 ID 必须是整数')
-    const response = await request<{ unlocked_count: number; scope: VideoUnlockResult['scope']; scope_id: number }>('/api/tasks/unlock-videos', {
-      method: 'POST',
-      body: JSON.stringify({ [scopeKey]: scopeId }),
-    })
-    return { unlockedCount: Number(response.unlocked_count || 0), scope: response.scope, scopeId: Number(response.scope_id) }
+  async videoHeartbeat(videoId: string, mockUserId = ''): Promise<VideoHeartbeatResult> {
+    if (!videoId) throw new Error('缺少视频记录 ID，无法获取作业锁')
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return { locked: true, lockedById: mockUserId || null } }
+    const response = await request<{ locked: boolean; locked_by_id: number | null }>(`/api/videos/${encodeURIComponent(videoId)}/heartbeat`, { method: 'POST', body: '{}' })
+    return { locked: Boolean(response.locked), lockedById: response.locked_by_id === null || response.locked_by_id === undefined ? null : String(response.locked_by_id) }
   },
 
-  async getWorkspace(taskId: string, viewOnly = false, videoId = '', projectId = '', forceLock = false): Promise<AnnotationWorkspace> {
+  async getWorkspace(taskId: string, viewOnly = false, videoId = '', projectId = ''): Promise<AnnotationWorkspace> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const task = mockTasks.find((item) => item.id === taskId) || mockTasks[0]
@@ -207,12 +203,11 @@ export const annotationApi = {
       }
     }
     if (!videoId) throw new Error('缺少视频记录 ID，无法进入作业页')
-    const requestKey = `${taskId}:${videoId}:${forceLock ? 'force' : 'normal'}:${viewOnly ? 'view' : 'edit'}`
+    const requestKey = `${taskId}:${videoId}:${viewOnly ? 'view' : 'edit'}`
     const pending = workspaceRequests.get(requestKey)
     if (pending) return pending
     const workspaceRequest = (async () => {
       const params = new URLSearchParams({ video_id: videoId })
-      if (forceLock) params.set('force_lock', '1')
       const raw = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}?${params}`)
       const task = (raw.task || raw) as Record<string, unknown>
       const effectiveProjectId = String(task.project_id || (task.project as Record<string, unknown> | undefined)?.id || projectId)
@@ -246,23 +241,21 @@ export const annotationApi = {
     if (runtimeConfig.apiMode === 'mock') { await delay(); mockResults.set(taskId, clone(result)); return }
     const node = taskNodes.get(taskId) || 'annotation'
     if (node === 'annotation') await request(`/api/tasks/${encodeURIComponent(taskId)}/submit-annotation${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
-    else await request(`/api/tasks/${encodeURIComponent(taskId)}/decision${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify({ node: backendNode(node), decision: 'approved', opinion: '通过' }) })
-  },
-  async heartbeat(taskId: string) {
-    void taskId
+    else await request(`/api/tasks/${encodeURIComponent(taskId)}/decision`, { method: 'POST', body: JSON.stringify({ video_id: decisionVideoId(taskId), node: backendNode(node), decision: 'approved', opinion: '通过' }) })
   },
   async release(taskId: string) {
     taskNodes.delete(taskId)
     taskVideoIds.delete(taskId)
   },
-  async invalidate(taskId: string, reason: string) {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); return }
-    void taskId; void reason
-    throw new Error('当前后端 API 尚未提供整条任务作废接口')
+  async cancelVideo(taskId: string) {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return { videoId: Number(taskVideoIds.get(taskId) || 0), currentNode: 'annotation', status: 'cancelled', currentAssigneeId: null, cancelled: true } }
+    const response = await request<{ video_id: number; current_node: string; status: string; current_assignee_id: number | null; cancelled: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}/cancel-video`, { method: 'POST', body: JSON.stringify({ video_id: decisionVideoId(taskId) }) })
+    return { videoId: Number(response.video_id), currentNode: response.current_node, status: response.status, currentAssigneeId: response.current_assignee_id === null ? null : String(response.current_assignee_id), cancelled: Boolean(response.cancelled) }
   },
   async reject(taskId: string, reason: string) {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return }
     const node = taskNodes.get(taskId) || 'review'
-    await request(`/api/tasks/${encodeURIComponent(taskId)}/decision${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify({ node: backendNode(node), decision: 'rejected', opinion: reason }) })
+    if (node === 'annotation') throw new Error('标注环节不支持退回')
+    await request(`/api/tasks/${encodeURIComponent(taskId)}/decision`, { method: 'POST', body: JSON.stringify({ video_id: decisionVideoId(taskId), node: backendNode(node), decision: 'rejected', opinion: reason }) })
   },
 }

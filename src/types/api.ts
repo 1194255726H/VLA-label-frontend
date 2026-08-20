@@ -386,7 +386,6 @@ export interface AnnotationWorkspace {
   durationSeconds: number
   mediaStartTime: number
   currentRevision: number
-  session?: { sessionId: string; sessionToken: string; leaseVersion: string; heartbeatIntervalSeconds: number }
   labels: LabelItem[]
   labelLibraryBound: boolean
   result: AnnotationResult

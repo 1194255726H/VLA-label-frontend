@@ -51,10 +51,12 @@ function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskT
           {!loading && (items.length === 0 ? <tr><td colSpan={9}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video) => {
             const action = actionFor(video, tab)
             const displayedStatus = tab === 'submitted' ? video.submittedDecision || 'submitted' : video.videoStatus
+            const submittedNode = ({ annotation: 'annotation', quality_check: 'review', review: 'quality', acceptance: 'acceptance' } as Record<string, TaskNode>)[video.submittedNode || '']
+            const displayedNode = tab === 'submitted' && submittedNode ? submittedNode : video.currentNode
             return <tr key={video.id}>
               <td><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.videoId || video.uri || `#${video.id}`}</small></div></td>
               <td><div className="data-name"><strong title={video.taskTitle}>{video.taskTitle || '-'}</strong><small>{video.taskExternalTaskId || video.taskId}</small></div></td>
-              <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>
+              <td><span className={`node-tag ${nodeTones[displayedNode]}`}>{nodeLabels[displayedNode]}</span></td>
               <td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td>
               <td><div className="video-status-stack"><span className={`status-tag ${displayedStatus}`}>{decisionLabels[displayedStatus] || statusLabels[displayedStatus] || displayedStatus}</span><small>当前视频：{statusLabels[video.videoStatus] || video.videoStatus || '-'}</small><small>任务：{statusLabels[video.taskStatus] || video.taskStatus || '-'}</small></div></td>
               <td><span className={`storage-tag ${video.storageStatus}`} title={video.storageError}>{storageLabels[video.storageStatus]}</span></td>

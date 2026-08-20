@@ -477,11 +477,13 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [history, setHistory] = useState({ undo: 0, redo: 0 })
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [returning, setReturning] = useState(false)
+  const [cancellingVideo, setCancellingVideo] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
   const [errorCode, setErrorCode] = useState('')
   const [workspaceReloadKey, setWorkspaceReloadKey] = useState(0)
-  const [unlockingVideo, setUnlockingVideo] = useState(false)
+  const [videoLockState, setVideoLockState] = useState<'checking' | 'loading' | 'held' | 'lost' | 'stopped'>('checking')
   const [toast, setToast] = useState('')
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
@@ -493,44 +495,117 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [editing, setEditing] = useState<string>()
   const [scrubbing, setScrubbing] = useState(false)
   const videoId = searchParams.get('video_id') || ''
-  const adminIdentities = [...session.account.roles, ...session.account.roleLabels, session.account.account]
+  const cancelPermissionIdentities = [...session.account.roles, ...session.account.roleLabels]
     .map((value) => value.toLowerCase().replace(/[\s_-]/g, ''))
-  const isAdmin = Boolean(session.account.isStaff || session.account.isSuperuser
-    || adminIdentities.some((value) => ['admin', 'systemadmin', 'superadmin', 'administrator', 'superuser', '管理员', '超级管理员'].includes(value)))
-  const isVideoLockedError = errorCode === 'video_locked' || /video.*lock|lock.*video/i.test(errorCode) || /视频.*(?:锁|占用|其他人处理)/.test(error)
+  const canCancelVideo = Boolean(session.account.isStaff || session.account.isSuperuser || cancelPermissionIdentities.some((value) => ['admin', 'projectmanager', 'systemadmin', '管理员', '项目经理', '超级管理员'].includes(value)))
+  const isVideoLockError = ['video_locked', 'video_heartbeat_failed'].includes(errorCode)
 
   useEffect(() => {
     let active = true
-    annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1', videoId, searchParams.get('project_id') || '').then((data) => {
+    async function acquireLock() {
+      let lastError: unknown
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try { return await annotationApi.videoHeartbeat(videoId, session.account.id) }
+        catch (reason) { lastError = reason; if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, (attempt + 1) * 750)) }
+      }
+      throw lastError
+    }
+    async function loadWorkspace() {
+      await Promise.resolve()
       if (!active) return
-      undoStack.current = []
-      redoStack.current = []
-      setHistory({ undo: 0, redo: 0 })
-      setSelectedId(undefined)
-      setActiveGoalId(undefined)
-      setAtomicViewports({})
-      setEditing(undefined)
-      setDirty(false)
-      setSubmitted(false)
-      setWorkspace(data)
-      setResult(data.result)
-      setRevision(data.currentRevision)
-      setError('')
-      setErrorCode('')
-    }).catch((reason) => {
-      if (!active) return
-      const apiError = reason as Error & { code?: string }
-      setError(apiError instanceof Error ? apiError.message : '操作台加载失败')
-      setErrorCode(apiError.code || '')
-    })
-    return () => { active = false }
-  }, [searchParams, taskId, videoId, workspaceReloadKey])
+      setWorkspace(undefined); setResult(undefined); setError(''); setErrorCode(''); setVideoLockState('checking')
+      let lockAcquired = false
+      let awaitingHeartbeat = true
+      try {
+        const lock = await acquireLock()
+        if (!active) return
+        if (!lock.locked || lock.lockedById !== String(session.account.id)) {
+          const lockError = new Error('该视频正在被其他成员处理') as Error & { code?: string }
+          lockError.code = 'video_locked'
+          throw lockError
+        }
+        lockAcquired = true
+        awaitingHeartbeat = false
+        setVideoLockState('loading')
+        const data = await annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1', videoId, searchParams.get('project_id') || '')
+        if (!active) return
+        awaitingHeartbeat = true
+        const confirmedLock = await acquireLock()
+        if (!active) return
+        if (!confirmedLock.locked || confirmedLock.lockedById !== String(session.account.id)) {
+          const lockError = new Error('视频锁已被其他成员获取，当前作业已停止') as Error & { code?: string }
+          lockError.code = 'video_locked'
+          throw lockError
+        }
+        awaitingHeartbeat = false
+        setVideoLockState('held')
+        undoStack.current = []
+        redoStack.current = []
+        setHistory({ undo: 0, redo: 0 })
+        setSelectedId(undefined)
+        setActiveGoalId(undefined)
+        setAtomicViewports({})
+        setEditing(undefined)
+        setDirty(false)
+        setSubmitted(false)
+        setWorkspace(data)
+        setResult(data.result)
+        setRevision(data.currentRevision)
+        setError('')
+        setErrorCode('')
+      } catch (reason) {
+        if (!active) return
+        const apiError = reason as Error & { code?: string }
+        const lockFailure = apiError.code === 'video_locked'
+        setVideoLockState(lockFailure ? 'lost' : 'stopped')
+        setError(apiError instanceof Error ? apiError.message : '操作台加载失败')
+        setErrorCode(apiError.code || (awaitingHeartbeat || !lockAcquired ? 'video_heartbeat_failed' : ''))
+      }
+    }
+    void loadWorkspace()
+    return () => { active = false; annotationApi.release(taskId) }
+  }, [searchParams, session.account.id, taskId, videoId, workspaceReloadKey])
 
   useEffect(() => {
-    if (!workspace?.session) return
-    const heartbeat = window.setInterval(() => annotationApi.heartbeat(taskId).catch(() => setToast('编辑会话心跳失败，请尽快保存')), workspace.session.heartbeatIntervalSeconds * 1000)
-    return () => { window.clearInterval(heartbeat); annotationApi.release(taskId) }
-  }, [taskId, workspace?.session])
+    if (videoLockState !== 'held' || !videoId) return
+    let active = true
+    let requestInFlight = false
+    let retryTimer: number | undefined
+    let lastSuccessAt = Date.now()
+    const loseLock = (code: 'video_locked' | 'video_heartbeat_failed', message: string) => {
+      if (!active) return
+      active = false
+      if (retryTimer) window.clearTimeout(retryTimer)
+      videoRef.current?.pause()
+      setVideoLockState('lost')
+      setErrorCode(code)
+      setError(message)
+    }
+    const sendHeartbeat = async (attempt = 0) => {
+      if (!active || requestInFlight || document.visibilityState !== 'visible') return
+      requestInFlight = true
+      try {
+        const lock = await annotationApi.videoHeartbeat(videoId, session.account.id)
+        if (!active) return
+        if (!lock.locked || lock.lockedById !== String(session.account.id)) return loseLock('video_locked', '视频锁已被其他成员获取，当前作业已停止')
+        lastSuccessAt = Date.now()
+        if (retryTimer) { window.clearTimeout(retryTimer); retryTimer = undefined }
+      } catch {
+        if (!active) return
+        if (Date.now() - lastSuccessAt >= 30_000) return loseLock('video_heartbeat_failed', '心跳服务持续不可用，视频锁可能已释放，请重新打开')
+        if (attempt < 2) retryTimer = window.setTimeout(() => { retryTimer = undefined; void sendHeartbeat(attempt + 1) }, (attempt + 1) * 1000)
+        else setToast('视频锁心跳暂时失败，正在自动重试')
+      } finally { requestInFlight = false }
+    }
+    const interval = window.setInterval(() => { if (!retryTimer) void sendHeartbeat() }, 10_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (retryTimer) { window.clearTimeout(retryTimer); retryTimer = undefined }
+      } else void sendHeartbeat()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => { active = false; window.clearInterval(interval); if (retryTimer) window.clearTimeout(retryTimer); document.removeEventListener('visibilitychange', onVisibilityChange) }
+  }, [session.account.id, videoId, videoLockState])
 
   useEffect(() => {
     function beforeUnload(event: BeforeUnloadEvent) { if (dirty) event.preventDefault() }
@@ -541,8 +616,9 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2400); return () => clearTimeout(timer) }, [toast])
 
   const approvalStage = Boolean(workspace && workspace.node !== 'annotation')
+  const canReturn = Boolean(workspace && ['review', 'quality', 'acceptance'].includes(workspace.node))
   const submitButtonLabel = workspace?.node === 'quality' ? '提交审核' : workspace?.node === 'acceptance' ? '提交验收' : '提交'
-  const hardReadonly = Boolean(workspace?.readonly || searchParams.get('readonly') === '1' || submitted)
+  const hardReadonly = Boolean(workspace?.readonly || searchParams.get('readonly') === '1' || submitted || videoLockState !== 'held')
   const readonly = Boolean(hardReadonly || approvalStage)
   const selected = useMemo(() => result && [...result.goals, ...result.actions].find((item) => item.id === selectedId), [result, selectedId])
   const selectedInvalidRange = useMemo(() => selectedId?.startsWith('invalid:') ? result?.invalidRanges.find((range) => `invalid:${range.id}` === selectedId) : undefined, [result, selectedId])
@@ -879,39 +955,26 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       const nextRevision = dirty ? await save(false) : revision
       await annotationApi.submit(taskId, result, nextRevision)
       setSubmitted(true)
+      setVideoLockState('stopped')
       try {
-        await annotationApi.unlockVideos({ taskId })
         const nextVideoId = await annotationApi.nextVideo(workspace?.projectId || searchParams.get('project_id') || '', workspace?.node || 'annotation')
         if (nextVideoId) {
-          setToast('任务提交并解锁成功，正在进入下一条')
+          setToast('任务提交成功，正在进入下一条')
           const params = new URLSearchParams({ video_id: nextVideoId, project_id: workspace?.projectId || searchParams.get('project_id') || '' })
           navigate(`/annotation/${encodeURIComponent(taskId)}?${params}`, { replace: true })
         } else {
-          setToast('任务提交并解锁成功，当前暂无下一条')
+          setToast('任务提交成功，当前暂无下一条')
           window.setTimeout(() => navigate('/workbench'), 700)
         }
-      } catch (unlockError) {
-        setToast(`任务已提交，但解锁或获取下一条失败：${unlockError instanceof Error ? unlockError.message : '未知错误'}`)
+      } catch (nextError) {
+        setToast(`任务已提交，但获取下一条失败：${nextError instanceof Error ? nextError.message : '未知错误'}`)
       }
     } catch (reason) {
       setToast(reason instanceof Error ? reason.message : '任务提交失败')
     }
   }
 
-  async function unlockVideoAndReload() {
-    if (!videoId || unlockingVideo) return
-    setUnlockingVideo(true)
-    try {
-      await annotationApi.unlockVideos({ videoId })
-      setError('')
-      setErrorCode('')
-      setWorkspaceReloadKey((value) => value + 1)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '视频解锁失败')
-    } finally {
-      setUnlockingVideo(false)
-    }
-  }
+  function retryVideoLock() { setError(''); setErrorCode(''); setWorkspaceReloadKey((value) => value + 1) }
 
   function addComment() {
     if (!result || hardReadonly || !commentDraft.trim() || workspace?.node === 'annotation') return
@@ -934,10 +997,22 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   async function returnTask() {
-    if (!result) return
+    if (!result || returning) return
     const unresolved = result.comments.filter((item) => item.status !== 'resolved')
-    if (!unresolved.length) return setToast('退回前至少需要一条未解决批注')
-    try { if (dirty) await save(false); await annotationApi.reject(taskId, `${nodeLabels[workspace?.node || 'review']}批注共 ${unresolved.length} 条`); setDirty(false); setToast('任务已退回'); window.setTimeout(() => navigate('/workbench'), 700) } catch (failure) { setToast(failure instanceof Error ? failure.message : '退回失败') }
+    if (!window.confirm('确认将该视频退回上一个流程环节？')) return
+    const opinion = unresolved.map((item) => item.content.trim()).filter(Boolean).join('；')
+    setReturning(true)
+    try { if (dirty) await save(false); await annotationApi.reject(taskId, opinion); setDirty(false); setSubmitted(true); setVideoLockState('stopped'); setToast('任务已退回'); window.setTimeout(() => navigate('/workbench'), 700) } catch (failure) { setToast(failure instanceof Error ? failure.message : '退回失败') }
+    finally { setReturning(false) }
+  }
+
+  async function cancelVideo() {
+    if (cancellingVideo || !canCancelVideo) return
+    if (!window.confirm(`确认作废视频“${workspace?.dataName || videoId}”？作废后将不再参与流转，且当前未保存修改会被丢弃。`)) return
+    setCancellingVideo(true)
+    try { await annotationApi.cancelVideo(taskId); videoRef.current?.pause(); setDirty(false); setVideoLockState('stopped'); setToast('视频已作废'); window.setTimeout(() => navigate('/workbench'), 700) }
+    catch (failure) { setToast(failure instanceof Error ? failure.message : '视频作废失败') }
+    finally { setCancellingVideo(false) }
   }
 
   useEffect(() => {
@@ -1011,8 +1086,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('blur', cancelTemporary) }
   })
 
-  if (error) return <main className="annotation-load-state"><CircleAlert size={38} /><h1>无法打开视频标注工作台</h1><p>{error}</p>{isVideoLockedError && isAdmin && <button className="primary-button" type="button" disabled={unlockingVideo} onClick={unlockVideoAndReload}>{unlockingVideo ? '正在解锁...' : '解锁并打开'}</button>}<button className={isVideoLockedError && isAdmin ? 'secondary-button' : 'primary-button'} type="button" onClick={() => navigate('/workbench')}>返回工作台</button></main>
-  if (!workspace || !result) return <main className="annotation-load-state"><RotateCcw className="spinning" size={34} /><p>正在加载任务和标注结果...</p></main>
+  if (error) return <main className="annotation-load-state"><CircleAlert size={38} /><h1>无法打开视频标注工作台</h1><p>{error}</p>{isVideoLockError && <button className="primary-button" type="button" onClick={retryVideoLock}>重新获取视频锁</button>}<button className={isVideoLockError ? 'secondary-button' : 'primary-button'} type="button" onClick={() => navigate('/workbench')}>返回工作台</button></main>
+  if (!workspace || !result) return <main className="annotation-load-state"><RotateCcw className="spinning" size={34} /><p>{videoLockState === 'checking' ? '正在获取视频锁...' : '正在加载任务和标注结果...'}</p></main>
 
   function segmentListButton(item: AnnotationSegment, title: string) {
     const label = item.type === 'no_action' ? '系统无动作' : item.labelName || '未选择标签'
@@ -1042,8 +1117,9 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         {approvalStage && <button className="secondary-button" type="button" onClick={() => setCommentsOpen((value) => !value)}>全部批注（{result.comments.length}）</button>}
         <span className={readonly ? 'readonly-badge' : 'editing-badge'} title={`当前处理人：${session.account.name}`}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
+        {canCancelVideo && <button className="secondary-button danger-button" type="button" disabled={cancellingVideo || videoLockState !== 'held'} onClick={cancelVideo}>{cancellingVideo ? '正在作废...' : '作废'}</button>}
         {/* <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button> */}
-        {approvalStage && <button className="secondary-button return-button" type="button" disabled={workspace.readonly || submitted} onClick={returnTask}>退回</button>}
+        {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}
         <button className="primary-button" type="button" disabled={hardReadonly || saving || Boolean(editing)} onClick={submit}><Check size={16} />{submitButtonLabel}</button>
       </div>
     </header>
