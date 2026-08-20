@@ -462,7 +462,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const scrubVideoRef = useRef<HTMLVideoElement>(null)
   const commentDialogRef = useRef<HTMLDivElement>(null)
-  const commentDragRef = useRef<{ offsetX: number; offsetY: number }>()
+  const commentDragRef = useRef<{ offsetX: number; offsetY: number } | null>(null)
   const undoStack = useRef<AnnotationResult[]>([])
   const redoStack = useRef<AnnotationResult[]>([])
   const editSnapshotRef = useRef<AnnotationResult | undefined>(undefined)
@@ -1028,7 +1028,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   function stopCommentDialogDrag(event: React.PointerEvent<HTMLElement>) {
-    commentDragRef.current = undefined
+    commentDragRef.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
   }
 
