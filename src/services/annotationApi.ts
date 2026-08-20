@@ -1,6 +1,6 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockTasks } from '../mocks/data'
-import type { AnnotationResult, AnnotationWorkspace, TaskNode } from '../types/api'
+import type { AnnotationResult, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
 import { request } from './api'
 
 const mockResults = new Map<string, AnnotationResult>()
@@ -8,6 +8,7 @@ const mockRevisions = new Map<string, number>()
 const workspaceRequests = new Map<string, Promise<AnnotationWorkspace>>()
 const taskNodes = new Map<string, TaskNode>()
 const taskVideoIds = new Map<string, string>()
+const mockVideoComments = new Map<string, VideoComment[]>()
 
 export interface VideoHeartbeatResult { locked: boolean; lockedById: string | null }
 
@@ -48,6 +49,16 @@ function wireNode(value: unknown): TaskNode {
 
 function backendNode(value: TaskNode) {
   return ({ annotation: 'annotation', review: 'quality_check', quality: 'review', acceptance: 'acceptance' } as const)[value]
+}
+
+function normalizeVideoComment(item: Record<string, unknown>): VideoComment {
+  return {
+    id: String(item.id || ''), videoId: String(item.video_id || ''), taskId: String(item.task_id || ''),
+    node: wireNode(item.node), sequence: Number(item.sequence || 0),
+    positionX: Number(item.position_x || 0), positionY: Number(item.position_y || 0), content: String(item.content || ''),
+    resolved: Boolean(item.resolved), createdById: String(item.created_by_id || ''), createdByName: String(item.created_by_name || ''),
+    createdAt: String(item.created_at || ''), resolvedById: item.resolved_by_id == null ? undefined : String(item.resolved_by_id), resolvedAt: item.resolved_at == null ? undefined : String(item.resolved_at),
+  }
 }
 
 function videoQuery(taskId: string) {
@@ -174,6 +185,38 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
 }
 
 export const annotationApi = {
+  async listVideoComments(taskId: string, videoId: string): Promise<VideoComment[]> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(mockVideoComments.get(`${taskId}:${videoId}`) || []) }
+    const params = new URLSearchParams({ video_id: videoId })
+    const response = await request<{ items: Array<Record<string, unknown>> }>(`/api/tasks/${encodeURIComponent(taskId)}/comments?${params}`)
+    return (response.items || []).map(normalizeVideoComment)
+  },
+
+  async createVideoComment(taskId: string, payload: { videoId: string; node: TaskNode; sequence: number; content: string; positionX: number; positionY: number }): Promise<VideoComment> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const key = `${taskId}:${payload.videoId}`
+      const comment: VideoComment = { id: crypto.randomUUID(), videoId: payload.videoId, taskId, node: payload.node, sequence: payload.sequence, positionX: payload.positionX, positionY: payload.positionY, content: payload.content, resolved: false, createdById: 'mock-user', createdByName: '当前用户', createdAt: new Date().toISOString() }
+      mockVideoComments.set(key, [...(mockVideoComments.get(key) || []), comment])
+      return clone(comment)
+    }
+    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/comments`, { method: 'POST', body: JSON.stringify({ video_id: Number(payload.videoId), node: backendNode(payload.node), sequence: payload.sequence, content: payload.content, position_x: payload.positionX, position_y: payload.positionY }) })
+    return normalizeVideoComment(response)
+  },
+
+  async resolveVideoComment(taskId: string, commentId: string): Promise<VideoComment> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      for (const [key, comments] of mockVideoComments) {
+        const comment = comments.find((item) => item.id === commentId)
+        if (comment) { const resolved = { ...comment, resolved: true, resolvedById: 'mock-user', resolvedAt: new Date().toISOString() }; mockVideoComments.set(key, comments.map((item) => item.id === commentId ? resolved : item)); return clone(resolved) }
+      }
+      throw new Error('批注不存在')
+    }
+    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/comments/${encodeURIComponent(commentId)}/resolve`, { method: 'POST', body: '{}' })
+    return normalizeVideoComment(response)
+  },
+
   async nextVideo(projectId: string, node: TaskNode): Promise<string | null> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return null }
     if (!projectId) throw new Error('缺少项目 ID，无法获取下一条视频')

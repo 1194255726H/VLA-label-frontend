@@ -347,6 +347,23 @@ export interface AnnotationComment {
   draft: boolean
 }
 
+export interface VideoComment {
+  id: string
+  videoId: string
+  taskId: string
+  node: TaskNode
+  sequence: number
+  positionX: number
+  positionY: number
+  content: string
+  resolved: boolean
+  createdById: string
+  createdByName: string
+  createdAt: string
+  resolvedById?: string
+  resolvedAt?: string
+}
+
 export interface InvalidRange {
   id: string
   sequence: number

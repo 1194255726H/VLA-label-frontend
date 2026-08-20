@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, Check, ChevronDown, CircleAlert, Expand, Keyboard, Pause, Play, Redo2, RotateCcw,
+  ArrowLeft, Check, ChevronDown, CircleAlert, Expand, GripVertical, Keyboard, Pause, Play, Plus, Redo2, RotateCcw,
   SkipBack, SkipForward, Trash2, Undo2, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -7,7 +7,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { BrandLogo } from '../components/BrandLogo'
 import { Modal } from '../components/Modal'
 import { annotationApi, normalizeAnnotationResult } from '../services/annotationApi'
-import type { AnnotationResult, AnnotationSegment, AnnotationWorkspace, SessionResponse } from '../types/api'
+import type { AnnotationResult, AnnotationSegment, AnnotationWorkspace, SessionResponse, VideoComment } from '../types/api'
+import { formatDateTime } from '../utils/date'
 
 const nodeLabels = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const TIMELINE_FRAME_WIDTH = 6
@@ -460,6 +461,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const navigate = useNavigate()
   const videoRef = useRef<HTMLVideoElement>(null)
   const scrubVideoRef = useRef<HTMLVideoElement>(null)
+  const commentDialogRef = useRef<HTMLDivElement>(null)
+  const commentDragRef = useRef<{ offsetX: number; offsetY: number }>()
   const undoStack = useRef<AnnotationResult[]>([])
   const redoStack = useRef<AnnotationResult[]>([])
   const editSnapshotRef = useRef<AnnotationResult | undefined>(undefined)
@@ -486,6 +489,13 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [videoLockState, setVideoLockState] = useState<'checking' | 'loading' | 'held' | 'lost' | 'stopped'>('checking')
   const [toast, setToast] = useState('')
   const [commentsOpen, setCommentsOpen] = useState(false)
+  const [videoComments, setVideoComments] = useState<VideoComment[]>([])
+  const [commentsLoading, setCommentsLoading] = useState(false)
+  const [commentFilter, setCommentFilter] = useState<'all' | 'pending' | 'resolved'>('all')
+  const [commentDialogPosition, setCommentDialogPosition] = useState<{ x: number; y: number }>()
+  const [commentPlacementMode, setCommentPlacementMode] = useState(false)
+  const [commentPoint, setCommentPoint] = useState<{ x: number; y: number }>()
+  const [commentSubmitting, setCommentSubmitting] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [commentDraft, setCommentDraft] = useState('')
   const [keyframeObject, setKeyframeObject] = useState('')
@@ -513,7 +523,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     async function loadWorkspace() {
       await Promise.resolve()
       if (!active) return
-      setWorkspace(undefined); setResult(undefined); setError(''); setErrorCode(''); setVideoLockState('checking')
+      setWorkspace(undefined); setResult(undefined); setVideoComments([]); setCommentsOpen(false); setCommentPlacementMode(false); setCommentPoint(undefined); setError(''); setErrorCode(''); setVideoLockState('checking')
       let lockAcquired = false
       let awaitingHeartbeat = true
       try {
@@ -620,6 +630,23 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const submitButtonLabel = workspace?.node === 'quality' ? '提交审核' : workspace?.node === 'acceptance' ? '提交验收' : '提交'
   const hardReadonly = Boolean(workspace?.readonly || searchParams.get('readonly') === '1' || submitted || videoLockState !== 'held')
   const readonly = Boolean(hardReadonly || approvalStage)
+  const canComment = Boolean(approvalStage && !hardReadonly)
+  const visibleVideoComments = useMemo(() => videoComments.filter((comment) => commentFilter === 'all' || (commentFilter === 'resolved' ? comment.resolved : !comment.resolved)), [commentFilter, videoComments])
+
+  useEffect(() => {
+    if (!workspace || workspace.node === 'annotation' || !videoId) return
+    let active = true
+    async function loadComments() {
+      setCommentsLoading(true)
+      try {
+        const comments = await annotationApi.listVideoComments(taskId, videoId)
+        if (active) setVideoComments(comments)
+      } catch (reason) { if (active) setToast(reason instanceof Error ? reason.message : '批注加载失败') }
+      finally { if (active) setCommentsLoading(false) }
+    }
+    void loadComments()
+    return () => { active = false }
+  }, [taskId, videoId, workspace])
   const selected = useMemo(() => result && [...result.goals, ...result.actions].find((item) => item.id === selectedId), [result, selectedId])
   const selectedInvalidRange = useMemo(() => selectedId?.startsWith('invalid:') ? result?.invalidRanges.find((range) => `invalid:${range.id}` === selectedId) : undefined, [result, selectedId])
   const selectedGoal = selected?.type === 'goal'
@@ -976,16 +1003,66 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   function retryVideoLock() { setError(''); setErrorCode(''); setWorkspaceReloadKey((value) => value + 1) }
 
-  function addComment() {
-    if (!result || hardReadonly || !commentDraft.trim() || workspace?.node === 'annotation') return
-    const sequence = Math.max(0, ...result.comments.map((item) => item.sequence)) + 1
-    mutate({ ...result, comments: [...result.comments, { id: crypto.randomUUID(), sequence, content: commentDraft.trim().slice(0, 100), frame: currentFrame, location: selected?.code || '视频画面', status: 'open', stage: workspace?.node || 'review', draft: true }] })
+  function openComments() {
+    setCommentsOpen(true)
+    setCommentDialogPosition((current) => current || { x: Math.max(16, (window.innerWidth - 680) / 2), y: Math.max(76, (window.innerHeight - 520) / 2) })
+  }
+
+  function startCommentDialogDrag(event: React.PointerEvent<HTMLElement>) {
+    if ((event.target as HTMLElement).closest('button')) return
+    const rect = commentDialogRef.current?.getBoundingClientRect()
+    if (!rect) return
+    commentDragRef.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function moveCommentDialog(event: React.PointerEvent<HTMLElement>) {
+    const drag = commentDragRef.current
+    if (!drag) return
+    const width = commentDialogRef.current?.offsetWidth || 680
+    const height = commentDialogRef.current?.offsetHeight || 520
+    setCommentDialogPosition({
+      x: Math.max(8, Math.min(window.innerWidth - width - 8, event.clientX - drag.offsetX)),
+      y: Math.max(8, Math.min(window.innerHeight - height - 8, event.clientY - drag.offsetY)),
+    })
+  }
+
+  function stopCommentDialogDrag(event: React.PointerEvent<HTMLElement>) {
+    commentDragRef.current = undefined
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  function chooseCommentPosition(event: React.MouseEvent<HTMLDivElement>) {
+    if (!canComment) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+    setCommentPlacementMode(false)
+    setCommentPoint({ x, y })
     setCommentDraft('')
   }
 
-  function updateCommentStatus(id: string, status: 'open' | 'addressed' | 'resolved') {
-    if (!result || hardReadonly) return
-    mutate({ ...result, comments: result.comments.map((item) => item.id === id ? { ...item, status } : item) })
+  async function createComment() {
+    if (!workspace || !commentPoint || !canComment || !commentDraft.trim() || commentSubmitting) return
+    setCommentSubmitting(true)
+    try {
+      const sequence = Math.max(0, ...videoComments.map((item) => item.sequence)) + 1
+      const comment = await annotationApi.createVideoComment(taskId, { videoId, node: workspace.node, sequence, content: commentDraft.trim().slice(0, 2000), positionX: commentPoint.x, positionY: commentPoint.y })
+      setVideoComments((items) => [...items, comment].sort((left, right) => left.sequence - right.sequence))
+      setCommentPoint(undefined)
+      setCommentDraft('')
+      setToast('批注已添加')
+    } catch (reason) { setToast(reason instanceof Error ? reason.message : '批注添加失败') }
+    finally { setCommentSubmitting(false) }
+  }
+
+  async function resolveComment(commentId: string) {
+    if (!canComment) return
+    try {
+      const resolved = await annotationApi.resolveVideoComment(taskId, commentId)
+      setVideoComments((items) => items.map((item) => item.id === commentId ? resolved : item))
+      setToast('批注已标记解决')
+    } catch (reason) { setToast(reason instanceof Error ? reason.message : '批注状态更新失败') }
   }
 
   function addKeyframe() {
@@ -998,7 +1075,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   async function returnTask() {
     if (!result || returning) return
-    const unresolved = result.comments.filter((item) => item.status !== 'resolved')
+    const unresolved = videoComments.filter((item) => !item.resolved)
     if (!window.confirm('确认将该视频退回上一个流程环节？')) return
     const opinion = unresolved.map((item) => item.content.trim()).filter(Boolean).join('；')
     setReturning(true)
@@ -1037,11 +1114,22 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null
+      if (commentPlacementMode && (event.key === 'Escape' || event.key.toLowerCase() === 'c')) {
+        event.preventDefault()
+        setCommentPlacementMode(false)
+        return
+      }
       if (shortcutsOpen) {
         if (event.key === 'Escape') { event.preventDefault(); setShortcutsOpen(false) }
         return
       }
       if (target?.matches('input,textarea,select,[contenteditable="true"],[contenteditable=""]') || event.repeat) return
+      if (event.key.toLowerCase() === 'c' && canComment) {
+        event.preventDefault()
+        setCommentsOpen(false)
+        setCommentPlacementMode(true)
+        return
+      }
       if (event.code === 'Space') {
         if (document.querySelector('.modal-backdrop') || target?.closest('.comment-panel')) return
         event.preventDefault()
@@ -1114,7 +1202,10 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><span className="workflow-stage-chip">{nodeLabels[workspace.node]}</span></div><small>{workspace.taskCode} · {workspace.projectName}</small></div>
       <div className="annotation-save-state"><i className={dirty ? 'dirty' : ''} />{saving ? '正在保存' : dirty ? '有未保存修改' : `草稿已保存 · V${revision}`}</div>
       <div className="annotation-header-actions">
-        {approvalStage && <button className="secondary-button" type="button" onClick={() => setCommentsOpen((value) => !value)}>全部批注（{result.comments.length}）</button>}
+        {approvalStage && <>
+          <button className={`comment-add-button${commentPlacementMode ? ' active' : ''}`} type="button" disabled={!canComment} onClick={() => { setCommentsOpen(false); setCommentPlacementMode((value) => !value) }}><Plus size={17} />添加批注</button>
+          <button className="comment-all-button" type="button" onClick={() => commentsOpen ? setCommentsOpen(false) : openComments()}>全部批注 <b>{videoComments.length}</b></button>
+        </>}
         <span className={readonly ? 'readonly-badge' : 'editing-badge'} title={`当前处理人：${session.account.name}`}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
         {canCancelVideo && <button className="secondary-button danger-button" type="button" disabled={cancellingVideo || videoLockState !== 'held'} onClick={cancelVideo}>{cancellingVideo ? '正在作废...' : '作废'}</button>}
@@ -1135,7 +1226,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         <div className="segment-list-columns"><span>片段</span><span>标签与描述</span><span>总时长</span></div>
         <div className="segment-tree">{result.goals.map((goal, index) => <div className="segment-group" key={goal.id}><div className={`segment-list-entry${selectedId === goal.id ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{selectedId === goal.id && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => <div className={`segment-list-entry child${selectedId === action.id ? ' selected' : ''}`} key={action.id}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{selectedId === action.id && inlineSegmentEditor(action)}</div>)}</div>)}</div>
         {selected?.type === 'action' && <section className="keyframe-panel"><div className="keyframe-toolbar"><strong>关键帧（选填）</strong><span>F{currentFrame}</span><input value={keyframeObject} disabled={readonly} onChange={(event) => setKeyframeObject(event.target.value)} placeholder="接触对象名称" /><button type="button" disabled={readonly} onClick={addKeyframe}>标记当前帧</button></div>{selected.keyFrames?.map((frame) => <button type="button" className="keyframe-item" key={frame.id} onClick={() => seek(frame.frame)}><b>F{frame.frame}</b><span>{frame.objectName}</span>{!readonly && <X size={13} onClick={(event) => { event.stopPropagation(); updateSelected({ keyFrames: selected.keyFrames?.filter((item) => item.id !== frame.id) }) }} />}</button>)}</section>}
-        {commentsOpen && <section className="comment-panel"><header><strong>全部批注</strong><button type="button" onClick={() => setCommentsOpen(false)}><X size={15} /></button></header><div className="comment-list">{result.comments.map((comment) => <article key={comment.id}><button type="button" onClick={() => seek(comment.frame)}>#{comment.sequence} · F{comment.frame}</button><p>{comment.content}</p><small>{comment.location}</small><div>{comment.status !== 'resolved' && <button type="button" disabled={hardReadonly} onClick={() => updateCommentStatus(comment.id, comment.status === 'open' ? 'addressed' : 'resolved')}>{comment.status === 'open' ? '标记已处理' : '确认解决'}</button>}{comment.status === 'resolved' && <button type="button" disabled={hardReadonly} onClick={() => updateCommentStatus(comment.id, 'open')}>重新打开</button>}</div></article>)}</div><div className="comment-create"><textarea value={commentDraft} disabled={hardReadonly} maxLength={100} onChange={(event) => setCommentDraft(event.target.value)} placeholder="输入当前帧或选中片段的批注" /><button type="button" disabled={hardReadonly || !commentDraft.trim()} onClick={addComment}>添加批注</button></div></section>}
       </aside>
     </section>
 
@@ -1148,7 +1238,16 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`) }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
+    {approvalStage && videoComments.map((comment) => <button type="button" className={`page-comment-marker${comment.resolved ? ' resolved' : ''}`} style={{ left: `${comment.positionX * 100}%`, top: `${comment.positionY * 100}%` }} key={comment.id} title={`#${comment.sequence} ${comment.content}`} onClick={openComments}>{comment.sequence}</button>)}
+    {commentPlacementMode && <div className="page-comment-placement-layer" role="button" tabIndex={0} aria-label="选择批注位置" onClick={chooseCommentPosition}><span>点击页面任意位置放置批注 · 按 C 或 Esc 取消</span></div>}
+    {commentsOpen && commentDialogPosition && <div ref={commentDialogRef} className="page-comment-dialog" style={{ left: commentDialogPosition.x, top: commentDialogPosition.y }} role="dialog" aria-label="全部批注">
+      <header onPointerDown={startCommentDialogDrag} onPointerMove={moveCommentDialog} onPointerUp={stopCommentDialogDrag} onPointerCancel={stopCommentDialogDrag}><strong>全部批注</strong><div><GripVertical size={18} /><button type="button" onClick={() => setCommentsOpen(false)} aria-label="关闭"><X size={17} /></button></div></header>
+      <nav><button className={commentFilter === 'all' ? 'active' : ''} type="button" onClick={() => setCommentFilter('all')}>全部 <b>{videoComments.length}</b></button><button className={commentFilter === 'pending' ? 'active' : ''} type="button" onClick={() => setCommentFilter('pending')}>待处理 <b>{videoComments.filter((item) => !item.resolved).length}</b></button><button className={commentFilter === 'resolved' ? 'active' : ''} type="button" onClick={() => setCommentFilter('resolved')}>已解决 <b>{videoComments.filter((item) => item.resolved).length}</b></button></nav>
+      <div className="page-comment-dialog-list">{commentsLoading ? <div className="comment-empty">批注加载中...</div> : visibleVideoComments.length === 0 ? <div className="comment-empty">暂无批注</div> : visibleVideoComments.map((comment) => <article className={comment.resolved ? 'resolved' : ''} key={comment.id}><header><span className="page-comment-sequence">{comment.sequence}</span><strong>{nodeLabels[comment.node]}批注</strong><span className={comment.resolved ? 'resolved' : 'pending'}>{comment.resolved ? '已解决' : '待处理'}</span></header><p>{comment.content}</p><footer><small>{comment.createdByName || '未知用户'} · {formatDateTime(comment.createdAt)} · 页面位置 {Math.round(comment.positionX * 100)}%, {Math.round(comment.positionY * 100)}%</small>{!comment.resolved && <button type="button" disabled={!canComment} onClick={() => resolveComment(comment.id)}>标记已解决</button>}</footer></article>)}</div>
+      <footer><button className="secondary-button" type="button" onClick={() => setCommentsOpen(false)}>关闭</button></footer>
+    </div>}
     {shortcutsOpen && <Modal title="快捷键与操作" onClose={() => setShortcutsOpen(false)}><div className="shortcut-guide"><ShortcutColumn title="键盘快捷键" items={keyboardShortcuts} /><ShortcutColumn title="时间轴操作" items={timelineShortcuts} /></div></Modal>}
+    {commentPoint && <Modal title="添加批注" onClose={() => { if (!commentSubmitting) setCommentPoint(undefined) }} footer={<><button className="secondary-button" type="button" disabled={commentSubmitting} onClick={() => setCommentPoint(undefined)}>取消</button><button className="primary-button" type="button" disabled={commentSubmitting || !commentDraft.trim()} onClick={createComment}>{commentSubmitting ? '正在添加...' : '添加批注'}</button></>}><div className="page-comment-form"><p>批注位置：横向 {Math.round(commentPoint.x * 100)}%，纵向 {Math.round(commentPoint.y * 100)}%</p><textarea autoFocus value={commentDraft} maxLength={2000} onChange={(event) => setCommentDraft(event.target.value)} placeholder="请输入批注内容（最多 2000 字）" /><small>{commentDraft.length}/2000</small></div></Modal>}
     {toast && <div className="toast">{toast}</div>}
   </main>
 }
