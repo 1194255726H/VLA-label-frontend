@@ -563,7 +563,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       }
     }
     void loadWorkspace()
-    return () => { active = false; annotationApi.release(taskId) }
+    return () => { active = false; annotationApi.clearTaskContext(taskId) }
   }, [searchParams, session.account.id, taskId, videoId, workspaceReloadKey])
 
   useEffect(() => {

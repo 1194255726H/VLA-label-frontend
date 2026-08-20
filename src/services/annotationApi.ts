@@ -243,7 +243,7 @@ export const annotationApi = {
     if (node === 'annotation') await request(`/api/tasks/${encodeURIComponent(taskId)}/submit-annotation${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
     else await request(`/api/tasks/${encodeURIComponent(taskId)}/decision`, { method: 'POST', body: JSON.stringify({ video_id: decisionVideoId(taskId), node: backendNode(node), decision: 'approved', opinion: '通过' }) })
   },
-  async release(taskId: string) {
+  clearTaskContext(taskId: string) {
     taskNodes.delete(taskId)
     taskVideoIds.delete(taskId)
   },
