@@ -1,5 +1,5 @@
 import {
-  ChevronDown, FolderKanban, LayoutDashboard, LogOut, Menu, Tags, UserRound, UsersRound,
+  ChevronDown, FolderKanban, LayoutDashboard, LogOut, Menu, Tags, UsersRound,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
