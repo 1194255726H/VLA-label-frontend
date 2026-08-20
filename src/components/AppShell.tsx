@@ -56,7 +56,7 @@ export function AppShell({ user, children }: Props) {
               <ChevronDown size={14} />
             </button>
             {profileOpen && <div className="profile-dropdown">
-              <button type="button"><UserRound size={16} />个人资料</button>
+              {/* <button type="button"><UserRound size={16} />个人资料</button> */}
               <button type="button" onClick={logout}><LogOut size={16} />退出登录</button>
             </div>}
           </div>

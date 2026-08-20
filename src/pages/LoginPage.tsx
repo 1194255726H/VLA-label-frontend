@@ -100,13 +100,13 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
         <div className="login-card-title"><span className="login-title-icon"><KeyRound size={22} /></span><div><h2>欢迎登录</h2><p>登录 iLabel++ 开始数据生产作业</p></div></div>
         <div className="login-tabs" role="tablist">
           <button className={mode === 'password' ? 'active' : ''} type="button"><LockKeyhole size={16} />密码登录</button>
-          <button className={mode === 'sms' ? 'active' : ''} type="button" disabled title="当前后端 API 尚未提供短信登录"><MessageSquareText size={16} />验证码登录</button>
+          {/* <button className={mode === 'sms' ? 'active' : ''} type="button" disabled title="当前后端 API 尚未提供短信登录"><MessageSquareText size={16} />验证码登录</button> */}
         </div>
         <form onSubmit={submit}>
           {mode === 'password' ? <>
             <label className="form-field"><span>账号</span><div className="input-wrap"><UserRound size={18} /><input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入登录账号" autoComplete="username" /></div></label>
             <label className="form-field"><span>密码</span><div className="input-wrap"><LockKeyhole size={18} /><input value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? 'text' : 'password'} placeholder="请输入登录密码" autoComplete="current-password" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? '隐藏密码' : '显示密码'}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
-            <div className="login-options"><label><input type="checkbox" />记住账号</label><button type="button" disabled title="当前后端 API 尚未提供密码找回">忘记密码</button></div>
+            {/* <div className="login-options"><label><input type="checkbox" />记住账号</label><button type="button" disabled title="当前后端 API 尚未提供密码找回">忘记密码</button></div> */}
           </> : <>
             <label className="form-field"><span>手机号</span><div className="input-wrap"><Phone size={18} /><b>+86</b><input value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 11))} inputMode="numeric" placeholder="请输入手机号" /></div></label>
             <label className="form-field"><span>验证码</span><div className="input-wrap"><MessageSquareText size={18} /><input value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="请输入 6 位验证码" /><button className="code-button" type="button" disabled={countdown > 0} onClick={sendSms}>{countdown ? `${countdown}s` : '获取验证码'}</button></div></label>

@@ -13,7 +13,7 @@ import { formatDateTime } from '../utils/date'
 
 const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const nodeTones: Record<TaskNode, string> = { annotation: 'cyan', review: 'blue', quality: 'amber', acceptance: 'green' }
-const statusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', returned: '退回', submitted: '已提交', completed: '已完成', rejected: '已退回' }
+const statusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', returned: '退回', approved: '正常', submitted: '已提交', completed: '已完成', rejected: '已退回' }
 const decisionLabels: Record<string, string> = { approved: '正常流转', rejected: '已回退/打回' }
 const storageLabels = { available: '存在', missing: '缺失', unchecked: '未确认' }
 const submittedNodeMap: Record<string, TaskNode> = { annotation: 'annotation', quality_check: 'review', review: 'quality', acceptance: 'acceptance' }
