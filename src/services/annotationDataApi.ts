@@ -4,6 +4,8 @@ import type { ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem } fro
 import { request } from './api'
 import { getMockFleetSyncedTasks } from './managementApi'
 
+const pendingVideoListRequests = new Map<string, Promise<ProjectVideoPage>>()
+
 function delay() { return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay)) }
 function numberValue(value: unknown) { return value === null || value === undefined || value === '' ? 0 : Number(value) }
 function optionalString(value: unknown) { return value === null || value === undefined || value === '' ? undefined : String(value) }
@@ -52,7 +54,11 @@ export const annotationDataApi = {
     if (query.status) params.set('status', query.status)
     if (query.currentNode) params.set('current_node', backendNode(query.currentNode))
     if (query.storageStatus) params.set('storage_status', query.storageStatus)
-    const result = await request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(projectId)}/videos?${params}`)
-    return { items: result.items.map(normalize), total: result.total || 0, page: result.page || page, pageSize: result.page_size || pageSize, pages: result.pages || 1 }
+    const path = `/api/projects/${encodeURIComponent(projectId)}/videos?${params}`
+    const existing = pendingVideoListRequests.get(path)
+    if (existing) return existing
+    const pending = request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(path).then((result) => ({ items: result.items.map(normalize), total: result.total || 0, page: result.page || page, pageSize: result.page_size || pageSize, pages: result.pages || 1 }))
+    pendingVideoListRequests.set(path, pending)
+    try { return await pending } finally { if (pendingVideoListRequests.get(path) === pending) pendingVideoListRequests.delete(path) }
   },
 }

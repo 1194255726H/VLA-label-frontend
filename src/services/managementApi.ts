@@ -78,6 +78,11 @@ export const projectApi = {
     return normalizeProject(record(result.project || result))
   },
   async save(payload: ProjectPayload): Promise<ManagedProject[]> {
+    if (!payload.projectId && payload.deliveryAt) {
+      const now = new Date()
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      if (payload.deliveryAt < today) throw new Error('交付时间不能早于项目创建时间')
+    }
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       if (projects.some((item) => item.name === payload.name && item.id !== payload.projectId)) throw new Error('项目名称已存在')
@@ -196,6 +201,11 @@ async function loadLibrary(item: Record<string, unknown>) {
 }
 
 export const labelApi = {
+  async listSummaries(): Promise<LabelLibrary[]> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(libraries.map((library) => ({ ...library, tags: [] }))) }
+    const result = await request<{ items: Array<Record<string, unknown>> }>('/api/data/label-libraries')
+    return result.items.map(normalizeLibrary)
+  },
   async list(): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(libraries) }
     const result = await request<{ items: Array<Record<string, unknown>> }>('/api/data/label-libraries')
