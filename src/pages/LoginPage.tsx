@@ -77,7 +77,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
       } catch (reason) { setError(reason instanceof Error ? reason.message : '账号验证失败') }
       return
     }
-    if (resetCode.length !== 6 || newPassword.length < 6) return setError('请输入 6 位验证码和至少 6 位的新密码')
+    if (resetCode.length !== 6 || newPassword.length < 8) return setError('请输入 6 位验证码和至少 8 位的新密码')
     try {
       await authApi.confirmPasswordReset({ resetToken, code: resetCode, newPassword })
       setForgotOpen(false)
@@ -119,7 +119,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
       <footer className="login-footer">© 2026 iLabel++ All Rights Reserved</footer>
       {forgotOpen && <Modal title="找回登录密码" onClose={() => setForgotOpen(false)} footer={<><button className="secondary-button" type="button" onClick={() => resetStep === 2 ? setResetStep(1) : setForgotOpen(false)}>{resetStep === 2 ? '上一步' : '取消'}</button><button className="primary-button" type="button" onClick={nextResetStep}>{resetStep === 1 ? '发送验证码' : '确认重置'}</button></>}>
         <div className="reset-steps"><span className="active">1 账号验证</span><i /><span className={resetStep === 2 ? 'active' : ''}>2 设置新密码</span></div>
-        {resetStep === 1 ? <label className="form-field"><span>登录账号</span><div className="input-wrap"><UserRound size={18} /><input value={resetAccount} onChange={(event) => setResetAccount(event.target.value)} placeholder="请输入登录账号" /></div></label> : <div className="reset-fields"><p>验证码已发送至 <strong>{maskedPhone}</strong></p><label className="form-field"><span>验证码</span><div className="input-wrap"><MessageSquareText size={18} /><input value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="请输入 6 位验证码" /></div></label><label className="form-field"><span>新密码</span><div className="input-wrap"><LockKeyhole size={18} /><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="至少 6 位字符" /></div></label></div>}
+        {resetStep === 1 ? <label className="form-field"><span>登录账号</span><div className="input-wrap"><UserRound size={18} /><input value={resetAccount} onChange={(event) => setResetAccount(event.target.value)} placeholder="请输入登录账号" /></div></label> : <div className="reset-fields"><p>验证码已发送至 <strong>{maskedPhone}</strong></p><label className="form-field"><span>验证码</span><div className="input-wrap"><MessageSquareText size={18} /><input value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="请输入 6 位验证码" /></div></label><label className="form-field"><span>新密码</span><div className="input-wrap"><LockKeyhole size={18} /><input type="password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="至少 8 位字符" /></div></label></div>}
         {error && <div className="form-message">{error}</div>}
       </Modal>}
     </main>

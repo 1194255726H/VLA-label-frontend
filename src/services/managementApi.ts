@@ -272,6 +272,7 @@ export const teamApi = {
     return this.getData()
   },
   async saveMember(payload: Partial<Member> & Pick<Member, 'name' | 'account' | 'email' | 'team' | 'roles'> & { password?: string }): Promise<TeamMembersData> {
+    if (!payload.accountId && (payload.password?.length || 0) < 8) throw new Error('初始密码至少 8 位')
     if (runtimeConfig.apiMode === 'mock') { await delay(); if (members.some((item) => item.account === payload.account && item.accountId !== payload.accountId)) throw new Error('登录账号已存在'); if (payload.accountId) members = members.map((item) => item.accountId === payload.accountId ? { ...item, ...payload } as Member : item); else members = [...members, { accountId: String(Date.now()), projects: [], enabled: true, joinedAt: new Date().toISOString().slice(0, 10), ...payload } as Member]; return clone({ teams, members, projects: mockProjectDistribution }) }
     const rolesResult = await request<{ items: Array<Record<string, unknown>> }>('/api/auth/roles')
     const roleIds = rolesResult.items.filter((role) => payload.roles.includes(String(role.name || role.code))).map((role) => Number(role.id))
@@ -290,6 +291,7 @@ export const teamApi = {
     return this.getData()
   },
   async setMemberPassword(accountId: string, password: string) {
+    if (password.length < 8) throw new Error('新密码至少 8 位')
     if (runtimeConfig.apiMode === 'mock') { await delay(); return }
     await request(`/api/auth/members/${encodeURIComponent(accountId)}/password`, { method: 'POST', body: JSON.stringify({ password }) })
   },

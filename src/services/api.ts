@@ -40,6 +40,13 @@ function getCsrfToken() {
   }
 }
 
+function collectErrorMessages(value: unknown): string[] {
+  if (typeof value === 'string') return value.trim() ? [value.trim()] : []
+  if (Array.isArray(value)) return value.flatMap(collectErrorMessages)
+  if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).flatMap(collectErrorMessages)
+  return []
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   headers.set('Accept', 'application/json')
@@ -54,7 +61,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const payload = await response.json().catch(() => ({}))
   const businessFailed = payload?.success === false || (typeof payload?.code === 'string' && payload.code !== 'ok')
   if (!response.ok || businessFailed) {
-    const error = new Error(payload?.message || `请求失败（${response.status}）`) as Error & { code?: string; status?: number }
+    const validationMessages = collectErrorMessages(payload?.errors)
+    const error = new Error(validationMessages.length ? validationMessages.join('；') : payload?.message || `请求失败（${response.status}）`) as Error & { code?: string; status?: number }
     error.code = payload?.code
     error.status = response.status
     throw error
