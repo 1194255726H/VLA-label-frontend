@@ -65,15 +65,20 @@ export interface VideoListItem {
   taskStatus: string
   taskCurrentNode: TaskNode
   taskCurrentAssigneeId?: string
+  taskCurrentAssigneeName?: string
   currentNode: TaskNode
   currentAssigneeId?: string
   currentAssigneeName?: string
   videoStatus: string
   assignmentSource: string
+  sortOrder: number
   videoIndex: number
+  externalVideoId?: string
   videoId?: string
   filename: string
   uri: string
+  sourceUri: string
+  previewUrl: string
   ossBucket: string
   ossKey: string
   duration: number
@@ -81,6 +86,7 @@ export interface VideoListItem {
   storageStatus: StorageStatus
   storageError?: string
   storageCheckedAt?: string
+  videoMeta: Record<string, unknown>
   createdAt: string
   updatedAt: string
   submittedNode?: string
