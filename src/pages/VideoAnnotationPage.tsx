@@ -1047,7 +1047,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     setCommentSubmitting(true)
     try {
       const sequence = Math.max(0, ...videoComments.map((item) => item.sequence)) + 1
-      const comment = await annotationApi.createVideoComment(taskId, { videoId, node: workspace.node, sequence, content: commentDraft.trim().slice(0, 2000), positionX: commentPoint.x, positionY: commentPoint.y })
+      const comment = await annotationApi.createVideoComment(taskId, { videoId, node: workspace.node, sequence, content: commentDraft.trim().slice(0, 100), positionX: commentPoint.x, positionY: commentPoint.y })
       setVideoComments((items) => [...items, comment].sort((left, right) => left.sequence - right.sequence))
       setCommentPoint(undefined)
       setCommentDraft('')
@@ -1252,7 +1252,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <footer><button className="secondary-button" type="button" onClick={() => setCommentsOpen(false)}>关闭</button></footer>
     </div>}
     {shortcutsOpen && <Modal title="快捷键与操作" onClose={() => setShortcutsOpen(false)}><div className="shortcut-guide"><ShortcutColumn title="键盘快捷键" items={keyboardShortcuts} /><ShortcutColumn title="时间轴操作" items={timelineShortcuts} /></div></Modal>}
-    {commentPoint && <Modal title="添加批注" onClose={() => { if (!commentSubmitting) setCommentPoint(undefined) }} footer={<><button className="secondary-button" type="button" disabled={commentSubmitting} onClick={() => setCommentPoint(undefined)}>取消</button><button className="primary-button" type="button" disabled={commentSubmitting || !commentDraft.trim()} onClick={createComment}>{commentSubmitting ? '正在添加...' : '添加批注'}</button></>}><div className="page-comment-form"><p>批注位置：横向 {Math.round(commentPoint.x * 100)}%，纵向 {Math.round(commentPoint.y * 100)}%</p><textarea autoFocus value={commentDraft} maxLength={2000} onChange={(event) => setCommentDraft(event.target.value)} placeholder="请输入批注内容（最多 2000 字）" /><small>{commentDraft.length}/2000</small></div></Modal>}
+    {commentPoint && <Modal title="添加批注" onClose={() => { if (!commentSubmitting) setCommentPoint(undefined) }} footer={<><button className="secondary-button" type="button" disabled={commentSubmitting} onClick={() => setCommentPoint(undefined)}>取消</button><button className="primary-button" type="button" disabled={commentSubmitting || !commentDraft.trim()} onClick={createComment}>{commentSubmitting ? '正在添加...' : '添加批注'}</button></>}><div className="page-comment-form"><p>批注位置：横向 {Math.round(commentPoint.x * 100)}%，纵向 {Math.round(commentPoint.y * 100)}%</p><textarea autoFocus value={commentDraft} maxLength={100} onChange={(event) => setCommentDraft(event.target.value)} placeholder="请输入批注内容（最多 100 字）" /><small>{commentDraft.length}/100</small></div></Modal>}
     {toast && <div className="toast">{toast}</div>}
   </main>
 }

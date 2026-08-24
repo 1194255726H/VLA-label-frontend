@@ -14,9 +14,7 @@ import { formatDateTime } from '../utils/date'
 const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const nodeTones: Record<TaskNode, string> = { annotation: 'cyan', review: 'blue', quality: 'amber', acceptance: 'green' }
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
-const taskStatusLabels: Record<string, string> = { pending: '待处理', processing: '处理中', in_progress: '处理中', returned: '已退回', completed: '已完成', cutting: '切割中', cancelled: '已取消' }
-const decisionLabels: Record<string, string> = { approved: '正常流转', rejected: '已回退/打回' }
-const storageLabels = { available: '存在', missing: '缺失', unchecked: '未确认' }
+const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
 const submittedNodeMap: Record<string, TaskNode> = { annotation: 'annotation', quality_check: 'review', review: 'quality', acceptance: 'acceptance' }
 
 function formatSeconds(value: number) {
@@ -25,19 +23,34 @@ function formatSeconds(value: number) {
   return `${minutes ? `${minutes}分` : ''}${seconds}秒`
 }
 
+function formatClock(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return '—'
+  const totalSeconds = Math.max(0, Math.round(value))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  return hours ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function formatMilliseconds(value: number | null) { return value === null ? '—' : formatClock(value / 1000) }
+
 function actionFor(video: VideoListItem, tab: TaskTab) {
-  if (video.storageStatus === 'missing') return { label: '素材缺失', readonly: true, disabled: true }
-  if (tab === 'submitted' || ['submitted', 'completed'].includes(video.videoStatus) || video.taskStatus === 'completed') return { label: '查看', readonly: true, disabled: false }
+  if (tab === 'submitted' || video.videoStatus === 'completed') return { label: '查看', readonly: true, disabled: !video.taskId && !video.uri }
+  if (!video.taskId) return { label: ['in_progress', 'processing'].includes(video.videoStatus) ? '继续处理' : '开始处理', readonly: false, disabled: true }
   if (['in_progress', 'processing'].includes(video.videoStatus)) return { label: '继续处理', readonly: false, disabled: false }
   return { label: '开始处理', readonly: false, disabled: false }
 }
 
 function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskTab; loading: boolean }) {
   const navigate = useNavigate()
-  const columnCount = tab === 'submitted' ? 12 : 10
+  const columnCount = tab === 'submitted' ? 15 : 14
   async function openVideo(video: VideoListItem) {
     const action = actionFor(video, tab)
     if (action.disabled) return
+    if (action.readonly && !video.taskId && video.uri) {
+      window.open(video.uri, '_blank', 'noopener,noreferrer')
+      return
+    }
     if (!action.readonly && !['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(video.taskId)
     const params = new URLSearchParams({ video_id: video.id, project_id: video.projectId })
     if (action.readonly) params.set('readonly', '1')
@@ -47,29 +60,21 @@ function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskT
     <div className="table-scroll">
       <table className={`task-table workbench-video-table ${tab}`}>
         <thead><tr>
-          <th>视频名称</th><th>所属任务</th><th>视频状态</th><th>当前节点</th><th>当前处理人</th><th>任务状态</th>
-          {tab === 'submitted' && <><th>提交节点</th><th>流转类型</th></>}
-          <th>素材状态</th><th>时长</th><th>{tab === 'pending' ? '最后更新时间' : '提交时间'}</th><th className="action-column">操作</th>
+          <th>视频名称</th><th>状态</th><th>当前节点</th>
+          {tab === 'submitted' && <th>提交节点</th>}
+          <th>流转类型</th><th>原视频时长</th><th>切片覆盖时长</th><th>有效片段时长</th><th>无效片段时长</th><th>未覆盖时长</th><th>单次任务数</th><th>小目标数</th><th>当前处理人</th><th>创建时间</th><th className="action-column">操作</th>
         </tr></thead>
         <tbody>
-          {!loading && (items.length === 0 ? <tr><td colSpan={columnCount}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video) => {
+          {!loading && (items.length === 0 ? <tr><td colSpan={columnCount}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video, index) => {
             const action = actionFor(video, tab)
             const submittedNode = submittedNodeMap[video.submittedNode || '']
-            const submittedDecision = video.submittedDecision || ''
-            return <tr key={video.id}>
-              <td><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.videoId || video.uri || `#${video.id}`}</small></div></td>
-              <td><div className="data-name"><strong title={video.taskTitle}>{video.taskTitle || '-'}</strong><small>{video.taskExternalTaskId || video.taskId}</small></div></td>
+            return <tr key={`${video.id}-${video.submittedNode || 'pending'}-${index}`}>
+              <td><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `#${video.id}`}</small></div></td>
               <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
               <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>
-              <td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td>
-              <td><span className={`status-tag ${video.taskStatus}`}>{taskStatusLabels[video.taskStatus] || video.taskStatus || '-'}</span></td>
-              {tab === 'submitted' && <>
-                <td>{submittedNode ? <span className={`node-tag ${nodeTones[submittedNode]}`}>{nodeLabels[submittedNode]}</span> : '-'}</td>
-                <td>{submittedDecision ? <span className={`status-tag ${submittedDecision}`}>{decisionLabels[submittedDecision] || submittedDecision}</span> : '-'}</td>
-              </>}
-              <td><span className={`storage-tag ${video.storageStatus}`} title={video.storageError}>{storageLabels[video.storageStatus]}</span></td>
-              <td>{formatSeconds(video.duration)}</td>
-              <td>{tab === 'pending' ? formatDateTime(video.updatedAt) : formatDateTime(video.submittedAt || video.updatedAt)}</td>
+              {tab === 'submitted' && <td>{submittedNode ? <span className={`node-tag ${nodeTones[submittedNode]}`}>{nodeLabels[submittedNode]}</span> : '-'}</td>}
+              <td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
+              <td>{formatClock(video.duration)}</td><td>{formatMilliseconds(video.selectedDurationMs)}</td><td>{formatMilliseconds(video.effectiveDurationMs)}</td><td>{formatMilliseconds(video.invalidDurationMs)}</td><td>{formatMilliseconds(video.unselectedDurationMs)}</td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td>
               <td><div className="row-actions"><button type="button" disabled={action.disabled} onClick={() => openVideo(video)}>{action.label}</button></div></td>
             </tr>
           }))}
@@ -149,7 +154,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
 
   async function openRecommendedTask() {
     const video = snapshot?.recommendedTask
-    if (!video) return
+    if (!video || !video.taskId) return
     const action = actionFor(video, 'pending')
     if (action.disabled) return
     if (!['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(video.taskId)
@@ -168,8 +173,8 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
           </div>
           {!loading && snapshot && (snapshot.recommendedTask ? <div className="recommended-task">
             <div className="recommended-icon"><Sparkles size={19} /></div>
-            <div><small>推荐优先处理</small><strong>{snapshot.recommendedTask.filename}</strong><span>{nodeLabels[snapshot.recommendedTask.currentNode]} · {videoStatusLabels[snapshot.recommendedTask.videoStatus] || snapshot.recommendedTask.videoStatus} · 更新于 {formatDateTime(snapshot.recommendedTask.updatedAt).slice(11)}</span></div>
-            <button className="primary-button" type="button" disabled={snapshot.recommendedTask.storageStatus === 'missing'} onClick={openRecommendedTask}><Play size={16} />{['in_progress', 'processing'].includes(snapshot.recommendedTask.videoStatus) ? '继续处理' : '开始处理'}</button>
+            <div><small>推荐优先处理</small><strong>{snapshot.recommendedTask.filename}</strong><span>{nodeLabels[snapshot.recommendedTask.currentNode]} · {videoStatusLabels[snapshot.recommendedTask.videoStatus] || snapshot.recommendedTask.videoStatus} · 创建于 {formatDateTime(snapshot.recommendedTask.createdAt)}</span></div>
+            <button className="primary-button" type="button" disabled={!snapshot.recommendedTask.taskId} title={!snapshot.recommendedTask.taskId ? '接口未返回 task_id，无法进入作业页' : undefined} onClick={openRecommendedTask}><Play size={16} />{['in_progress', 'processing'].includes(snapshot.recommendedTask.videoStatus) ? '继续处理' : '开始处理'}</button>
           </div> : tab === 'pending' ? <button className="primary-button claim-random-button" type="button" onClick={() => claimTask('annotation')}>随机领取</button> : null)}
         </section>
 

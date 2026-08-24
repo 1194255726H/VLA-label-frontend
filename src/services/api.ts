@@ -309,7 +309,10 @@ export const workbenchApi = {
     const rawVideos = effectiveProjectId
       ? await request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/workbench/videos?${params}`)
       : { items: [], total: 0, page: pageNo, page_size: pageSize, pages: 0 }
-    const videoItems = rawVideos.items.map(normalizeVideo)
+    const videoItems = rawVideos.items.map((item) => {
+      const video = normalizeVideo(item)
+      return video.projectId ? video : { ...video, projectId: effectiveProjectId }
+    })
     const tasks: WorkbenchSnapshot['tasks'] = { items: videoItems, page: { pageNo: rawVideos.page || pageNo, pageSize: rawVideos.page_size || pageSize, total: rawVideos.total || 0 }, pages: rawVideos.pages || 1, viewMode: 'personal', selfClaimEnabled: true }
     return {
       projects: projects.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: String(item.id) === effectiveProjectId && query.tab === 'pending' ? rawVideos.total : 0, claimLimit: numberValue(config.active_task_limit) || 10 } }),
