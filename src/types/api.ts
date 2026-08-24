@@ -93,6 +93,13 @@ export interface VideoListItem {
   submittedById?: string
   submittedAt?: string
   submittedDecision?: string
+  workType: 'normal' | 'returned'
+  selectedDurationMs: number
+  effectiveDurationMs: number
+  invalidDurationMs: number
+  unselectedDurationMs: number | null
+  atomicTaskCount: number
+  atomicActionCount: number
 }
 
 export interface TaskPage {
@@ -134,10 +141,11 @@ export interface TaskQuery {
 }
 
 export interface ProjectVideoQuery {
-  keyword?: string
+  filename?: string
   status?: string
-  currentNode?: TaskNode | ''
-  storageStatus?: StorageStatus | ''
+  currentAssigneeId?: string
+  createdAtStart?: string
+  createdAtEnd?: string
   page?: number
   pageSize?: number
 }

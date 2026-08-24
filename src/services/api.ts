@@ -252,6 +252,13 @@ function normalizeVideo(item: Record<string, unknown>): VideoListItem {
     submittedById: optionalString(item.submitted_by_id),
     submittedAt: optionalString(item.submitted_at),
     submittedDecision: optionalString(item.submitted_decision),
+    workType: String(item.work_type || 'normal') === 'returned' ? 'returned' : 'normal',
+    selectedDurationMs: numberValue(item.selected_duration_ms),
+    effectiveDurationMs: numberValue(item.effective_duration_ms),
+    invalidDurationMs: numberValue(item.invalid_duration_ms),
+    unselectedDurationMs: item.unselected_duration_ms === null || item.unselected_duration_ms === undefined ? null : numberValue(item.unselected_duration_ms),
+    atomicTaskCount: numberValue(item.atomic_task_count),
+    atomicActionCount: numberValue(item.atomic_action_count),
   }
 }
 

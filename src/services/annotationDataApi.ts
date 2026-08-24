@@ -8,16 +8,13 @@ const pendingVideoListRequests = new Map<string, Promise<ProjectVideoPage>>()
 
 function delay() { return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay)) }
 function numberValue(value: unknown) { return value === null || value === undefined || value === '' ? 0 : Number(value) }
+function nullableNumberValue(value: unknown) { return value === null || value === undefined || value === '' ? null : Number(value) }
 function optionalString(value: unknown) { return value === null || value === undefined || value === '' ? undefined : String(value) }
 
 function normalizeNode(value: unknown): TaskNode {
   const raw = String(value || 'annotation')
   const nodeMap: Record<string, TaskNode> = { '标注': 'annotation', '质检': 'review', '审核': 'quality', '验收': 'acceptance', quality_check: 'review', review: 'quality' }
   return nodeMap[raw] || raw as TaskNode
-}
-
-function backendNode(node: TaskNode | '') {
-  return ({ annotation: 'annotation', review: 'quality_check', quality: 'review', acceptance: 'acceptance' } as const)[node as TaskNode] || ''
 }
 
 function normalize(item: Record<string, unknown>): VideoListItem {
@@ -29,6 +26,7 @@ function normalize(item: Record<string, unknown>): VideoListItem {
     filename: String(item.filename || item.external_video_id || item.video_id || item.uri || `视频 ${item.id || ''}`), uri: String(item.uri || item.preview_url || ''), sourceUri: String(item.source_uri || ''), previewUrl: String(item.preview_url || item.uri || ''), ossBucket: String(item.oss_bucket || ''), ossKey: String(item.oss_key || ''),
     duration: numberValue(item.duration), fileSize: numberValue(item.file_size), storageStatus: String(item.storage_status || 'unchecked') as VideoListItem['storageStatus'], storageError: optionalString(item.storage_error), storageCheckedAt: optionalString(item.storage_checked_at),
     videoMeta: item.video_meta && typeof item.video_meta === 'object' ? item.video_meta as Record<string, unknown> : {}, createdAt: String(item.created_at || ''), updatedAt: String(item.updated_at || ''), submittedNode: optionalString(item.submitted_node), submittedById: optionalString(item.submitted_by_id), submittedAt: optionalString(item.submitted_at), submittedDecision: optionalString(item.submitted_decision),
+    workType: String(item.work_type || 'normal') === 'returned' ? 'returned' : 'normal', selectedDurationMs: numberValue(item.selected_duration_ms), effectiveDurationMs: numberValue(item.effective_duration_ms), invalidDurationMs: numberValue(item.invalid_duration_ms), unselectedDurationMs: nullableNumberValue(item.unselected_duration_ms), atomicTaskCount: numberValue(item.atomic_task_count), atomicActionCount: numberValue(item.atomic_action_count),
   }
 }
 
@@ -45,15 +43,16 @@ export const annotationDataApi = {
     const pageSize = query.pageSize || 20
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
-      const keyword = query.keyword?.toLowerCase()
-      const items = mockItems(projectId).filter((item) => (!keyword || `${item.filename}${item.videoId}${item.uri}${item.taskTitle}${item.taskExternalTaskId}`.toLowerCase().includes(keyword)) && (!query.status || item.taskStatus === query.status) && (!query.currentNode || item.currentNode === query.currentNode) && (!query.storageStatus || item.storageStatus === query.storageStatus))
+      const filename = query.filename?.toLowerCase()
+      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.status || item.videoStatus === query.status) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
       return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize, pages: Math.max(1, Math.ceil(items.length / pageSize)) }
     }
     const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
-    if (query.keyword) params.set('keyword', query.keyword)
+    if (query.filename) params.set('filename', query.filename)
     if (query.status) params.set('status', query.status)
-    if (query.currentNode) params.set('current_node', backendNode(query.currentNode))
-    if (query.storageStatus) params.set('storage_status', query.storageStatus)
+    if (query.currentAssigneeId) params.set('current_assignee_id', query.currentAssigneeId)
+    if (query.createdAtStart) params.set('created_at_start', query.createdAtStart)
+    if (query.createdAtEnd) params.set('created_at_end', query.createdAtEnd)
     const path = `/api/projects/${encodeURIComponent(projectId)}/videos?${params}`
     const existing = pendingVideoListRequests.get(path)
     if (existing) return existing
