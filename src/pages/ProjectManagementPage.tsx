@@ -131,7 +131,10 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   const [openingProjectId, setOpeningProjectId] = useState('')
   const projectPermissionIdentities = [...session.account.roles, ...session.account.roleLabels]
     .map((value) => value.toLowerCase().replace(/[\s_-]/g, ''))
-  const canCreateProject = Boolean(session.account.isStaff || session.account.isSuperuser || projectPermissionIdentities.some((value) => ['admin', 'systemadmin', '管理员', '系统管理员', '超级管理员', '系统超级管理员'].includes(value)))
+  const canCreateProject = Boolean(session.account.isStaff || session.account.isSuperuser || projectPermissionIdentities.some((value) => [
+    'admin', 'administrator', 'normaladmin', 'generaladmin', 'platformadmin', 'projectadmin', 'systemadmin',
+    '管理员', '普通管理员', '项目管理员', '平台管理员', '系统管理员', '超级管理员', '系统超级管理员',
+  ].includes(value)))
 
   useEffect(() => { Promise.all([projectApi.list(), teamApi.getData(false)]).then(([projects, teamData]) => { setItems(projects); setTeams(teamData.teams); setMembers(teamData.members) }).finally(() => setLoading(false)) }, [])
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2500); return () => clearTimeout(timer) }, [toast])
