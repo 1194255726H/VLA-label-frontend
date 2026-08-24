@@ -975,7 +975,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const gap = result.goals.map((goal) => ({ goal, gap: firstCoverageGap(goal, result) })).find((item) => item.gap)
     if (gap?.gap) { setSelectedId(gap.goal.id); seek(gap.gap.startFrame); return setToast(`单次任务存在未覆盖区间 F${gap.gap.startFrame}–F${gap.gap.endFrame}`) }
     const missingSkill = result.actions.find((item) => item.type === 'action' && !item.labelId)
-    if (missingSkill) { setSelectedId(missingSkill.id); seek(missingSkill.startFrame); return setToast('普通小目标必须选择项目原子技能') }
+    if (missingSkill) { setSelectedId(missingSkill.id); seek(missingSkill.startFrame); return setToast('小目标必须关联标签') }
     const fullyInvalid = result.actions.find((item) => result.invalidRanges.some((range) => range.startFrame <= item.startFrame && range.endFrame >= item.endFrame))
     if (fullyInvalid) { setSelectedId(fullyInvalid.id); return setToast('小目标被无效区间完全覆盖，请调整或删除') }
     try {
@@ -1137,6 +1137,11 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); if (editing) return; if (event.shiftKey) redo(); else undo(); return }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); if (!editing) redo(); return }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'e') {
+        event.preventDefault()
+        if (!readonly) addKeyframe()
+        return
+      }
       const pointerFrame = !playing && hoverPoint ? hoverPoint.frame : currentFrame
       if (!readonly && event.key.toLowerCase() === 'q' && !mark) setMark({ kind: hoverPoint?.level === 'action' || (!hoverPoint && selectedGoal) ? 'action' : 'goal', frame: pointerFrame })
       if (!readonly && event.key.toLowerCase() === 'w' && !mark) {

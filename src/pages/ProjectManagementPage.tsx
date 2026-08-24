@@ -129,6 +129,9 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   const [labelPickerOpen, setLabelPickerOpen] = useState(false)
   const [uploadingGuideline, setUploadingGuideline] = useState(false)
   const [openingProjectId, setOpeningProjectId] = useState('')
+  const projectPermissionIdentities = [...session.account.roles, ...session.account.roleLabels]
+    .map((value) => value.toLowerCase().replace(/[\s_-]/g, ''))
+  const canCreateProject = Boolean(session.account.isStaff || session.account.isSuperuser || projectPermissionIdentities.some((value) => ['admin', 'systemadmin', '管理员', '系统管理员', '超级管理员', '系统超级管理员'].includes(value)))
 
   useEffect(() => { Promise.all([projectApi.list(), teamApi.getData(false)]).then(([projects, teamData]) => { setItems(projects); setTeams(teamData.teams); setMembers(teamData.members) }).finally(() => setLoading(false)) }, [])
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2500); return () => clearTimeout(timer) }, [toast])
@@ -190,7 +193,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
       <section className="management-panel panel">
         <header className="management-toolbar">
           <div className="status-segments"><button className={status === 'all' ? 'active' : ''} onClick={() => setStatus('all')} type="button">全部 <span>{items.length}</span></button>{Object.entries(statusLabels).map(([key, label]) => <button className={status === key ? 'active' : ''} onClick={() => setStatus(key as ProjectStatus)} type="button" key={key}>{label} <span>{counts[key] || 0}</span></button>)}</div>
-          <button className="primary-button" type="button" onClick={openCreate}><Plus size={16} />创建项目</button>
+          {canCreateProject && <button className="primary-button" type="button" onClick={openCreate}><Plus size={16} />创建项目</button>}
         </header>
         <div className="management-filters">
           <label><span>项目名称</span><div className="filter-control"><Search size={16} /><input value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="请输入项目名称或编号" /></div></label>
