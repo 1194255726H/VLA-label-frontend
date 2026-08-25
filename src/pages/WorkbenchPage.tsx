@@ -1,6 +1,6 @@
 import {
   ArrowRight, ChevronDown, CircleAlert, Clock3,
-  Filter, ListFilter, Play, RefreshCw, Sparkles,
+  ListFilter, Play, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -16,12 +16,6 @@ const nodeTones: Record<TaskNode, string> = { annotation: 'cyan', review: 'blue'
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
 const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
 const submittedNodeMap: Record<string, TaskNode> = { annotation: 'annotation', quality_check: 'review', review: 'quality', acceptance: 'acceptance' }
-
-function formatSeconds(value: number) {
-  const minutes = Math.floor(value / 60)
-  const seconds = value % 60
-  return `${minutes ? `${minutes}分` : ''}${seconds}秒`
-}
 
 function formatClock(value: number | null) {
   if (value === null || !Number.isFinite(value)) return '—'
@@ -109,8 +103,8 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const fetchWorkbenchData = useCallback(async () => {
     const otherTab: TaskTab = tab === 'pending' ? 'submitted' : 'pending'
     const [result, otherTabResult] = await Promise.all([
-      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize: 10 }),
-      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab: otherTab, pageNo: 1, pageSize: 1 }),
+      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize: 10, includeOverview: true }),
+      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab: otherTab, pageNo: 1, pageSize: 1, includeOverview: false }),
     ])
     return {
       result,
@@ -207,12 +201,12 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
 
           <aside className="workbench-side">
             <section className="metric-panel panel">
-              <header><div><span>今日标注量</span><small>截至当前</small></div><Clock3 size={19} /></header>
-              <div className="metric-main"><strong>{snapshot?.summary.todayObjects.toLocaleString() || 0}</strong><span>个对象</span></div>
-              <div className="metric-grid"><div><span>有效时长</span><strong>{formatSeconds(snapshot?.summary.validDuration || 0)}</strong></div><div><span>单次任务</span><strong>{snapshot?.summary.goalCount || 0}</strong></div><div><span>小目标</span><strong>{snapshot?.summary.actionCount || 0}</strong></div></div>
+              <header><div><span>今日作业统计</span><small>{snapshot?.summary.date || '截至当前'}</small></div><Clock3 size={19} /></header>
+              <div className="metric-main"><strong>{snapshot?.summary.processedCount.toLocaleString() || 0}</strong><span>条处理数据</span></div>
+              <div className="metric-grid daily-stats-grid"><div><span>完成作业</span><strong>{snapshot?.summary.completedCount || 0} 条</strong></div><div><span>切片覆盖时长</span><strong>{formatMilliseconds(snapshot?.summary.selectedDurationMs || 0)}</strong></div><div><span>有效片段时长</span><strong>{formatMilliseconds(snapshot?.summary.effectiveDurationMs || 0)}</strong></div><div><span>无效片段时长</span><strong>{formatMilliseconds(snapshot?.summary.invalidDurationMs || 0)}</strong></div><div><span>无效率</span><strong>{snapshot?.summary.invalidRatePct || 0}%</strong></div><div><span>单次任务</span><strong>{snapshot?.summary.atomicTaskCount || 0}</strong></div><div><span>小目标</span><strong>{snapshot?.summary.atomicActionCount || 0}</strong></div></div>
             </section>
             <section className="claim-panel panel">
-              <header><div><h2>待领取数据</h2><span>共 {(snapshot?.claimPool || []).reduce((sum, item) => sum + item.count, 0)} 条</span></div><button type="button"><Filter size={15} />筛选</button></header>
+              <header><div><h2>待领取数据</h2><span>共 {(snapshot?.claimPool || []).reduce((sum, item) => sum + item.count, 0)} 条</span></div></header>
               <div className="claim-list">{snapshot?.claimPool.map((item) => <article className={`claim-card ${nodeTones[item.node]}`} key={item.node}><div><span>{item.label}</span><strong>{item.count}<small> 条可领取</small></strong></div><button type="button" disabled={item.count === 0 || claimingNode !== null} onClick={() => claimTask(item.node)}>{claimingNode === item.node ? <RefreshCw className="spinning" size={16} /> : <ArrowRight size={16} />}<span>领取</span></button></article>)}</div>
             </section>
           </aside>

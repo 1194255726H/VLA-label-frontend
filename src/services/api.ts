@@ -71,7 +71,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function normalizeUser(payload: Record<string, unknown>): SessionResponse {
-  const raw = (payload.account || payload) as Record<string, unknown>
+  const raw = (payload.account || payload.user || payload) as Record<string, unknown>
   const booleanValue = (...values: unknown[]) => values.some((value) => value === true || value === 1 || value === '1' || value === 'true')
   const account = {
     id: String(raw.id || raw.userCode || ''),
@@ -101,7 +101,10 @@ export const authApi = {
       return session
     }
     const payload = await request<Record<string, unknown>>('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
-    const session = normalizeUser(payload)
+    // 登录接口只保证返回基础用户信息，角色权限以 /auth/me 的完整数据为准。
+    // 否则首次登录后要等刷新页面才会识别 admin 等角色。
+    const currentUser = await request<Record<string, unknown>>('/api/auth/me').catch(() => payload)
+    const session = normalizeUser(currentUser)
     saveSession(session)
     return session
   },
@@ -316,16 +319,22 @@ export const workbenchApi = {
         recommendedTask: query.tab === 'pending' ? all.map(mockVideo)[0] || null : null,
         tasks: { items: all.map(mockVideo).slice((pageNo - 1) * pageSize, pageNo * pageSize), page: { pageNo, pageSize, total: all.length }, pages: Math.max(1, Math.ceil(all.length / pageSize)), viewMode: 'personal', selfClaimEnabled: true },
         claimPool: mutablePool.map((item) => ({ ...item })),
-        summary: { todayObjects: 3008, validDuration: 972, goalCount: 68, actionCount: 214 },
+        summary: { date: new Date().toISOString().slice(0, 10), processedCount: 12, completedCount: 10, effectiveDurationMs: 972000, invalidDurationMs: 86000, selectedDurationMs: 1058000, invalidRatePct: 8.13, atomicTaskCount: 68, atomicActionCount: 214 },
       }
     }
     const projects = await loadWorkbenchProjects()
     const effectiveProjectId = query.projectId || String(projects.items[0]?.id || '')
     const pageNo = query.pageNo || 1; const pageSize = query.pageSize || 10
     const params = new URLSearchParams({ operator_id: query.operatorId, tab: query.tab, page: String(pageNo), page_size: String(pageSize) })
-    const rawVideos = effectiveProjectId
-      ? await request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/workbench/videos?${params}`)
-      : { items: [], total: 0, page: pageNo, page_size: pageSize, pages: 0 }
+    const emptyClaims = { annotation: 0, quality_check: 0, review: 0, acceptance: 0 }
+    const emptySummary: WorkbenchSnapshot['summary'] = { date: '', processedCount: 0, completedCount: 0, effectiveDurationMs: 0, invalidDurationMs: 0, selectedDurationMs: 0, invalidRatePct: 0, atomicTaskCount: 0, atomicActionCount: 0 }
+    const [rawVideos, pendingClaims, dailyStats] = effectiveProjectId
+      ? await Promise.all([
+          request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/workbench/videos?${params}`),
+          query.includeOverview === false ? Promise.resolve(emptyClaims) : request<typeof emptyClaims>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/pending-claims`),
+          query.includeOverview === false ? Promise.resolve(emptySummary) : request<{ date: string; processed_count: number; completed_count: number; effective_duration_ms: number; invalid_duration_ms: number; selected_duration_ms: number; invalid_rate_pct: number; atomic_task_count: number; atomic_action_count: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/my-daily-stats`),
+        ])
+      : [{ items: [], total: 0, page: pageNo, page_size: pageSize, pages: 0 }, emptyClaims, emptySummary]
     const videoItems = rawVideos.items.map((item) => {
       const video = normalizeVideo(item)
       return video.projectId ? video : { ...video, projectId: effectiveProjectId }
@@ -336,8 +345,17 @@ export const workbenchApi = {
       currentProjectId: effectiveProjectId,
       recommendedTask: query.tab === 'pending' ? videoItems[0] || null : null,
       tasks,
-      claimPool: [],
-      summary: { todayObjects: 0, validDuration: 0, goalCount: 0, actionCount: 0 },
+      claimPool: [
+        { node: 'annotation', label: '标注', count: numberValue(pendingClaims.annotation) },
+        { node: 'review', label: '质检', count: numberValue(pendingClaims.quality_check) },
+        { node: 'quality', label: '审核', count: numberValue(pendingClaims.review) },
+        { node: 'acceptance', label: '验收', count: numberValue(pendingClaims.acceptance) },
+      ],
+      summary: 'processed_count' in dailyStats ? {
+        date: String(dailyStats.date || ''), processedCount: numberValue(dailyStats.processed_count), completedCount: numberValue(dailyStats.completed_count),
+        effectiveDurationMs: numberValue(dailyStats.effective_duration_ms), invalidDurationMs: numberValue(dailyStats.invalid_duration_ms), selectedDurationMs: numberValue(dailyStats.selected_duration_ms),
+        invalidRatePct: numberValue(dailyStats.invalid_rate_pct), atomicTaskCount: numberValue(dailyStats.atomic_task_count), atomicActionCount: numberValue(dailyStats.atomic_action_count),
+      } : dailyStats,
     }
   },
   async claim(projectId: string, node: string): Promise<WorkbenchTask> {

@@ -117,10 +117,15 @@ export interface ClaimPoolItem {
 }
 
 export interface WorkbenchSummary {
-  todayObjects: number
-  validDuration: number
-  goalCount: number
-  actionCount: number
+  date: string
+  processedCount: number
+  completedCount: number
+  effectiveDurationMs: number
+  invalidDurationMs: number
+  selectedDurationMs: number
+  invalidRatePct: number
+  atomicTaskCount: number
+  atomicActionCount: number
 }
 
 export interface WorkbenchSnapshot {
@@ -138,6 +143,7 @@ export interface TaskQuery {
   tab: TaskTab
   pageNo?: number
   pageSize?: number
+  includeOverview?: boolean
 }
 
 export interface ProjectVideoQuery {
@@ -186,6 +192,7 @@ export interface ManagedProject {
   unselectedDuration: number
   goalCount: number
   actionCount: number
+  currentNode?: '标注' | '质检' | '审核' | '验收'
   completionNode: '质检' | '审核' | '验收'
   modelGenerationNode?: '标注' | '质检' | '审核' | '验收'
   progress: number
