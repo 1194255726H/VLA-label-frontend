@@ -213,6 +213,23 @@ function optionalString(value: unknown) {
   return value === null || value === undefined || value === '' ? undefined : String(value)
 }
 
+function objectValue(value: unknown) {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+}
+
+function objectItems(value: unknown) {
+  if (Array.isArray(value)) return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+  const object = objectValue(value)
+  return Array.isArray(object.items) ? object.items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : []
+}
+
+function mediaName(value: unknown) {
+  const raw = String(value || '').split('?')[0]
+  const name = raw.slice(raw.lastIndexOf('/') + 1)
+  try { return decodeURIComponent(name).toLowerCase().replace(/\.[^.]+$/, '') }
+  catch { return name.toLowerCase().replace(/\.[^.]+$/, '') }
+}
+
 function normalizeVideo(item: Record<string, unknown>): VideoListItem {
   return {
     id: String(item.id || ''),
@@ -338,5 +355,27 @@ export const workbenchApi = {
     if (!candidate) throw new Error('当前没有可领取任务')
     const claimed = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(String(candidate.id))}/claim`, { method: 'POST', body: '{}' })
     return normalizeTask((claimed.task || claimed) as Record<string, unknown>)
+  },
+  async resolveTaskId(video: VideoListItem): Promise<string> {
+    if (video.taskId) return video.taskId
+    if (runtimeConfig.apiMode === 'mock') return mockTasks[0]?.id || ''
+    const response = await request<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>('/api/tasks/my?page_size=100')
+    const tasks = Array.isArray(response) ? response : objectItems(response)
+    const videoRecordId = String(video.id)
+    const externalVideoId = String(video.externalVideoId || video.videoId || '')
+    const filename = mediaName(video.filename)
+    const matched = tasks.find((raw) => {
+      const task = Object.keys(objectValue(raw.task)).length ? objectValue(raw.task) : raw
+      const projectId = String(task.project_id || objectValue(task.project).id || '')
+      if (video.projectId && projectId && projectId !== video.projectId) return false
+      const nestedVideos = [task.videos, task.task_videos, task.video_items, raw.videos, raw.task_videos].flatMap(objectItems)
+      if (nestedVideos.some((item) => String(item.id || item.video_id || '') === videoRecordId)) return true
+      if (externalVideoId && nestedVideos.some((item) => String(item.external_video_id || item.video_id || '') === externalVideoId)) return true
+      if (String(task.video_id || task.task_video_id || '') === videoRecordId) return true
+      const taskMediaName = mediaName(task.video_uri || task.uri || task.preview_url)
+      return Boolean(taskMediaName && (taskMediaName === filename || taskMediaName === mediaName(video.uri)))
+    })
+    const task = matched && (Object.keys(objectValue(matched.task)).length ? objectValue(matched.task) : matched)
+    return task ? String(task.id || task.task_id || '') : ''
   },
 }

@@ -36,25 +36,33 @@ function formatMilliseconds(value: number | null) { return value === null ? '—
 
 function actionFor(video: VideoListItem, tab: TaskTab) {
   if (tab === 'submitted' || video.videoStatus === 'completed') return { label: '查看', readonly: true, disabled: !video.taskId && !video.uri }
-  if (!video.taskId) return { label: ['in_progress', 'processing'].includes(video.videoStatus) ? '继续处理' : '开始处理', readonly: false, disabled: true }
   if (['in_progress', 'processing'].includes(video.videoStatus)) return { label: '继续处理', readonly: false, disabled: false }
   return { label: '开始处理', readonly: false, disabled: false }
 }
 
-function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskTab; loading: boolean }) {
+function TaskTable({ items, tab, loading, onError }: { items: VideoListItem[]; tab: TaskTab; loading: boolean; onError: (message: string) => void }) {
   const navigate = useNavigate()
+  const [openingVideoId, setOpeningVideoId] = useState('')
   const columnCount = tab === 'submitted' ? 15 : 14
   async function openVideo(video: VideoListItem) {
     const action = actionFor(video, tab)
     if (action.disabled) return
-    if (action.readonly && !video.taskId && video.uri) {
-      window.open(video.uri, '_blank', 'noopener,noreferrer')
-      return
+    setOpeningVideoId(video.id)
+    try {
+      const taskId = video.taskId || await workbenchApi.resolveTaskId(video)
+      if (!taskId) {
+        if (action.readonly && video.uri) return window.open(video.uri, '_blank', 'noopener,noreferrer')
+        throw new Error('未找到该视频所属任务，请后端在工作台视频接口中返回 task_id')
+      }
+      if (!action.readonly && !['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(taskId)
+      const params = new URLSearchParams({ video_id: video.id, project_id: video.projectId })
+      if (action.readonly) params.set('readonly', '1')
+      navigate(`/annotation/${encodeURIComponent(taskId)}?${params}`)
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : '无法进入视频作业页')
+    } finally {
+      setOpeningVideoId('')
     }
-    if (!action.readonly && !['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(video.taskId)
-    const params = new URLSearchParams({ video_id: video.id, project_id: video.projectId })
-    if (action.readonly) params.set('readonly', '1')
-    navigate(`/annotation/${encodeURIComponent(video.taskId)}?${params}`)
   }
   return (
     <div className="table-scroll">
@@ -75,7 +83,7 @@ function TaskTable({ items, tab, loading }: { items: VideoListItem[]; tab: TaskT
               {tab === 'submitted' && <td>{submittedNode ? <span className={`node-tag ${nodeTones[submittedNode]}`}>{nodeLabels[submittedNode]}</span> : '-'}</td>}
               <td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
               <td>{formatClock(video.duration)}</td><td>{formatMilliseconds(video.selectedDurationMs)}</td><td>{formatMilliseconds(video.effectiveDurationMs)}</td><td>{formatMilliseconds(video.invalidDurationMs)}</td><td>{formatMilliseconds(video.unselectedDurationMs)}</td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td>
-              <td><div className="row-actions"><button type="button" disabled={action.disabled} onClick={() => openVideo(video)}>{action.label}</button></div></td>
+              <td><div className="row-actions"><button type="button" disabled={action.disabled || Boolean(openingVideoId)} onClick={() => openVideo(video)}>{openingVideoId === video.id ? '正在打开...' : action.label}</button></div></td>
             </tr>
           }))}
         </tbody>
@@ -95,6 +103,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [claimingNode, setClaimingNode] = useState<TaskNode | null>(null)
+  const [openingRecommended, setOpeningRecommended] = useState(false)
   const [toast, setToast] = useState('')
 
   const fetchWorkbenchData = useCallback(async () => {
@@ -154,11 +163,15 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
 
   async function openRecommendedTask() {
     const video = snapshot?.recommendedTask
-    if (!video || !video.taskId) return
-    const action = actionFor(video, 'pending')
-    if (action.disabled) return
-    if (!['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(video.taskId)
-    navigate(`/annotation/${encodeURIComponent(video.taskId)}?video_id=${encodeURIComponent(video.id)}&project_id=${encodeURIComponent(video.projectId)}`)
+    if (!video || openingRecommended) return
+    setOpeningRecommended(true)
+    try {
+      const taskId = video.taskId || await workbenchApi.resolveTaskId(video)
+      if (!taskId) throw new Error('未找到该视频所属任务，请后端在工作台视频接口中返回 task_id')
+      if (!['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(taskId)
+      navigate(`/annotation/${encodeURIComponent(taskId)}?video_id=${encodeURIComponent(video.id)}&project_id=${encodeURIComponent(video.projectId)}`)
+    } catch (reason) { setToast(reason instanceof Error ? reason.message : '无法进入视频作业页') }
+    finally { setOpeningRecommended(false) }
   }
 
   return (
@@ -174,7 +187,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
           {!loading && snapshot && (snapshot.recommendedTask ? <div className="recommended-task">
             <div className="recommended-icon"><Sparkles size={19} /></div>
             <div><small>推荐优先处理</small><strong>{snapshot.recommendedTask.filename}</strong><span>{nodeLabels[snapshot.recommendedTask.currentNode]} · {videoStatusLabels[snapshot.recommendedTask.videoStatus] || snapshot.recommendedTask.videoStatus} · 创建于 {formatDateTime(snapshot.recommendedTask.createdAt)}</span></div>
-            <button className="primary-button" type="button" disabled={!snapshot.recommendedTask.taskId} title={!snapshot.recommendedTask.taskId ? '接口未返回 task_id，无法进入作业页' : undefined} onClick={openRecommendedTask}><Play size={16} />{['in_progress', 'processing'].includes(snapshot.recommendedTask.videoStatus) ? '继续处理' : '开始处理'}</button>
+            <button className="primary-button" type="button" disabled={openingRecommended} onClick={openRecommendedTask}><Play size={16} />{openingRecommended ? '正在打开...' : ['in_progress', 'processing'].includes(snapshot.recommendedTask.videoStatus) ? '继续处理' : '开始处理'}</button>
           </div> : tab === 'pending' ? <button className="primary-button claim-random-button" type="button" onClick={() => claimTask('annotation')}>随机领取</button> : null)}
         </section>
 
@@ -188,7 +201,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
               <button className={tab === 'pending' ? 'active' : ''} type="button" onClick={() => { if (tab === 'pending') return; setLoading(true); setTab('pending'); setPageNo(1) }}>待处理<span>{tabTotals.pending}</span></button>
               <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { if (tab === 'submitted') return; setLoading(true); setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
             </div>
-            <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} />
+            <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} onError={setToast} />
             <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={(next) => { setLoading(true); setPageNo(next) }} /></footer>
           </section>
 
