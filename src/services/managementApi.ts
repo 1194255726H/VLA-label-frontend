@@ -79,10 +79,10 @@ export const projectApi = {
     return normalizeProject(record(result.project || result))
   },
   async save(payload: ProjectPayload): Promise<ManagedProject[]> {
-    if (!payload.projectId && payload.deliveryAt) {
+    if (payload.deliveryAt) {
       const now = new Date()
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-      if (payload.deliveryAt < today) throw new Error('交付时间不能早于项目创建时间')
+      if (payload.deliveryAt < today) throw new Error('交付时间不能早于当前日期')
     }
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
