@@ -631,10 +631,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const hardReadonly = Boolean(workspace?.readonly || searchParams.get('readonly') === '1' || submitted || videoLockState !== 'held')
   const readonly = Boolean(hardReadonly || approvalStage)
   const canComment = Boolean(approvalStage && !hardReadonly)
+  const unresolvedCommentCount = videoComments.filter((comment) => !comment.resolved).length
+  const commentsAvailable = Boolean(approvalStage || videoComments.length)
   const visibleVideoComments = useMemo(() => videoComments.filter((comment) => commentFilter === 'all' || (commentFilter === 'resolved' ? comment.resolved : !comment.resolved)), [commentFilter, videoComments])
 
   useEffect(() => {
-    if (!workspace || workspace.node === 'annotation' || !videoId) return
+    if (!workspace || !videoId) return
     let active = true
     async function loadComments() {
       setCommentsLoading(true)
@@ -1075,7 +1077,9 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   async function returnTask() {
     if (!result || returning) return
+    if (commentsLoading) return setToast('批注仍在加载，请稍后再试')
     const unresolved = videoComments.filter((item) => !item.resolved)
+    if (!unresolved.length) return setToast('至少需要一条未解决批注才能退回')
     if (!window.confirm('确认将该视频退回上一个流程环节？')) return
     const opinion = unresolved.map((item) => item.content.trim()).filter(Boolean).join('；')
     setReturning(true)
@@ -1207,15 +1211,15 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><span className="workflow-stage-chip">{nodeLabels[workspace.node]}</span></div><small>{workspace.taskCode} · {workspace.projectName}</small></div>
       <div className="annotation-save-state"><i className={dirty ? 'dirty' : ''} />{saving ? '正在保存' : dirty ? '有未保存修改' : `草稿已保存 · V${revision}`}</div>
       <div className="annotation-header-actions">
-        {approvalStage && <>
-          <button className={`comment-add-button${commentPlacementMode ? ' active' : ''}`} type="button" disabled={!canComment} onClick={() => { setCommentsOpen(false); setCommentPlacementMode((value) => !value) }}><Plus size={17} />添加批注</button>
+        {approvalStage && <button className={`comment-add-button${commentPlacementMode ? ' active' : ''}`} type="button" disabled={!canComment} onClick={() => { setCommentsOpen(false); setCommentPlacementMode((value) => !value) }}><Plus size={17} />添加批注</button>}
+        {commentsAvailable &&
           <button className="comment-all-button" type="button" onClick={() => commentsOpen ? setCommentsOpen(false) : openComments()}>全部批注 <b>{videoComments.length}</b></button>
-        </>}
+        }
         <span className={readonly ? 'readonly-badge' : 'editing-badge'} title={`当前处理人：${session.account.name}`}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
         {canCancelVideo && <button className="secondary-button danger-button" type="button" disabled={cancellingVideo || videoLockState !== 'held'} onClick={cancelVideo}>{cancellingVideo ? '正在作废...' : '作废'}</button>}
         {/* <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button> */}
-        {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}
+        {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning || commentsLoading || unresolvedCommentCount === 0} title={unresolvedCommentCount === 0 ? '至少需要一条未解决批注才能退回' : undefined} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}
         <button className="primary-button" type="button" disabled={hardReadonly || saving || Boolean(editing)} onClick={submit}><Check size={16} />{submitButtonLabel}</button>
       </div>
     </header>
@@ -1243,7 +1247,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`) }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
-    {approvalStage && videoComments.map((comment) => <button type="button" className={`page-comment-marker${comment.resolved ? ' resolved' : ''}`} style={{ left: `${comment.positionX * 100}%`, top: `${comment.positionY * 100}%` }} key={comment.id} title={`#${comment.sequence} ${comment.content}`} onClick={openComments}>{comment.sequence}</button>)}
+    {commentsAvailable && videoComments.map((comment) => <button type="button" className={`page-comment-marker${comment.resolved ? ' resolved' : ''}`} style={{ left: `${comment.positionX * 100}%`, top: `${comment.positionY * 100}%` }} key={comment.id} title={`#${comment.sequence} ${comment.content}`} onClick={openComments}>{comment.sequence}</button>)}
     {commentPlacementMode && <div className="page-comment-placement-layer" role="button" tabIndex={0} aria-label="选择批注位置" onClick={chooseCommentPosition}><span>点击页面任意位置放置批注 · 按 C 或 Esc 取消</span></div>}
     {commentsOpen && commentDialogPosition && <div ref={commentDialogRef} className="page-comment-dialog" style={{ left: commentDialogPosition.x, top: commentDialogPosition.y }} role="dialog" aria-label="全部批注">
       <header onPointerDown={startCommentDialogDrag} onPointerMove={moveCommentDialog} onPointerUp={stopCommentDialogDrag} onPointerCancel={stopCommentDialogDrag}><strong>全部批注</strong><div><GripVertical size={18} /><button type="button" onClick={() => setCommentsOpen(false)} aria-label="关闭"><X size={17} /></button></div></header>
