@@ -3,14 +3,14 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { AppShell } from '../components/AppShell'
 import { Modal } from '../components/Modal'
 import { PaginationJump } from '../components/PaginationJump'
-import { fleetApi, labelApi, mediaApi, projectApi, teamApi } from '../services/managementApi'
-import type { FleetScene, FleetTask, LabelLibrary, ManagedProject, Member, ProjectPayload, ProjectStatus, SessionResponse, Team } from '../types/api'
+import { fleetApi, labelApi, mediaApi, operationObjectApi, projectApi, teamApi } from '../services/managementApi'
+import type { FleetScene, FleetTask, LabelLibrary, ManagedProject, Member, OperationObjectLibrary, ProjectPayload, ProjectStatus, SessionResponse, Team } from '../types/api'
 
 const statusLabels: Record<ProjectStatus, string> = { 'not-started': '未启动', running: '进行中', paused: '已暂停', finished: '已结束', archived: '已归档' }
 const statusActions: Record<ProjectStatus, Array<{ label: string; status: ProjectStatus; icon: typeof Play }>> = {
   'not-started': [{ label: '启动', status: 'running', icon: Play }], running: [{ label: '暂停', status: 'paused', icon: Pause }, { label: '结束', status: 'finished', icon: Square }], paused: [{ label: '恢复', status: 'running', icon: RotateCcw }, { label: '结束', status: 'finished', icon: Square }], finished: [{ label: '归档', status: 'archived', icon: Archive }], archived: [],
 }
-const emptyForm: ProjectPayload = { name: '', desc: '', teams: [], owner: '', deliveryAt: '', completionNode: '验收', modelGenerationNode: '标注', assignmentStrategy: 'manual_claim', labelLibraryIds: [], annotationGuideline: null }
+const emptyForm: ProjectPayload = { name: '', desc: '', teams: [], owner: '', deliveryAt: '', completionNode: '验收', modelGenerationNode: '标注', assignmentStrategy: 'manual_claim', labelLibraryIds: [], operationLibraryId: '', annotationGuideline: null }
 const nodeOrder = ['标注', '质检', '审核', '验收'] as const
 function localToday() { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}` }
 
@@ -125,6 +125,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   const [members, setMembers] = useState<Member[]>([])
   const [labelLibraries, setLabelLibraries] = useState<LabelLibrary[]>([])
   const [loadingLabelLibraries, setLoadingLabelLibraries] = useState(false)
+  const [operationLibraries, setOperationLibraries] = useState<OperationObjectLibrary[]>([])
   const [labelKeyword, setLabelKeyword] = useState('')
   const [labelPickerOpen, setLabelPickerOpen] = useState(false)
   const [uploadingGuideline, setUploadingGuideline] = useState(false)
@@ -144,8 +145,8 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
 
   async function loadLabelLibraryOptions() {
     setLoadingLabelLibraries(true)
-    try { setLabelLibraries(await labelApi.listSummaries()) }
-    catch (reason) { setToast(reason instanceof Error ? reason.message : '标签库加载失败') }
+    try { const [labels, operations] = await Promise.all([labelApi.listSummaries(), operationObjectApi.listLibraries({ pageSize: 100 })]); setLabelLibraries(labels); setOperationLibraries(operations.items) }
+    catch (reason) { setToast(reason instanceof Error ? reason.message : '标注配置加载失败') }
     finally { setLoadingLabelLibraries(false) }
   }
   function openCreate() { setEditingId(undefined); setForm(emptyForm); setLabelKeyword(''); setLabelPickerOpen(false); setUploadingGuideline(false); setStep(1); setError(''); setModalOpen(true); void loadLabelLibraryOptions() }
@@ -155,7 +156,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
     setOpeningProjectId(item.id); setError('')
     try {
       const detail = await projectApi.detail(item.id)
-      setEditingId(detail.id); setForm({ projectId: detail.id, name: detail.name, desc: detail.desc, teams: [...(detail.teamIds || [])], owner: detail.ownerId || '', deliveryAt: detail.deliveryAt, completionNode: detail.completionNode, modelGenerationNode: detail.modelGenerationNode || '标注', assignmentStrategy: detail.assignmentStrategy || 'manual_claim', labelLibraryIds: [...detail.labelLibraryIds], annotationGuideline: detail.annotationGuideline || null }); setLabelKeyword(''); setLabelPickerOpen(false); setUploadingGuideline(false); setStep(1); setModalOpen(true)
+      setEditingId(detail.id); setForm({ projectId: detail.id, name: detail.name, desc: detail.desc, teams: [...(detail.teamIds || [])], owner: detail.ownerId || '', deliveryAt: detail.deliveryAt, completionNode: detail.completionNode, modelGenerationNode: detail.modelGenerationNode || '标注', assignmentStrategy: detail.assignmentStrategy || 'manual_claim', labelLibraryIds: [...detail.labelLibraryIds], operationLibraryId: detail.operationLibraryId, annotationGuideline: detail.annotationGuideline || null }); setLabelKeyword(''); setLabelPickerOpen(false); setUploadingGuideline(false); setStep(1); setModalOpen(true)
     } catch (reason) { setToast(reason instanceof Error ? reason.message : '项目详情加载失败') }
     finally { setOpeningProjectId('') }
   }
@@ -174,6 +175,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
     event.preventDefault(); setError('')
     if (step === 1) { if (!form.name.trim() || !form.teams.length || !form.owner || !form.deliveryAt) return setError('请完整填写项目名称、团队、负责人和交付时间'); if (form.deliveryAt < localToday()) return setError('交付时间不能早于当前日期'); setStep(2); return }
     if (!form.completionNode) return setError('请选择任务结束节点')
+    if (!form.operationLibraryId) return setError('必须选择操作对象库')
     if (nodeOrder.indexOf(form.modelGenerationNode) > nodeOrder.indexOf(form.completionNode)) return setError('模型生成环节不能晚于任务结束节点')
     if (form.annotationGuideline?.type === 'link') {
       const { displayName, url } = form.annotationGuideline
@@ -217,6 +219,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
           <label><span>任务结束节点 <i className="required-mark">*</i></span><select value={form.completionNode} onChange={(e) => { const completionNode = e.target.value as ProjectPayload['completionNode']; setForm({ ...form, completionNode, modelGenerationNode: nodeOrder.indexOf(form.modelGenerationNode) > nodeOrder.indexOf(completionNode) ? completionNode : form.modelGenerationNode }) }}><option>质检</option><option>审核</option><option>验收</option></select></label>
           <label><span>模型生成环节 <i className="required-mark">*</i></span><select value={form.modelGenerationNode} onChange={(e) => setForm({ ...form, modelGenerationNode: e.target.value as ProjectPayload['modelGenerationNode'] })}>{nodeOrder.filter((node) => nodeOrder.indexOf(node) <= nodeOrder.indexOf(form.completionNode)).map((node) => <option key={node}>{node}</option>)}</select></label>
           <label><span>分配策略</span><select value={form.assignmentStrategy} onChange={(e) => setForm({ ...form, assignmentStrategy: e.target.value as ProjectPayload['assignmentStrategy'] })}><option value="manual_claim">人工领取</option><option value="load_balance">负载均衡</option><option value="average">平均分配</option></select></label>
+          <label><span>操作对象库 <i className="required-mark">*</i></span><select value={form.operationLibraryId} disabled={loadingLabelLibraries} onChange={(e) => setForm({ ...form, operationLibraryId: e.target.value })}><option value="">{loadingLabelLibraries ? '正在加载对象库...' : '请选择操作对象库'}</option>{operationLibraries.map((library) => <option value={library.id} key={library.id}>{library.name}</option>)}</select></label>
           <label><span>标注规则</span><select value={form.annotationGuideline?.type || ''} disabled={uploadingGuideline} onChange={(e) => setForm({ ...form, annotationGuideline: e.target.value === 'link' ? { type: 'link', displayName: '标注规则', url: '' } : e.target.value === 'file' ? { type: 'file', displayName: '', url: '' } : null })}><option value="">不设置</option><option value="link">链接</option><option value="file">上传文件</option></select></label>
           <div className="wide project-field"><span>关联标签库</span><div className="label-library-picker" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setLabelPickerOpen(false) }}>
             <div className="label-library-input">{form.labelLibraryIds.map((id) => { const library = labelLibraries.find((item) => item.id === id); return library ? <span className="selected-library" key={id}>{library.name}<button type="button" aria-label={`移除${library.name}`} onClick={() => setForm({ ...form, labelLibraryIds: form.labelLibraryIds.filter((item) => item !== id) })}><X size={12} /></button></span> : null })}<input value={labelKeyword} onFocus={() => setLabelPickerOpen(true)} onChange={(e) => { setLabelKeyword(e.target.value); setLabelPickerOpen(true) }} placeholder={form.labelLibraryIds.length ? '继续输入搜索' : '输入标签库名称搜索'} /></div>

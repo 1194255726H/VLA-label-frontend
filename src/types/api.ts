@@ -201,6 +201,8 @@ export interface ManagedProject {
   createdAt: string
   deliveryAt: string
   labelLibraryIds: string[]
+  operationLibraryId: string
+  operationLibraryName?: string
   assignmentStrategy?: 'manual_claim' | 'load_balance' | 'average'
   annotationGuideline?: AnnotationGuideline | null
 }
@@ -228,6 +230,7 @@ export interface ProjectPayload {
   modelGenerationNode: NonNullable<ManagedProject['modelGenerationNode']>
   assignmentStrategy: 'manual_claim' | 'load_balance' | 'average'
   labelLibraryIds: string[]
+  operationLibraryId: string
   annotationGuideline: AnnotationGuideline | null
 }
 
@@ -283,6 +286,30 @@ export interface LabelLibrary {
   createdAt: string
   count: number
   tags: LabelItem[]
+}
+
+export interface OperationObjectLibrary {
+  id: string
+  name: string
+  desc: string
+  createdAt: string
+}
+
+export interface OperationObject {
+  id: string
+  libraryId: string
+  name: string
+  alias: string
+  attribute: string
+  approved: boolean
+  createdAt: string
+}
+
+export interface OperationObjectPage<T> {
+  items: T[]
+  page: number
+  pageSize: number
+  total: number
 }
 
 export interface Team {
@@ -342,6 +369,8 @@ export interface AnnotationSegment {
   systemCode?: 'NO_ACTION'
   descriptionSource?: 'user' | 'system'
   modelDescriptionRequired?: boolean
+  operationObjectIds?: string[]
+  operationObjectNames?: string[]
   keyFrames?: AnnotationKeyFrame[]
   keyframeNoneConfirmed?: boolean
   nextAtomicSequence?: number
@@ -352,8 +381,9 @@ export interface AnnotationKeyFrame {
   id: string
   sequence: number
   frame: number
-  type: 'contact' | 'change' | 'abnormal'
-  objectName: string
+  type: 'contact' | 'object_change' | 'abnormal'
+  operationObjectIds: string[]
+  operationObjectNames: string[]
   detail: string
 }
 
@@ -426,6 +456,8 @@ export interface AnnotationWorkspace {
   currentRevision: number
   labels: LabelItem[]
   labelLibraryBound: boolean
+  operationLibraryId: string
+  operationLibraryName: string
   result: AnnotationResult
 }
 

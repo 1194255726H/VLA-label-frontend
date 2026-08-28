@@ -307,6 +307,11 @@ function mockVideo(task: WorkbenchTask, index: number): VideoListItem {
 }
 
 export const workbenchApi = {
+  async listProjects(): Promise<Project[]> {
+    if (runtimeConfig.apiMode === 'mock') { await sleep(); return mockProjects.map((item) => ({ ...item })) }
+    const result = await loadWorkbenchProjects()
+    return result.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: 0, claimLimit: numberValue(config.active_task_limit) || 10 } })
+  },
   async getSnapshot(query: TaskQuery): Promise<WorkbenchSnapshot> {
     if (runtimeConfig.apiMode === 'mock') {
       await sleep()

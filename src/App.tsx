@@ -4,6 +4,7 @@ import './App.css'
 import { AnnotationDataPage } from './pages/AnnotationDataPage'
 import { LabelManagementPage } from './pages/LabelManagementPage'
 import { LoginPage } from './pages/LoginPage'
+import { OperationObjectManagementPage } from './pages/OperationObjectManagementPage'
 import { ProjectManagementPage } from './pages/ProjectManagementPage'
 import { TeamMembersPage } from './pages/TeamMembersPage'
 import { VideoAnnotationPage } from './pages/VideoAnnotationPage'
@@ -29,6 +30,7 @@ function App() {
       <Route path="/projects" element={session ? <ProjectManagementPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/projects/:projectId/annotation-data" element={session ? <AnnotationDataPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/labels" element={session ? <LabelManagementPage session={session} /> : <Navigate to="/login" replace />} />
+      <Route path="/operation-objects" element={session ? <OperationObjectManagementPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/team-members" element={session ? <TeamMembersPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/annotation/:taskId" element={session ? <VideoAnnotationPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to={session ? '/workbench' : '/login'} replace />} />

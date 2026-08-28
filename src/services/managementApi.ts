@@ -1,10 +1,12 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
-import type { FleetPage, FleetScene, FleetSyncResult, FleetTask, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
+import type { FleetPage, FleetScene, FleetSyncResult, FleetTask, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
 import { request } from './api'
 
 let projects = mockManagedProjects.map((item) => ({ ...item, teams: [...item.teams], labelLibraryIds: [...item.labelLibraryIds] }))
 let libraries = mockLabelLibraries.map((item) => ({ ...item, tags: item.tags.map((tag) => ({ ...tag })) }))
+let operationLibraries: OperationObjectLibrary[] = [{ id: '1', name: '常用操作对象库', desc: '标注常用对象', createdAt: '2026-08-25 06:15' }]
+let operationObjects: OperationObject[] = [{ id: '1', libraryId: '1', name: '水杯', alias: '杯子', attribute: '容器', approved: true, createdAt: '2026-08-25 06:16' }]
 let teams = mockTeams.map((item) => ({ ...item }))
 let members = mockMembers.map((item) => ({ ...item, roles: [...item.roles], projects: [...item.projects] }))
 let pendingProjectList: Promise<ManagedProject[]> | undefined
@@ -51,6 +53,7 @@ function normalizeProject(item: Record<string, unknown>): ManagedProject {
     selectedDuration: num(item.selected_duration_ms ?? item.selectedDuration) / (item.selected_duration_ms == null ? 1 : 1000), validDuration: num(item.effective_duration_ms ?? item.validDuration) / (item.effective_duration_ms == null ? 1 : 1000), invalidDuration: num(item.invalid_duration_ms ?? item.invalidDuration) / (item.invalid_duration_ms == null ? 1 : 1000), unselectedDuration: num(item.uncovered_duration_ms ?? item.unselectedDuration) / (item.uncovered_duration_ms == null ? 1 : 1000), goalCount: num(item.atomic_task_count ?? item.goalCount), actionCount: num(item.atomic_action_count ?? item.actionCount),
     currentNode: currentNodeLabels[String(item.current_node)] || undefined, completionNode: completionLabels[String(workConfig.completion_node || item.completionNode)] || '验收', modelGenerationNode: modelGenerationLabels[String(workConfig.model_generation_node || item.modelGenerationNode)] || '标注', progress: num(item.progress_percent ?? item.progress), owner: String(owner.display_name || owner.username || item.owner || '-'), ownerId: String(owner.id || item.owner_id || ''), createdAt: String(item.created_at || item.createdAt || ''), deliveryAt: String(item.delivery_at || item.deliveryAt || ''),
     labelLibraryIds: Array.isArray(rawLabelLibraryIds) ? rawLabelLibraryIds.map(String) : [],
+    operationLibraryId: String(workConfig.operation_library_id || item.operationLibraryId || ''), operationLibraryName: String(workConfig.operation_library_name || item.operationLibraryName || ''),
     assignmentStrategy: workConfig.assignment_strategy === 'round_robin' ? 'average' : ['manual_claim', 'load_balance', 'average'].includes(String(workConfig.assignment_strategy)) ? String(workConfig.assignment_strategy) as ManagedProject['assignmentStrategy'] : 'manual_claim',
     annotationGuideline,
   }
@@ -79,6 +82,7 @@ export const projectApi = {
     return normalizeProject(record(result.project || result))
   },
   async save(payload: ProjectPayload): Promise<ManagedProject[]> {
+    if (!payload.operationLibraryId) throw new Error('必须选择操作对象库')
     if (payload.deliveryAt) {
       const now = new Date()
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -87,10 +91,11 @@ export const projectApi = {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       if (projects.some((item) => item.name === payload.name && item.id !== payload.projectId)) throw new Error('项目名称已存在')
+      const operationLibraryName = operationLibraries.find((item) => item.id === payload.operationLibraryId)?.name || ''
       if (payload.projectId) {
-        projects = projects.map((item) => item.id === payload.projectId ? { ...item, ...payload, labelLibraryIds: [...payload.labelLibraryIds] } : item)
+        projects = projects.map((item) => item.id === payload.projectId ? { ...item, ...payload, operationLibraryName, labelLibraryIds: [...payload.labelLibraryIds] } : item)
       } else {
-        projects = [{ id: String(Date.now()), code: `PRJ-${Date.now().toString(36).toUpperCase()}`, status: 'not-started', memberCount: 0, dataCount: 0, selectedDuration: 0, validDuration: 0, invalidDuration: 0, unselectedDuration: 0, goalCount: 0, actionCount: 0, progress: 0, createdAt: new Date().toISOString().slice(0, 10), ...payload }, ...projects]
+        projects = [{ id: String(Date.now()), code: `PRJ-${Date.now().toString(36).toUpperCase()}`, status: 'not-started', memberCount: 0, dataCount: 0, selectedDuration: 0, validDuration: 0, invalidDuration: 0, unselectedDuration: 0, goalCount: 0, actionCount: 0, progress: 0, createdAt: new Date().toISOString().slice(0, 10), ...payload, operationLibraryName }, ...projects]
       }
       return clone(projects)
     }
@@ -100,7 +105,7 @@ export const projectApi = {
       : payload.annotationGuideline?.type === 'file'
         ? { type: 'file', display_name: payload.annotationGuideline.displayName, url: payload.annotationGuideline.url }
         : null
-    const body = { name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : null, delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
+    const body = { name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : null, delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), operation_library_id: Number(payload.operationLibraryId), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
     await request(payload.projectId ? `/api/projects/${encodeURIComponent(payload.projectId)}` : '/api/projects/', { method: payload.projectId ? 'PATCH' : 'POST', body: JSON.stringify(body) })
     return this.list()
   },
@@ -245,6 +250,53 @@ export const labelApi = {
     if (runtimeConfig.apiMode === 'mock') { await delay(); libraries = libraries.map((library) => library.id === libraryId ? { ...library, tags: library.tags.filter((tag) => tag.id !== labelId), count: Math.max(0, library.count - 1) } : library); return clone(libraries) }
     await request(`/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels/${encodeURIComponent(labelId)}`, { method: 'DELETE' })
     return this.list()
+  },
+}
+
+function normalizeOperationLibrary(item: Record<string, unknown>): OperationObjectLibrary {
+  return { id: String(item.id || ''), name: String(item.name || ''), desc: String(item.description || ''), createdAt: String(item.created_at || '') }
+}
+
+function normalizeOperationObject(item: Record<string, unknown>): OperationObject {
+  return { id: String(item.id || ''), libraryId: String(item.library_id || ''), name: String(item.name || ''), alias: String(item.alias || ''), attribute: String(item.attribute || ''), approved: item.approved === true, createdAt: String(item.created_at || '') }
+}
+
+export const operationObjectApi = {
+  async listLibraries(query: { keyword?: string; page?: number; pageSize?: number } = {}): Promise<OperationObjectPage<OperationObjectLibrary>> {
+    const page = query.page || 1; const pageSize = query.pageSize || 10
+    if (runtimeConfig.apiMode === 'mock') { await delay(); const matched = operationLibraries.filter((item) => !query.keyword || `${item.name}${item.desc}`.includes(query.keyword)); return clone({ items: matched.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: matched.length }) }
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) }); if (query.keyword) params.set('keyword', query.keyword)
+    const result = await request<{ items: Array<Record<string, unknown>>; page?: number; page_size?: number; total?: number }>(`/api/data/operation-libraries?${params}`)
+    return { items: (result.items || []).map(normalizeOperationLibrary), page: result.page || page, pageSize: result.page_size || pageSize, total: result.total ?? result.items?.length ?? 0 }
+  },
+  async saveLibrary(payload: { id?: string; name: string; desc: string }) {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); operationLibraries = payload.id ? operationLibraries.map((item) => item.id === payload.id ? { ...item, name: payload.name, desc: payload.desc } : item) : [{ id: String(Date.now()), name: payload.name, desc: payload.desc, createdAt: new Date().toISOString() }, ...operationLibraries]; return }
+    await request(payload.id ? `/api/data/operation-libraries/${encodeURIComponent(payload.id)}` : '/api/data/operation-libraries', { method: payload.id ? 'PATCH' : 'POST', body: JSON.stringify({ name: payload.name, description: payload.desc }) })
+  },
+  async deleteLibrary(id: string) {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); if (projects.some((item) => item.operationLibraryId === id)) throw new Error('对象库已被项目引用，不能删除'); operationLibraries = operationLibraries.filter((item) => item.id !== id); operationObjects = operationObjects.filter((item) => item.libraryId !== id); return }
+    await request(`/api/data/operation-libraries/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+  async listObjects(libraryId: string, query: { keyword?: string; page?: number; pageSize?: number } = {}): Promise<OperationObjectPage<OperationObject>> {
+    const page = query.page || 1; const pageSize = query.pageSize || 10
+    if (runtimeConfig.apiMode === 'mock') { await delay(); const matched = operationObjects.filter((item) => item.libraryId === libraryId && (!query.keyword || `${item.id}${item.name}`.includes(query.keyword))); return clone({ items: matched.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: matched.length }) }
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) }); if (query.keyword) params.set('keyword', query.keyword)
+    const result = await request<{ items: Array<Record<string, unknown>>; page?: number; page_size?: number; total?: number }>(`/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects?${params}`)
+    return { items: (result.items || []).map(normalizeOperationObject), page: result.page || page, pageSize: result.page_size || pageSize, total: result.total ?? result.items?.length ?? 0 }
+  },
+  async saveObject(libraryId: string, payload: { id?: string; name: string; alias: string; attribute: string; approved: boolean }) {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); operationObjects = payload.id ? operationObjects.map((item) => item.id === payload.id ? { ...item, ...payload } : item) : [...operationObjects, { ...payload, id: String(Date.now()), libraryId, createdAt: new Date().toISOString() }]; return }
+    const path = payload.id ? `/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects/${encodeURIComponent(payload.id)}` : `/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects`
+    await request(path, { method: payload.id ? 'PATCH' : 'POST', body: JSON.stringify({ name: payload.name, alias: payload.alias, attribute: payload.attribute, approved: payload.approved }) })
+  },
+  async deleteObject(libraryId: string, objectId: string) {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); operationObjects = operationObjects.filter((item) => item.id !== objectId); return }
+    await request(`/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects/${encodeURIComponent(objectId)}`, { method: 'DELETE' })
+  },
+  async listApprovedObjects(): Promise<Array<OperationObject & { libraryName: string }>> {
+    const librariesPage = await this.listLibraries({ pageSize: 100 })
+    const groups = await Promise.all(librariesPage.items.map(async (library) => ({ library, page: await this.listObjects(library.id, { pageSize: 100 }) })))
+    return groups.flatMap(({ library, page }) => page.items.filter((item) => item.approved).map((item) => ({ ...item, libraryName: library.name })))
   },
 }
 

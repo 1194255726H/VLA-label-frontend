@@ -1,6 +1,6 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockTasks } from '../mocks/data'
-import type { AnnotationResult, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
+import type { AnnotationKeyFrame, AnnotationResult, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
 import { request } from './api'
 
 const mockResults = new Map<string, AnnotationResult>()
@@ -75,6 +75,28 @@ function decisionVideoId(taskId: string) {
 function msToFrame(value: unknown, frameRate: number) { return Math.max(0, Math.round(Number(value || 0) / 1000 * frameRate)) }
 function frameToMs(value: number, frameRate: number) { return Math.max(0, Math.round(value / frameRate * 1000)) }
 
+function normalizeOperationObjectRefs(item: Record<string, unknown>) {
+  const rawObjects = Array.isArray(item.operation_objects) ? item.operation_objects as Array<Record<string, unknown>> : []
+  const rawIds = item.operation_object_ids ?? item.operationObjectIds
+  const legacyId = item.operation_object_id ?? item.operationObjectId
+  const operationObjectIds = (Array.isArray(rawIds) ? rawIds : legacyId == null ? rawObjects.map((object) => object.id) : [legacyId]).filter((id) => id != null).map(String)
+  const rawNames = item.operation_object_names ?? item.operationObjectNames
+  const legacyName = item.operation_object_name ?? item.operationObjectName ?? item.objectName
+  const operationObjectNames = (Array.isArray(rawNames) ? rawNames : legacyName ? [legacyName] : rawObjects.map((object) => object.name)).filter(Boolean).map(String)
+  return { operationObjectIds, operationObjectNames }
+}
+
+function normalizeKeyFrame(item: Record<string, unknown>, index = 0): AnnotationKeyFrame {
+  const type = String(item.event_type || item.type || 'contact') as AnnotationKeyFrame['type']
+  const detail = String(type === 'contact' ? item.contact_description || item.detail || '' : type === 'object_change' ? item.object_change_description || item.detail || '' : item.abnormal_description || item.detail || '')
+  const { operationObjectIds, operationObjectNames } = normalizeOperationObjectRefs(item)
+  return { id: String(item.id || crypto.randomUUID()), sequence: Number(item.sequence ?? index + 1), frame: Number(item.frame || 0), type, operationObjectIds, operationObjectNames, detail }
+}
+
+function keyFramePayload(keyFrame: AnnotationKeyFrame) {
+  return { frame: keyFrame.frame, event_type: keyFrame.type, contact_description: keyFrame.type === 'contact' ? keyFrame.detail : '', object_change_description: keyFrame.type === 'object_change' ? keyFrame.detail : '', abnormal_description: keyFrame.type === 'abnormal' ? keyFrame.detail : '', operation_object_ids: keyFrame.operationObjectIds.map(Number) }
+}
+
 export function normalizeAnnotationResult(source: AnnotationResult): AnnotationResult {
   const frameRate = Number.isFinite(source.frameRate) && source.frameRate > 0 ? source.frameRate : 30
   const totalFrames = Math.max(0, Math.round(source.totalFrames || 0))
@@ -92,7 +114,7 @@ export function normalizeAnnotationResult(source: AnnotationResult): AnnotationR
       labelCode: action.type === 'no_action' ? '' : action.labelCode || '',
       descriptionSource: action.type === 'no_action' ? 'system' as const : action.descriptionSource || 'user' as const,
       modelDescriptionRequired: action.type === 'no_action' ? false : action.modelDescriptionRequired,
-      keyFrames: (action.keyFrames || []).filter((keyFrame) => Number.isFinite(keyFrame.frame)).map((keyFrame) => ({ ...keyFrame, frame: Math.round(keyFrame.frame) })),
+      keyFrames: (action.keyFrames || []).filter((keyFrame) => Number.isFinite(keyFrame.frame)).map((keyFrame, index) => normalizeKeyFrame(keyFrame as unknown as Record<string, unknown>, index)),
     }
   })
   const nextActionSequenceByGoal = { ...(source.nextActionSequenceByGoal || {}) }
@@ -127,8 +149,9 @@ function annotationPayload(rawResult: AnnotationResult) {
         start_ms: frameToMs(action.startFrame, result.frameRate), end_ms: frameToMs(action.endFrame, result.frameRate), sequence: action.sequence,
         segment_type: action.segmentType || (action.type === 'no_action' ? 'no_action' : 'atomic'), system_code: action.systemCode,
         label_id: action.labelId ? Number(action.labelId) : null, label_code: action.labelCode || '', description: action.descriptionZh,
+        operation_object_ids: (action.operationObjectIds || []).map(Number),
         description_zh: action.descriptionZh, description_en: action.descriptionEn || '', description_source: action.descriptionSource || 'user',
-        model_description_required: action.modelDescriptionRequired, key_frames: action.keyFrames || [],
+        model_description_required: action.modelDescriptionRequired,
         relative_start_second: (action.startFrame - goal.startFrame) / result.frameRate,
         relative_end_second: (action.endFrame - goal.startFrame) / result.frameRate,
       })),
@@ -138,17 +161,17 @@ function annotationPayload(rawResult: AnnotationResult) {
   }
 }
 
-async function loadTaskLabels(projectId: string) {
-  if (!projectId) return { labels: [], bound: false }
+async function loadTaskConfiguration(projectId: string) {
+  if (!projectId) return { labels: [], bound: false, operationLibraryId: '', operationLibraryName: '' }
   const project = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}`)
   const projectData = (project.project || project) as Record<string, unknown>
   const config = (projectData.work_config || {}) as Record<string, unknown>
   const ids = Array.isArray(config.label_library_ids) ? config.label_library_ids : []
   const groups = await Promise.all(ids.map((id) => request<{ items: Array<Record<string, unknown>> }>(`/api/data/label-libraries/${encodeURIComponent(String(id))}/labels?page_size=100`)))
-  return { labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0 }
+  return { labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0, operationLibraryId: String(config.operation_library_id || ''), operationLibraryName: String(config.operation_library_name || '') }
 }
 
-function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, viewOnly: boolean, selectedProjectId = ''): AnnotationWorkspace {
+function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, operationLibraryId: string, operationLibraryName: string, viewOnly: boolean, selectedProjectId = ''): AnnotationWorkspace {
   const task = (raw.task || raw) as Record<string, unknown>
   const selectedVideo = (raw.selected_video || task.selected_video || {}) as Record<string, unknown>
   const project = (task.project || raw.project || {}) as Record<string, unknown>
@@ -162,11 +185,21 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
   const durationSeconds = Number(videoMeta.duration_ms || selectedVideo.duration_ms || task.duration_ms || 0) / 1000
   const rawGoals = Array.isArray(revisionPayload.atomic_tasks) ? revisionPayload.atomic_tasks as Array<Record<string, unknown>> : []
   const goals = rawGoals.map((goal, index) => ({ id: String(goal.id || `goal-${goal.sequence ?? index + 1}`), sequence: Number(goal.sequence ?? index + 1), type: 'goal' as const, startFrame: goal.start_frame == null ? msToFrame(goal.start_ms, frameRate) : Number(goal.start_frame), endFrame: goal.end_frame == null ? msToFrame(goal.end_ms, frameRate) : Number(goal.end_frame), labelId: goal.label_id == null ? undefined : String(goal.label_id), labelCode: String(goal.label_code || ''), labelName: labels.find((label) => label.id === String(goal.label_id))?.name, color: labels.find((label) => label.id === String(goal.label_id))?.color || '#2563EB', descriptionZh: String(goal.description || '') }))
-  const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => { const noAction = action.segment_type === 'no_action' || action.system_code === 'NO_ACTION'; return ({ id: String(action.id || `${parent.id}-A${String(action.sequence ?? index + 1).padStart(3, '0')}`), sequence: Number(action.sequence ?? index + 1), parentId: parent.id, type: noAction ? 'no_action' as const : 'action' as const, startFrame: action.start_frame == null ? msToFrame(action.start_ms, frameRate) : Number(action.start_frame), endFrame: action.end_frame == null ? msToFrame(action.end_ms, frameRate) : Number(action.end_frame), labelId: action.label_id == null ? undefined : String(action.label_id), labelCode: String(action.label_code || ''), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: noAction ? '#64748B' : labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: String(action.description_zh || action.description || (noAction ? '未执行有效动作' : '')), descriptionEn: String(action.description_en || (noAction ? 'No valid action is performed.' : '')), systemCode: noAction ? 'NO_ACTION' as const : undefined, descriptionSource: noAction ? 'system' as const : 'user' as const, modelDescriptionRequired: noAction ? false : undefined, keyFrames: Array.isArray(action.key_frames) ? action.key_frames as never[] : [] }) }) })
+  const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => { const noAction = action.segment_type === 'no_action' || action.system_code === 'NO_ACTION'; const rawKeyFrames = Array.isArray(action.keyframes) ? action.keyframes : Array.isArray(action.key_frames) ? action.key_frames : []; return ({ id: String(action.id || `${parent.id}-A${String(action.sequence ?? index + 1).padStart(3, '0')}`), sequence: Number(action.sequence ?? index + 1), parentId: parent.id, type: noAction ? 'no_action' as const : 'action' as const, startFrame: action.start_frame == null ? msToFrame(action.start_ms, frameRate) : Number(action.start_frame), endFrame: action.end_frame == null ? msToFrame(action.end_ms, frameRate) : Number(action.end_frame), labelId: action.label_id == null ? undefined : String(action.label_id), labelCode: String(action.label_code || ''), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: noAction ? '#64748B' : labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: String(action.description_zh || action.description || (noAction ? '未执行有效动作' : '')), descriptionEn: String(action.description_en || (noAction ? 'No valid action is performed.' : '')), systemCode: noAction ? 'NO_ACTION' as const : undefined, descriptionSource: noAction ? 'system' as const : 'user' as const, modelDescriptionRequired: noAction ? false : undefined, ...normalizeOperationObjectRefs(action), keyFrames: (rawKeyFrames as Array<Record<string, unknown>>).map(normalizeKeyFrame) }) }) })
   const node = wireNode(selectedVideo.current_node || task.current_node)
   const videoUri = String(selectedVideo.url || task.video_url || task.video_uri || '')
   const status = String(selectedVideo.status || task.status || '')
-  const baseResult = preserved || {
+  const preservedWithBackendIdentity = preserved ? (() => {
+    const goalIdByOldId = new Map<string, string>()
+    const mergedGoals = preserved.goals.map((goal) => { const backend = goals.find((item) => item.sequence === goal.sequence); if (backend) goalIdByOldId.set(goal.id, backend.id); return backend ? { ...goal, id: backend.id } : goal })
+    const mergedActions = preserved.actions.map((action) => {
+      const parentId = goalIdByOldId.get(action.parentId || '') || action.parentId
+      const backend = actions.find((item) => item.parentId === parentId && item.sequence === action.sequence)
+      return backend ? { ...action, id: backend.id, parentId, operationObjectIds: backend.operationObjectIds, operationObjectNames: backend.operationObjectNames, keyFrames: backend.keyFrames } : { ...action, parentId }
+    })
+    return { ...preserved, goals: mergedGoals, actions: mergedActions }
+  })() : undefined
+  const baseResult = preservedWithBackendIdentity || {
     schemaVersion: 'vla-video-hierarchy@11.0.0' as const, coordinateSystem: 'zero-based-frame' as const, intervalConvention: 'half-open' as const, frameRate,
     totalFrames: Math.round(durationSeconds * frameRate), mediaStartTime, goals, actions,
     invalidRanges: (Array.isArray(revisionPayload.invalid_intervals) ? revisionPayload.invalid_intervals as Array<Record<string, unknown>> : []).map((range, index) => ({ id: String(range.id || `invalid-${index + 1}`), sequence: Number(range.sequence || index + 1), startFrame: range.start_frame == null ? msToFrame(range.start_ms, frameRate) : Number(range.start_frame), endFrame: range.end_frame == null ? msToFrame(range.end_ms, frameRate) : Number(range.end_frame), reason: String(range.reason || range.description || '视频内容无效') })),
@@ -180,7 +213,7 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
     videoUrl: /^https?:\/\//i.test(videoUri) ? videoUri : '',
     frameRate,
     durationSeconds, mediaStartTime,
-    currentRevision: Number(revision.version || revision.revision || revision.revision_no || revision.id || 0), labels, labelLibraryBound, result: normalizeAnnotationResult(baseResult),
+    currentRevision: Number(revision.version || revision.revision || revision.revision_no || revision.id || 0), labels, labelLibraryBound, operationLibraryId, operationLibraryName, result: normalizeAnnotationResult(baseResult),
   }
 }
 
@@ -217,6 +250,23 @@ export const annotationApi = {
     return normalizeVideoComment(response)
   },
 
+  async createKeyFrame(taskId: string, videoId: string, actionId: string, keyFrame: AnnotationKeyFrame): Promise<AnnotationKeyFrame> {
+    if (runtimeConfig.apiMode === 'mock' || !/^\d+$/.test(actionId)) { await delay(); return { ...keyFrame, id: crypto.randomUUID() } }
+    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/keyframes`, { method: 'POST', body: JSON.stringify({ video_id: Number(videoId), action_id: Number(actionId), ...keyFramePayload(keyFrame) }) })
+    return normalizeKeyFrame(response)
+  },
+
+  async updateKeyFrame(taskId: string, videoId: string, keyFrame: AnnotationKeyFrame): Promise<AnnotationKeyFrame> {
+    if (runtimeConfig.apiMode === 'mock' || !/^\d+$/.test(keyFrame.id)) { await delay(); return keyFrame }
+    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/keyframes/${encodeURIComponent(keyFrame.id)}?video_id=${encodeURIComponent(videoId)}`, { method: 'PATCH', body: JSON.stringify(keyFramePayload(keyFrame)) })
+    return normalizeKeyFrame(response)
+  },
+
+  async deleteKeyFrame(taskId: string, videoId: string, keyFrameId: string): Promise<void> {
+    if (runtimeConfig.apiMode === 'mock' || !/^\d+$/.test(keyFrameId)) { await delay(); return }
+    await request(`/api/tasks/${encodeURIComponent(taskId)}/keyframes/${encodeURIComponent(keyFrameId)}?video_id=${encodeURIComponent(videoId)}`, { method: 'DELETE' })
+  },
+
   async nextVideo(projectId: string, node: TaskNode): Promise<string | null> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return null }
     if (!projectId) throw new Error('缺少项目 ID，无法获取下一条视频')
@@ -242,7 +292,7 @@ export const annotationApi = {
         projectId: '1', projectName: '清华路端项目', node: task.node, readonly: task.status === 'submitted' || task.status === 'completed',
         videoUrl: '/temp.mp4', frameRate: result.frameRate, durationSeconds: result.totalFrames / result.frameRate, mediaStartTime: result.mediaStartTime,
         currentRevision: mockRevisions.get(taskId) || 0,
-        labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), labelLibraryBound: true, result,
+        labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), labelLibraryBound: true, operationLibraryId: '1', operationLibraryName: '常用操作对象库', result,
       }
     }
     if (!videoId) throw new Error('缺少视频记录 ID，无法进入作业页')
@@ -254,8 +304,8 @@ export const annotationApi = {
       const raw = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}?${params}`)
       const task = (raw.task || raw) as Record<string, unknown>
       const effectiveProjectId = String(task.project_id || (task.project as Record<string, unknown> | undefined)?.id || projectId)
-      const labelSnapshot = await loadTaskLabels(effectiveProjectId)
-      const workspace = normalizeWorkspace(taskId, raw, labelSnapshot.labels, labelSnapshot.bound, viewOnly, effectiveProjectId)
+      const configuration = await loadTaskConfiguration(effectiveProjectId)
+      const workspace = normalizeWorkspace(taskId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly, effectiveProjectId)
       taskNodes.set(taskId, workspace.node)
       if (videoId) taskVideoIds.set(taskId, videoId)
       return workspace

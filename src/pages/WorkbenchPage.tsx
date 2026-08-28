@@ -8,7 +8,7 @@ import { AppShell } from '../components/AppShell'
 import { PaginationJump } from '../components/PaginationJump'
 import { annotationApi } from '../services/annotationApi'
 import { workbenchApi } from '../services/api'
-import type { SessionResponse, TaskNode, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
+import type { Project, SessionResponse, TaskNode, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
 import { formatDateTime } from '../utils/date'
 
 const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
@@ -90,6 +90,7 @@ function TaskTable({ items, tab, loading, onError }: { items: VideoListItem[]; t
 export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const navigate = useNavigate()
   const [projectId, setProjectId] = useState('')
+  const [projects, setProjects] = useState<Project[]>([])
   const [tab, setTab] = useState<TaskTab>('pending')
   const [tabTotals, setTabTotals] = useState<Record<TaskTab, number>>({ pending: 0, submitted: 0 })
   const [pageNo, setPageNo] = useState(1)
@@ -101,6 +102,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [toast, setToast] = useState('')
 
   const fetchWorkbenchData = useCallback(async () => {
+    if (!projectId) throw new Error('请先选择作业项目')
     const otherTab: TaskTab = tab === 'pending' ? 'submitted' : 'pending'
     const [result, otherTabResult] = await Promise.all([
       workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize: 10, includeOverview: true }),
@@ -121,6 +123,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     try {
       const { result, totals } = await fetchWorkbenchData()
       setSnapshot(result)
+      setProjects(result.projects)
       setTabTotals(totals)
       if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId)
     } catch (reason) {
@@ -130,19 +133,28 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
 
   useEffect(() => {
     let active = true
+    workbenchApi.listProjects()
+      .then((items) => { if (active) { setProjects(items); setProjectId((current) => current || items.find((item) => item.status === 'running')?.id || items[0]?.id || '') } })
+      .catch((reason) => { if (active) { setError(reason instanceof Error ? reason.message : '项目列表加载失败'); setLoading(false) } })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!projectId) return
+    let active = true
     fetchWorkbenchData()
-      .then(({ result, totals }) => { if (active) { setSnapshot(result); setTabTotals(totals); if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId) } })
-      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '工作台加载失败') })
+      .then(({ result, totals }) => { if (active) { setSnapshot(result); setProjects(result.projects); setTabTotals(totals); if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId) } })
+      .catch((reason) => { if (active) { setSnapshot(null); setTabTotals({ pending: 0, submitted: 0 }); setError(reason instanceof Error ? reason.message : '工作台加载失败') } })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [fetchWorkbenchData])
+  }, [fetchWorkbenchData, projectId])
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 2600)
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  const currentProject = useMemo(() => snapshot?.projects.find((item) => item.id === projectId) || snapshot?.projects[0], [projectId, snapshot])
+  const currentProject = useMemo(() => projects.find((item) => item.id === projectId) || projects[0], [projectId, projects])
   const totalPages = Math.max(1, snapshot?.tasks.pages || 1)
 
   async function claimTask(targetNode: TaskNode) {
@@ -175,7 +187,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
         <section className="project-hero panel">
           <div className="project-hero-main">
             <div className="project-kicker"><span className="live-dot" />当前作业项目</div>
-            <div className="project-title-row"><h1>{currentProject?.name || '加载中...'}</h1><div className="project-select-wrap"><select value={projectId} onChange={(event) => { setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{snapshot?.projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
+            <div className="project-title-row"><h1>{currentProject?.name || '加载中...'}</h1><div className="project-select-wrap"><select value={projectId} disabled={!projects.length} onChange={(event) => { setLoading(true); setError(''); setSnapshot(null); setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
             <p>{currentProject?.batchName} <span /> {tab === 'pending' ? '待处理' : '已提交'} {snapshot?.tasks.page.total || 0} 条 <span /> 当前任务额度 {currentProject?.pendingCount || 0}/{currentProject?.claimLimit || 10}</p>
           </div>
           {!loading && snapshot && (snapshot.recommendedTask ? <div className="recommended-task">
