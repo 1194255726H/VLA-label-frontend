@@ -32,7 +32,7 @@ function App() {
       <Route path="/labels" element={session ? <LabelManagementPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/operation-objects" element={session ? <OperationObjectManagementPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/team-members" element={session ? <TeamMembersPage session={session} /> : <Navigate to="/login" replace />} />
-      <Route path="/annotation/:taskId" element={session ? <VideoAnnotationPage session={session} /> : <Navigate to="/login" replace />} />
+      <Route path="/projects/:projectId/videos/:videoId/annotation" element={session ? <VideoAnnotationPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to={session ? '/workbench' : '/login'} replace />} />
     </Routes>
   )

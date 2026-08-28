@@ -460,7 +460,7 @@ function GlobalTimeline({ goals, invalidRanges, draft, selectedRange, totalFrame
 }
 
 export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
-  const { taskId = '' } = useParams()
+  const { projectId = '', videoId = '' } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -521,7 +521,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [atomicViewports, setAtomicViewports] = useState<Record<string, TimelineViewport>>({})
   const [editing, setEditing] = useState<string>()
   const [scrubbing, setScrubbing] = useState(false)
-  const videoId = searchParams.get('video_id') || ''
   const cancelPermissionIdentities = [...session.account.roles, ...session.account.roleLabels]
     .map((value) => value.toLowerCase().replace(/[\s_-]/g, ''))
   const canCancelVideo = Boolean(session.account.isStaff || session.account.isSuperuser || cancelPermissionIdentities.some((value) => ['admin', 'projectmanager', 'systemadmin', '管理员', '项目经理', '超级管理员'].includes(value)))
@@ -554,7 +553,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         lockAcquired = true
         awaitingHeartbeat = false
         setVideoLockState('loading')
-        const data = await annotationApi.getWorkspace(taskId, searchParams.get('readonly') === '1', videoId, searchParams.get('project_id') || '')
+        const data = await annotationApi.getWorkspace(projectId, videoId, searchParams.get('readonly') === '1')
         if (!active) return
         awaitingHeartbeat = true
         const confirmedLock = await acquireLock()
@@ -590,8 +589,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       }
     }
     void loadWorkspace()
-    return () => { active = false; annotationApi.clearTaskContext(taskId) }
-  }, [searchParams, session.account.id, taskId, videoId, workspaceReloadKey])
+    return () => { active = false; annotationApi.clearVideoContext(projectId, videoId) }
+  }, [projectId, searchParams, session.account.id, videoId, workspaceReloadKey])
 
   useEffect(() => {
     if (videoLockState !== 'held' || !videoId) return
@@ -661,14 +660,14 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     async function loadComments() {
       setCommentsLoading(true)
       try {
-        const comments = await annotationApi.listVideoComments(taskId, videoId)
+        const comments = await annotationApi.listVideoComments(projectId, videoId)
         if (active) setVideoComments(comments)
       } catch (reason) { if (active) setToast(reason instanceof Error ? reason.message : '批注加载失败') }
       finally { if (active) setCommentsLoading(false) }
     }
     void loadComments()
     return () => { active = false }
-  }, [taskId, videoId, workspace])
+  }, [projectId, videoId, workspace])
 
   useEffect(() => {
     if (!workspace?.operationLibraryId) return
@@ -984,7 +983,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   async function save(showToast = true) {
     if (!result || hardReadonly || saving || editing) { if (editing && showToast) setToast('请先完成或取消当前拖动'); return revision }
     setSaving(true)
-    try { const nextRevision = await annotationApi.save(taskId, result, revision); setRevision(nextRevision); setDirty(false); if (showToast) setToast('草稿已保存'); return nextRevision }
+    try { const nextRevision = await annotationApi.save(projectId, videoId, result, revision); setRevision(nextRevision); setDirty(false); if (showToast) setToast('草稿已保存'); return nextRevision }
     catch (reason) { setToast(reason instanceof Error ? reason.message : '保存失败'); throw reason }
     finally { setSaving(false) }
   }
@@ -1016,15 +1015,14 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (fullyInvalid) { setSelectedId(fullyInvalid.id); return setToast('小目标被无效区间完全覆盖，请调整或删除') }
     try {
       const nextRevision = dirty ? await save(false) : revision
-      await annotationApi.submit(taskId, result, nextRevision)
+      await annotationApi.submit(projectId, videoId, result, nextRevision)
       setSubmitted(true)
       setVideoLockState('stopped')
       try {
-        const nextVideoId = await annotationApi.nextVideo(workspace?.projectId || searchParams.get('project_id') || '', workspace?.node || 'annotation')
+        const nextVideoId = await annotationApi.nextVideo(projectId, workspace?.node || 'annotation')
         if (nextVideoId) {
           setToast('任务提交成功，正在进入下一条')
-          const params = new URLSearchParams({ video_id: nextVideoId, project_id: workspace?.projectId || searchParams.get('project_id') || '' })
-          navigate(`/annotation/${encodeURIComponent(taskId)}?${params}`, { replace: true })
+          navigate(`/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(nextVideoId)}/annotation`, { replace: true })
         } else {
           setToast('任务提交成功，当前暂无下一条')
           window.setTimeout(() => navigate('/workbench'), 700)
@@ -1083,7 +1081,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     setCommentSubmitting(true)
     try {
       const sequence = Math.max(0, ...videoComments.map((item) => item.sequence)) + 1
-      const comment = await annotationApi.createVideoComment(taskId, { videoId, node: workspace.node, sequence, content: commentDraft.trim().slice(0, 100), positionX: commentPoint.x, positionY: commentPoint.y })
+      const comment = await annotationApi.createVideoComment(projectId, videoId, { node: workspace.node, sequence, content: commentDraft.trim().slice(0, 100), positionX: commentPoint.x, positionY: commentPoint.y })
       setVideoComments((items) => [...items, comment].sort((left, right) => left.sequence - right.sequence))
       setCommentPoint(undefined)
       setCommentDraft('')
@@ -1095,7 +1093,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   async function resolveComment(commentId: string) {
     if (!canComment) return
     try {
-      const resolved = await annotationApi.resolveVideoComment(taskId, commentId)
+      const resolved = await annotationApi.resolveVideoComment(projectId, videoId, commentId)
       setVideoComments((items) => items.map((item) => item.id === commentId ? resolved : item))
       setToast('批注已标记解决')
     } catch (reason) { setToast(reason instanceof Error ? reason.message : '批注状态更新失败') }
@@ -1129,13 +1127,13 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       if (!editingKeyFrame && !/^\d+$/.test(target.id)) {
         const parent = result?.goals.find((goal) => goal.id === target.parentId)
         await save(false)
-        refreshed = await annotationApi.getWorkspace(taskId, false, videoId, workspace.projectId)
+        refreshed = await annotationApi.getWorkspace(projectId, videoId, false)
         const persistedParent = refreshed.result.goals.find((goal) => goal.sequence === parent?.sequence)
         const persistedTarget = refreshed.result.actions.find((action) => action.parentId === persistedParent?.id && action.sequence === target.sequence)
         if (!persistedTarget || !/^\d+$/.test(persistedTarget.id)) throw new Error('小目标保存后未取得有效 ID，请刷新页面后重试')
         target = persistedTarget
       }
-      const saved = editingKeyFrame ? await annotationApi.updateKeyFrame(taskId, videoId, keyFrame) : await annotationApi.createKeyFrame(taskId, videoId, target.id, keyFrame)
+      const saved = editingKeyFrame ? await annotationApi.updateKeyFrame(projectId, videoId, keyFrame) : await annotationApi.createKeyFrame(projectId, videoId, target.id, keyFrame)
       const base = refreshed?.result || result
       if (!base) throw new Error('标注结果不存在')
       const nextResult = normalizeAnnotationResult({ ...base, actions: base.actions.map((action) => action.id === target.id ? { ...action, keyFrames: editingKeyFrame ? (action.keyFrames || []).map((item) => item.id === editingKeyFrame.id ? saved : item) : [...(action.keyFrames || []), saved], keyframeNoneConfirmed: false } : action) })
@@ -1163,7 +1161,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (!window.confirm('确认将该视频退回上一个流程环节？')) return
     const opinion = unresolved.map((item) => item.content.trim()).filter(Boolean).join('；')
     setReturning(true)
-    try { if (dirty) await save(false); await annotationApi.reject(taskId, opinion); setDirty(false); setSubmitted(true); setVideoLockState('stopped'); setToast('任务已退回'); window.setTimeout(() => navigate('/workbench'), 700) } catch (failure) { setToast(failure instanceof Error ? failure.message : '退回失败') }
+    try { if (dirty) await save(false); await annotationApi.reject(projectId, videoId, opinion); setDirty(false); setSubmitted(true); setVideoLockState('stopped'); setToast('视频已退回'); window.setTimeout(() => navigate('/workbench'), 700) } catch (failure) { setToast(failure instanceof Error ? failure.message : '退回失败') }
     finally { setReturning(false) }
   }
 
@@ -1171,7 +1169,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (cancellingVideo || !canCancelVideo) return
     if (!window.confirm(`确认作废视频“${workspace?.dataName || videoId}”？作废后将不再参与流转，且当前未保存修改会被丢弃。`)) return
     setCancellingVideo(true)
-    try { await annotationApi.cancelVideo(taskId); videoRef.current?.pause(); setDirty(false); setVideoLockState('stopped'); setToast('视频已作废'); window.setTimeout(() => navigate('/workbench'), 700) }
+    try { await annotationApi.cancelVideo(projectId, videoId); videoRef.current?.pause(); setDirty(false); setVideoLockState('stopped'); setToast('视频已作废'); window.setTimeout(() => navigate('/workbench'), 700) }
     catch (failure) { setToast(failure instanceof Error ? failure.message : '视频作废失败') }
     finally { setCancellingVideo(false) }
   }
@@ -1181,7 +1179,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const snapshot = result
     const timer = window.setTimeout(() => {
       setSaving(true)
-      annotationApi.save(taskId, snapshot, revision)
+      annotationApi.save(projectId, videoId, snapshot, revision)
         .then((nextRevision) => {
           setRevision(nextRevision)
           setResult((current) => {
@@ -1193,7 +1191,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         .finally(() => setSaving(false))
     }, 700)
     return () => window.clearTimeout(timer)
-  }, [dirty, editing, hardReadonly, result, revision, saving, taskId])
+  }, [dirty, editing, hardReadonly, projectId, result, revision, saving, videoId])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -1296,7 +1294,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   return <main className="annotation-page">
     <header className="annotation-header">
       <button className="annotation-back" type="button" onClick={() => navigate('/workbench')} aria-label="返回工作台"><BrandLogo compact /><ArrowLeft className="annotation-back-arrow" size={19} /></button>
-      <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><span className="workflow-stage-chip">{nodeLabels[workspace.node]}</span></div><small>{workspace.taskCode} · {workspace.projectName}</small></div>
+      <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><span className="workflow-stage-chip">{nodeLabels[workspace.node]}</span></div><small>{workspace.videoCode} · {workspace.projectName}</small></div>
       <div className="annotation-save-state"><i className={dirty ? 'dirty' : ''} />{saving ? '正在保存' : dirty ? '有未保存修改' : `草稿已保存 · V${revision}`}</div>
       <div className="annotation-header-actions">
         {approvalStage && <button className={`comment-add-button${commentPlacementMode ? ' active' : ''}`} type="button" disabled={!canComment} onClick={() => { setCommentsOpen(false); setCommentPlacementMode((value) => !value) }}><Plus size={17} />添加批注</button>}

@@ -4,7 +4,7 @@ import { AppShell } from '../components/AppShell'
 import { Modal } from '../components/Modal'
 import { PaginationJump } from '../components/PaginationJump'
 import { fleetApi, labelApi, mediaApi, operationObjectApi, projectApi, teamApi } from '../services/managementApi'
-import type { FleetScene, FleetTask, LabelLibrary, ManagedProject, Member, OperationObjectLibrary, ProjectPayload, ProjectStatus, SessionResponse, Team } from '../types/api'
+import type { FleetVideoGroup, FleetVideoPreview, LabelLibrary, ManagedProject, Member, OperationObjectLibrary, ProjectPayload, ProjectStatus, SessionResponse, Team } from '../types/api'
 
 const statusLabels: Record<ProjectStatus, string> = { 'not-started': '未启动', running: '进行中', paused: '已暂停', finished: '已结束', archived: '已归档' }
 const statusActions: Record<ProjectStatus, Array<{ label: string; status: ProjectStatus; icon: typeof Play }>> = {
@@ -17,92 +17,92 @@ function localToday() { const now = new Date(); return `${now.getFullYear()}-${S
 function duration(value: number) { if (!value) return '-'; const hours = Math.floor(value / 3600); const minutes = Math.floor(value % 3600 / 60); return `${hours}时${minutes}分` }
 
 export function FleetSyncModal({ projectId, projectName, onClose, onSynced }: { projectId: string; projectName: string; onClose: () => void; onSynced: (message: string) => void }) {
-  const [view, setView] = useState<'scenes' | 'tasks'>('scenes')
-  const [scenes, setScenes] = useState<FleetScene[]>([])
-  const [selectedScene, setSelectedScene] = useState('')
-  const [sceneKeywordInput, setSceneKeywordInput] = useState('')
-  const [sceneKeyword, setSceneKeyword] = useState('')
-  const [scenePage, setScenePage] = useState(1)
-  const [sceneTotal, setSceneTotal] = useState<number>()
-  const [tasks, setTasks] = useState<FleetTask[]>([])
-  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set())
-  const [selectedTaskDetails, setSelectedTaskDetails] = useState<Map<number, FleetTask>>(new Map())
-  const [taskKeywordInput, setTaskKeywordInput] = useState('')
-  const [taskKeyword, setTaskKeyword] = useState('')
-  const [taskPage, setTaskPage] = useState(1)
-  const [taskTotal, setTaskTotal] = useState<number>()
-  const [loading, setLoading] = useState(false)
+  const [level, setLevel] = useState<1 | 2 | 3>(1)
+  const [groups, setGroups] = useState<FleetVideoGroup[]>([])
+  const [selectedScene1Ids, setSelectedScene1Ids] = useState<Set<number>>(new Set())
+  const [selectedScene2Keys, setSelectedScene2Keys] = useState<Set<string>>(new Set())
+  const [keyword, setKeyword] = useState('')
+  const [supplierId, setSupplierId] = useState('')
+  const [videos, setVideos] = useState<FleetVideoPreview[]>([])
+  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<number>>(new Set())
+  const [videoKeywordInput, setVideoKeywordInput] = useState('')
+  const [videoKeyword, setVideoKeyword] = useState('')
+  const [videoPage, setVideoPage] = useState(1)
+  const [videoPages, setVideoPages] = useState(1)
+  const [videoTotal, setVideoTotal] = useState(0)
+  const [videosLoading, setVideosLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState('')
-  const pageSize = 20
 
   useEffect(() => {
-    if (!projectId || view !== 'scenes') return
+    if (!projectId) return
     let active = true
-    fleetApi.scenes(projectId, { keyword: sceneKeyword, page: scenePage, pageSize }).then((data) => {
-      if (!active) return
-      setScenes(data.items); setSceneTotal(data.total)
-    }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Fleet 场景加载失败') }).finally(() => { if (active) setLoading(false) })
+    fleetApi.videoGroups(projectId).then((data) => { if (active) setGroups(data) })
+      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Fleet 视频分组加载失败') })
+      .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [projectId, sceneKeyword, scenePage, view])
+  }, [projectId])
 
+  const scene2Key = (group: Pick<FleetVideoGroup, 'scene1Id' | 'scene2Id'>) => `${group.scene1Id}:${group.scene2Id}`
+  const suppliers = [...new Map(groups.map((group) => [group.supplierId, group.supplierName])).entries()]
+  const supplierGroups = groups.filter((group) => !supplierId || group.supplierId === Number(supplierId))
+  const scene1Rows = [...new Map(supplierGroups.map((group) => [group.scene1Id, { id: group.scene1Id, name: group.scene1Name }])).values()].map((scene) => {
+    const children = supplierGroups.filter((group) => group.scene1Id === scene.id)
+    return { ...scene, supplierCount: new Set(children.map((group) => group.supplierId)).size, videoCount: children.reduce((sum, group) => sum + group.videoCount, 0), syncableCount: children.reduce((sum, group) => sum + group.syncableCount, 0) }
+  }).filter((row) => !keyword.trim() || row.name.toLowerCase().includes(keyword.trim().toLowerCase()))
+  const scene2Rows = [...new Map(supplierGroups.filter((group) => selectedScene1Ids.has(group.scene1Id)).map((group) => [scene2Key(group), { scene1Id: group.scene1Id, scene1Name: group.scene1Name, scene2Id: group.scene2Id, scene2Name: group.scene2Name }])).values()].map((scene) => {
+    const children = supplierGroups.filter((group) => group.scene1Id === scene.scene1Id && group.scene2Id === scene.scene2Id)
+    return { ...scene, supplierCount: new Set(children.map((group) => group.supplierId)).size, videoCount: children.reduce((sum, group) => sum + group.videoCount, 0), syncableCount: children.reduce((sum, group) => sum + group.syncableCount, 0) }
+  }).filter((row) => !keyword.trim() || `${row.scene1Name}${row.scene2Name}`.toLowerCase().includes(keyword.trim().toLowerCase()))
+  const selectedScene2 = scene2Rows.find((row) => selectedScene2Keys.has(scene2Key(row)))
+  const previewScene1Id = selectedScene2?.scene1Id
+  const previewScene2Id = selectedScene2?.scene2Id
+  const selectedGroups = supplierGroups.filter((group) => level === 1 ? selectedScene1Ids.has(group.scene1Id) : selectedScene2Keys.has(scene2Key(group)))
+  const selectedVideoCount = selectedGroups.reduce((sum, group) => sum + group.syncableCount, 0)
+  const selectableScene1Rows = scene1Rows.filter((row) => row.syncableCount > 0)
+  const selectableScene2Rows = scene2Rows.filter((row) => row.syncableCount > 0)
+  const allVisibleSelected = level === 1
+    ? selectableScene1Rows.length > 0 && selectableScene1Rows.every((row) => selectedScene1Ids.has(row.id))
+    : level === 2 ? selectableScene2Rows.length > 0 && selectableScene2Rows.every((row) => selectedScene2Keys.has(scene2Key(row)))
+      : videos.some((video) => !video.synced) && videos.filter((video) => !video.synced).every((video) => selectedVideoIds.has(video.fleetVideoId))
+  function toggleScene1(id: number) { setSelectedScene1Ids((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
+  function toggleScene2(row: { scene1Id: number; scene2Id: number }) { const key = scene2Key(row); setSelectedScene2Keys((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next }) }
+  function toggleVisible() {
+    if (level === 1) setSelectedScene1Ids((current) => { const next = new Set(current); selectableScene1Rows.forEach((row) => allVisibleSelected ? next.delete(row.id) : next.add(row.id)); return next })
+    else if (level === 2) setSelectedScene2Keys((current) => { const next = new Set(current); selectableScene2Rows.forEach((row) => allVisibleSelected ? next.delete(scene2Key(row)) : next.add(scene2Key(row))); return next })
+    else setSelectedVideoIds((current) => { const next = new Set(current); videos.filter((video) => !video.synced).forEach((video) => allVisibleSelected ? next.delete(video.fleetVideoId) : next.add(video.fleetVideoId)); return next })
+  }
   useEffect(() => {
-    if (!projectId || !selectedScene || view !== 'tasks') return
+    if (level !== 3 || !previewScene1Id || !previewScene2Id) return
     let active = true
-    fleetApi.tasks(projectId, { scene: selectedScene, keyword: taskKeyword, page: taskPage, pageSize }).then((data) => {
-      if (!active) return
-      setTasks(data.items); setTaskTotal(data.total)
-    }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Fleet 任务加载失败') }).finally(() => { if (active) setLoading(false) })
+    fleetApi.videos(projectId, { scene1Id: previewScene1Id, scene2Id: previewScene2Id, supplierId: supplierId ? Number(supplierId) : undefined, keyword: videoKeyword, page: videoPage, pageSize: 20 })
+      .then((result) => { if (active) { setVideos(result.items); setVideoTotal(result.total); setVideoPages(result.pages) } })
+      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Fleet 视频明细加载失败') })
+      .finally(() => { if (active) setVideosLoading(false) })
     return () => { active = false }
-  }, [projectId, selectedScene, taskKeyword, taskPage, view])
-
-  const sceneHasNext = sceneTotal == null ? scenes.length === pageSize : scenePage * pageSize < sceneTotal
-  const taskHasNext = taskTotal == null ? tasks.length === pageSize : taskPage * pageSize < taskTotal
-  const scenePages = sceneTotal == null ? (sceneHasNext ? scenePage + 1 : scenePage) : Math.max(1, Math.ceil(sceneTotal / pageSize))
-  const taskPages = taskTotal == null ? (taskHasNext ? taskPage + 1 : taskPage) : Math.max(1, Math.ceil(taskTotal / pageSize))
-  const selectableTasks = tasks.filter((task) => task.availableCount > 0)
-  const currentPageSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id))
-  const selectedTasks = [...selectedTaskDetails.values()]
-  const selectedAvailable = selectedTasks.reduce((sum, task) => sum + task.availableCount, 0)
-  const selectedDuration = selectedTasks.reduce((sum, task) => sum + task.totalDuration, 0)
-
-  function startLoading() { setLoading(true); setError('') }
-  function openTasks() { if (!selectedScene) return; startLoading(); setTaskKeywordInput(''); setTaskKeyword(''); setTaskPage(1); setSelectedTaskIds(new Set()); setSelectedTaskDetails(new Map()); setView('tasks') }
-  function toggleTask(id: number) {
-    const task = tasks.find((item) => item.id === id); if (!task) return
-    setSelectedTaskIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
-    setSelectedTaskDetails((current) => { const next = new Map(current); if (next.has(id)) next.delete(id); else next.set(id, task); return next })
-  }
-  function togglePage() {
-    setSelectedTaskIds((current) => { const next = new Set(current); selectableTasks.forEach((task) => currentPageSelected ? next.delete(task.id) : next.add(task.id)); return next })
-    setSelectedTaskDetails((current) => { const next = new Map(current); selectableTasks.forEach((task) => currentPageSelected ? next.delete(task.id) : next.set(task.id, task)); return next })
-  }
-  async function sync(taskIds?: number[]) {
-    if (!projectId || !selectedScene || syncing) return
+  }, [level, previewScene1Id, previewScene2Id, projectId, supplierId, videoKeyword, videoPage])
+  async function sync() {
+    if (!projectId || (level === 3 ? !selectedVideoIds.size : !selectedGroups.length) || syncing) return
     setSyncing(true); setError('')
     try {
-      const result = await fleetApi.sync(projectId, selectedScene, taskIds)
-      onSynced(`Fleet 同步完成：新增 ${result.createdCount} 个，更新 ${result.updatedCount} 个任务`)
+      const result = await fleetApi.sync(projectId, level === 3 ? { videoIds: [...selectedVideoIds] } : { groups: selectedGroups })
+      onSynced(`Fleet 视频同步完成：新增 ${result.createdCount}，更新 ${result.updatedCount}，跳过 ${result.skippedCount}`)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Fleet 同步失败') }
     finally { setSyncing(false) }
   }
 
-  const footer = view === 'scenes'
-    ? <><button className="secondary-button" type="button" onClick={onClose}>取消</button><button className="secondary-button" type="button" disabled={!selectedScene || loading || syncing} onClick={openTasks}>选择任务同步</button><button className="primary-button" type="button" disabled={!selectedScene || loading || syncing} onClick={() => sync()}>{syncing ? '正在同步...' : '同步该场景全部数据'}</button></>
-    : <><button className="secondary-button" type="button" onClick={onClose}>取消</button><button className="secondary-button" type="button" disabled={syncing} onClick={() => { startLoading(); setView('scenes') }}>上一步</button><button className="primary-button" type="button" disabled={!selectedTaskIds.size || syncing} onClick={() => sync([...selectedTaskIds])}>{syncing ? '正在同步...' : `同步所选任务（${selectedTaskIds.size}）`}</button></>
+  const selectedCount = level === 1 ? selectedScene1Ids.size : level === 2 ? selectedScene2Keys.size : selectedVideoIds.size
+  const footer = <><button className="secondary-button" type="button" onClick={onClose}>取消</button>{level > 1 && <button className="secondary-button" type="button" disabled={syncing} onClick={() => { if (level === 3) { setLevel(2); setSelectedVideoIds(new Set()); setVideos([]) } else { setLevel(1); setSelectedScene2Keys(new Set()) }; setKeyword('') }}>上一步</button>}{level === 1
+    ? <button className="secondary-button" type="button" disabled={!selectedScene1Ids.size || syncing} onClick={() => { setLevel(2); setKeyword('') }}>下一步：选择二级场景</button>
+    : level === 2 ? <button className="secondary-button" type="button" disabled={selectedScene2Keys.size !== 1 || syncing} title={selectedScene2Keys.size > 1 ? '预览具体视频时请选择一个二级场景' : undefined} onClick={() => { setVideosLoading(true); setLevel(3); setVideoPage(1); setVideoKeyword(''); setVideoKeywordInput(''); setSelectedVideoIds(new Set()) }}>下一步：选择具体视频</button> : null}<button className="primary-button" type="button" disabled={(level === 3 ? !selectedVideoIds.size : !selectedGroups.length) || syncing} onClick={() => void sync()}>{syncing ? '正在同步...' : level === 3 ? `同步所选视频（${selectedVideoIds.size}）` : `同步当前选择（${selectedVideoCount}）`}</button></>
 
   return <Modal title="从 Fleet 同步数据" onClose={onClose} footer={footer}>
     <div className="fleet-sync-dialog">
       <div className="fleet-project-target"><span>同步到当前项目</span><strong>{projectName}</strong><small>{projectId}</small></div>
-      {view === 'scenes' ? <>
-        <div className="fleet-dialog-heading"><div><h3>选择场景</h3><p>从 Fleet 场景中选择整场同步，或进入任务列表选择部分任务</p></div><form className="fleet-search" onSubmit={(event) => { event.preventDefault(); startLoading(); setSelectedScene(''); setScenePage(1); setSceneKeyword(sceneKeywordInput.trim()) }}><Search size={16} /><input value={sceneKeywordInput} onChange={(event) => setSceneKeywordInput(event.target.value)} placeholder="搜索场景名称" /><button type="submit">查询</button></form></div>
-        <div className="fleet-scene-grid">{loading ? <div className="fleet-dialog-empty">正在读取 Fleet 场景...</div> : scenes.map((scene) => <button type="button" className={selectedScene === scene.scene ? 'selected' : ''} key={scene.scene} onClick={() => setSelectedScene(scene.scene)}><i className="fleet-radio" /><span><strong>{scene.scene}</strong><small>{scene.taskCount} 个任务 · {scene.videoCount} 个视频 · {duration(scene.totalDuration)}</small></span></button>)}{!loading && !scenes.length && <div className="fleet-dialog-empty">未找到可同步场景</div>}</div>
-        <div className="fleet-dialog-pagination"><span>{sceneTotal == null ? `第 ${scenePage} 页` : `共 ${sceneTotal} 个场景`}</span><PaginationJump page={scenePage} pages={scenePages} disabled={loading} onChange={(next) => { startLoading(); setSelectedScene(''); setScenePage(next) }} /></div>
-      </> : <>
-        <div className="fleet-dialog-heading"><div><h3>{selectedScene}</h3><p>选择需要同步的 Fleet 任务</p></div><form className="fleet-search" onSubmit={(event) => { event.preventDefault(); startLoading(); setTaskPage(1); setTaskKeyword(taskKeywordInput.trim()) }}><Search size={16} /><input value={taskKeywordInput} onChange={(event) => setTaskKeywordInput(event.target.value)} placeholder="搜索任务 ID、名称、设备或人员" /><button type="submit">查询</button></form></div>
-        <div className="fleet-task-table-wrap"><table className="fleet-task-table"><thead><tr><th><input type="checkbox" checked={currentPageSelected} disabled={!selectableTasks.length} onChange={togglePage} aria-label="选择当前页可同步任务" /></th><th>任务编号 / 任务路径</th><th>设备 / 人员</th><th>视频数</th><th>当前项目已同步</th><th>可同步</th></tr></thead><tbody>{loading ? <tr><td colSpan={6}><div className="fleet-dialog-empty">正在读取 Fleet 任务...</div></td></tr> : tasks.map((task) => <tr key={task.id}><td><input type="checkbox" checked={selectedTaskIds.has(task.id)} disabled={!task.availableCount} onChange={() => toggleTask(task.id)} aria-label={`选择 ${task.externalTaskId}`} /></td><td><strong>{task.externalTaskId}</strong><small>{task.path || task.name || '-'}</small></td><td><span>{[task.device, task.operator].filter(Boolean).join(' / ') || '-'}</span></td><td>{task.videoCount}</td><td>{task.syncedCount}</td><td><b className={task.availableCount ? 'available' : ''}>{task.availableCount}</b></td></tr>)}{!loading && !tasks.length && <tr><td colSpan={6}><div className="fleet-dialog-empty">未找到匹配任务</div></td></tr>}</tbody></table></div>
-        <div className="fleet-task-summary"><span>已选 <b>{selectedTaskIds.size}</b> 个任务</span><span>预计同步 <b>{selectedAvailable}</b> 个视频</span><span>总时长 <b>{duration(selectedDuration)}</b></span><PaginationJump page={taskPage} pages={taskPages} disabled={loading} onChange={(next) => { startLoading(); setTaskPage(next) }} /></div>
-      </>}
+      <div className="fleet-dialog-heading"><div><h3>{level === 1 ? '选择一级场景' : level === 2 ? '选择二级场景' : '选择具体视频'}</h3><p>{level === 1 ? '可直接同步一级场景，或继续细分' : level === 2 ? '可直接同步二级场景，预览视频时请单选一个二级场景' : `${selectedScene2?.scene1Name || ''} / ${selectedScene2?.scene2Name || ''}`}</p></div>{level < 3 ? <><div className="fleet-search"><Search size={16} /><input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={`搜索${level === 1 ? '一级' : '二级'}场景名称`} /></div><label className="fleet-search"><select value={supplierId} onChange={(event) => { setSupplierId(event.target.value); if (level === 1) setSelectedScene1Ids(new Set()); setSelectedScene2Keys(new Set()) }}><option value="">全部供应商</option>{suppliers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label></> : <form className="fleet-search" onSubmit={(event) => { event.preventDefault(); setVideosLoading(true); setVideoPage(1); setVideoKeyword(videoKeywordInput.trim()) }}><Search size={16} /><input value={videoKeywordInput} onChange={(event) => setVideoKeywordInput(event.target.value)} placeholder="搜索视频文件名" /><button type="submit">查询</button></form>}</div>
+      <div className="fleet-task-table-wrap"><table className="fleet-task-table"><thead>{level < 3 ? <tr><th><input type="checkbox" checked={allVisibleSelected} disabled={loading || !(level === 1 ? selectableScene1Rows.length : selectableScene2Rows.length)} onChange={toggleVisible} aria-label="全选当前场景" /></th><th>一级场景</th>{level === 2 && <th>二级场景</th>}<th>来源供应商</th><th>视频数量</th><th>可同步数量</th></tr> : <tr><th><input type="checkbox" checked={allVisibleSelected} disabled={videosLoading || !videos.some((video) => !video.synced)} onChange={toggleVisible} aria-label="全选当前页未同步视频" /></th><th>视频文件名</th><th>场景 / 供应商</th><th>时长</th><th>文件大小</th><th>状态</th></tr>}</thead><tbody>{level < 3 ? loading ? <tr><td colSpan={level === 1 ? 5 : 6}><div className="fleet-dialog-empty">正在读取 Fleet 视频分组...</div></td></tr> : level === 1 ? scene1Rows.map((row) => <tr key={row.id}><td><input type="checkbox" checked={selectedScene1Ids.has(row.id)} disabled={!row.syncableCount} onChange={() => toggleScene1(row.id)} /></td><td><strong>{row.name || '-'}</strong></td><td>{row.supplierCount} 个供应商</td><td>{row.videoCount}</td><td><b className={row.syncableCount ? 'available' : ''}>{row.syncableCount}</b></td></tr>) : scene2Rows.map((row) => <tr key={scene2Key(row)}><td><input type="checkbox" checked={selectedScene2Keys.has(scene2Key(row))} disabled={!row.syncableCount} onChange={() => toggleScene2(row)} /></td><td>{row.scene1Name || '-'}</td><td><strong>{row.scene2Name || '-'}</strong></td><td>{row.supplierCount} 个供应商</td><td>{row.videoCount}</td><td><b className={row.syncableCount ? 'available' : ''}>{row.syncableCount}</b></td></tr>) : videosLoading ? <tr><td colSpan={6}><div className="fleet-dialog-empty">正在读取 Fleet 视频...</div></td></tr> : videos.map((video) => <tr key={video.fleetVideoId}><td><input type="checkbox" checked={selectedVideoIds.has(video.fleetVideoId)} disabled={video.synced} onChange={() => setSelectedVideoIds((current) => { const next = new Set(current); if (next.has(video.fleetVideoId)) next.delete(video.fleetVideoId); else next.add(video.fleetVideoId); return next })} /></td><td><strong>{video.filename}</strong><small>ID: {video.fleetVideoId}</small></td><td>{video.scene1Name} / {video.scene2Name}<small>{video.supplierName}</small></td><td>{video.duration == null ? '-' : duration(video.duration)}</td><td>{video.fileSize == null ? '-' : `${(video.fileSize / 1024 / 1024).toFixed(1)} MB`}</td><td><b className={video.synced ? '' : 'available'}>{video.synced ? '已同步' : '可同步'}</b></td></tr>)}{!loading && !videosLoading && !(level === 1 ? scene1Rows.length : level === 2 ? scene2Rows.length : videos.length) && <tr><td colSpan={level === 1 ? 5 : 6}><div className="fleet-dialog-empty">{level === 3 ? '未找到匹配视频' : '未找到可同步场景'}</div></td></tr>}</tbody></table></div>
+      <div className="fleet-task-summary"><span>已选 <b>{selectedCount}</b> 个{level === 1 ? '一级场景' : level === 2 ? '二级场景' : '视频'}</span>{level < 3 ? <span>预计同步 <b>{selectedVideoCount}</b> 个视频</span> : <><span>共 <b>{videoTotal}</b> 个视频</span><PaginationJump page={videoPage} pages={videoPages} disabled={videosLoading} onChange={(next) => { setVideosLoading(true); setVideoPage(next) }} /></>}</div>
       {error && <p className="inline-error fleet-sync-error">{error}</p>}
     </div>
   </Modal>

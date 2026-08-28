@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { PaginationJump } from '../components/PaginationJump'
-import { annotationApi } from '../services/annotationApi'
 import { workbenchApi } from '../services/api'
 import type { Project, SessionResponse, TaskNode, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
 import { formatDateTime } from '../utils/date'
@@ -29,7 +28,7 @@ function formatClock(value: number | null) {
 function formatMilliseconds(value: number | null) { return value === null ? '—' : formatClock(value / 1000) }
 
 function actionFor(video: VideoListItem, tab: TaskTab) {
-  if (tab === 'submitted' || video.videoStatus === 'completed') return { label: '查看', readonly: true, disabled: !video.taskId && !video.uri }
+  if (tab === 'submitted' || video.videoStatus === 'completed') return { label: '查看', readonly: true, disabled: !video.id }
   if (['in_progress', 'processing'].includes(video.videoStatus)) return { label: '继续处理', readonly: false, disabled: false }
   return { label: '开始处理', readonly: false, disabled: false }
 }
@@ -43,15 +42,11 @@ function TaskTable({ items, tab, loading, onError }: { items: VideoListItem[]; t
     if (action.disabled) return
     setOpeningVideoId(video.id)
     try {
-      const taskId = video.taskId || await workbenchApi.resolveTaskId(video)
-      if (!taskId) {
-        if (action.readonly && video.uri) return window.open(video.uri, '_blank', 'noopener,noreferrer')
-        throw new Error('未找到该视频所属任务，请后端在工作台视频接口中返回 task_id')
-      }
-      if (!action.readonly && !['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(taskId)
-      const params = new URLSearchParams({ video_id: video.id, project_id: video.projectId })
+      if (!video.projectId || !video.id) throw new Error('视频缺少项目或视频 ID')
+      if (!action.readonly && !video.currentAssigneeId && !['in_progress', 'processing'].includes(video.videoStatus)) await workbenchApi.claimVideo(video.projectId, video.id)
+      const params = new URLSearchParams()
       if (action.readonly) params.set('readonly', '1')
-      navigate(`/annotation/${encodeURIComponent(taskId)}?${params}`)
+      navigate(`/projects/${encodeURIComponent(video.projectId)}/videos/${encodeURIComponent(video.id)}/annotation${params.size ? `?${params}` : ''}`)
     } catch (reason) {
       onError(reason instanceof Error ? reason.message : '无法进入视频作业页')
     } finally {
@@ -134,7 +129,17 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   useEffect(() => {
     let active = true
     workbenchApi.listProjects()
-      .then((items) => { if (active) { setProjects(items); setProjectId((current) => current || items.find((item) => item.status === 'running')?.id || items[0]?.id || '') } })
+      .then((items) => {
+        if (!active) return
+        setProjects(items)
+        const nextProjectId = items.find((item) => item.status === 'running')?.id || items[0]?.id || ''
+        setProjectId((current) => current || nextProjectId)
+        if (!nextProjectId) {
+          setSnapshot(null)
+          setTabTotals({ pending: 0, submitted: 0 })
+          setLoading(false)
+        }
+      })
       .catch((reason) => { if (active) { setError(reason instanceof Error ? reason.message : '项目列表加载失败'); setLoading(false) } })
     return () => { active = false }
   }, [])
@@ -160,8 +165,8 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   async function claimTask(targetNode: TaskNode) {
     setClaimingNode(targetNode)
     try {
-      const task = await workbenchApi.claim(projectId, targetNode)
-      setToast(`已领取 ${task.dataName}`)
+      const video = await workbenchApi.claim(projectId, targetNode)
+      setToast(`已领取 ${video.filename}`)
       await load()
     } catch (reason) { setToast(reason instanceof Error ? reason.message : '领取失败') }
     finally { setClaimingNode(null) }
@@ -172,10 +177,9 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     if (!video || openingRecommended) return
     setOpeningRecommended(true)
     try {
-      const taskId = video.taskId || await workbenchApi.resolveTaskId(video)
-      if (!taskId) throw new Error('未找到该视频所属任务，请后端在工作台视频接口中返回 task_id')
-      if (!['in_progress', 'processing'].includes(video.videoStatus)) await annotationApi.startTask(taskId)
-      navigate(`/annotation/${encodeURIComponent(taskId)}?video_id=${encodeURIComponent(video.id)}&project_id=${encodeURIComponent(video.projectId)}`)
+      if (!video.projectId || !video.id) throw new Error('视频缺少项目或视频 ID')
+      if (!video.currentAssigneeId && !['in_progress', 'processing'].includes(video.videoStatus)) await workbenchApi.claimVideo(video.projectId, video.id)
+      navigate(`/projects/${encodeURIComponent(video.projectId)}/videos/${encodeURIComponent(video.id)}/annotation`)
     } catch (reason) { setToast(reason instanceof Error ? reason.message : '无法进入视频作业页') }
     finally { setOpeningRecommended(false) }
   }
@@ -187,7 +191,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
         <section className="project-hero panel">
           <div className="project-hero-main">
             <div className="project-kicker"><span className="live-dot" />当前作业项目</div>
-            <div className="project-title-row"><h1>{currentProject?.name || '加载中...'}</h1><div className="project-select-wrap"><select value={projectId} disabled={!projects.length} onChange={(event) => { setLoading(true); setError(''); setSnapshot(null); setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
+            <div className="project-title-row"><h1>{currentProject?.name || (loading ? '加载中...' : '暂无可作业项目')}</h1><div className="project-select-wrap"><select value={projectId} disabled={!projects.length} onChange={(event) => { setLoading(true); setError(''); setSnapshot(null); setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{!projects.length && <option value="">暂无项目</option>}{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
             <p>{currentProject?.batchName} <span /> {tab === 'pending' ? '待处理' : '已提交'} {snapshot?.tasks.page.total || 0} 条 <span /> 当前任务额度 {currentProject?.pendingCount || 0}/{currentProject?.claimLimit || 10}</p>
           </div>
           {!loading && snapshot && (snapshot.recommendedTask ? <div className="recommended-task">

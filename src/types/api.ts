@@ -59,13 +59,7 @@ export interface VideoListItem {
   id: string
   projectId: string
   projectName: string
-  taskId: string
-  taskExternalTaskId: string
-  taskTitle: string
-  taskStatus: string
-  taskCurrentNode: TaskNode
-  taskCurrentAssigneeId?: string
-  taskCurrentAssigneeName?: string
+  fleetVideoId?: string
   currentNode: TaskNode
   currentAssigneeId?: string
   currentAssigneeName?: string
@@ -234,37 +228,46 @@ export interface ProjectPayload {
   annotationGuideline: AnnotationGuideline | null
 }
 
-export interface FleetScene {
-  scene: string
-  taskCount: number
+export interface FleetVideoGroup {
+  scene1Id: number
+  scene1Name: string
+  scene2Id: number
+  scene2Name: string
+  supplierId: number
+  supplierName: string
   videoCount: number
-  totalDuration: number
-}
-
-export interface FleetTask {
-  id: number
-  externalTaskId: string
-  name: string
-  path: string
-  device: string
-  operator: string
-  videoCount: number
-  syncedCount: number
-  availableCount: number
-  totalDuration: number
-}
-
-export interface FleetPage<T> {
-  items: T[]
-  page: number
-  pageSize: number
-  total?: number
+  syncableCount: number
 }
 
 export interface FleetSyncResult {
   createdCount: number
   updatedCount: number
-  items: Array<{ id: number | string; externalTaskId: string; created: boolean }>
+  skippedCount: number
+  skipped: Array<{ fleetVideoId: number; filename: string; reason: string }>
+}
+
+export interface FleetVideoPreview {
+  fleetVideoId: number
+  filename: string
+  duration: number | null
+  fileSize: number | null
+  ossKey: string
+  ossBucket: string
+  scene1Id: number
+  scene1Name: string
+  scene2Id: number
+  scene2Name: string
+  supplierId: number
+  supplierName: string
+  synced: boolean
+}
+
+export interface FleetVideoPreviewPage {
+  items: FleetVideoPreview[]
+  total: number
+  page: number
+  pageSize: number
+  pages: number
 }
 
 export interface LabelItem {
@@ -401,7 +404,6 @@ export interface AnnotationComment {
 export interface VideoComment {
   id: string
   videoId: string
-  taskId: string
   node: TaskNode
   sequence: number
   positionX: number
@@ -441,8 +443,8 @@ export interface AnnotationResult {
 }
 
 export interface AnnotationWorkspace {
-  taskId: string
-  taskCode: string
+  videoId: string
+  videoCode: string
   dataId: string
   dataName: string
   projectId: string
@@ -479,5 +481,4 @@ export interface AnnotationDataItem {
   actionCount: number | null
   ownerName: string
   updatedAt: string
-  taskId?: string
 }

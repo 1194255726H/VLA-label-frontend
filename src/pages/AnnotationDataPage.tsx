@@ -84,11 +84,8 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   function applySearch() { setPage(1); setFilename(filenameInput.trim()); setCurrentAssigneeId(assigneeInput.trim()) }
   function resetFilters() { setFilenameInput(''); setFilename(''); setVideoStatus(''); setAssigneeInput(''); setCurrentAssigneeId(''); setCreatedAtStart(''); setCreatedAtEnd(''); setPage(1) }
   function preview(video: VideoListItem) {
-    if (video.taskId) {
-      navigate(`/annotation/${encodeURIComponent(video.taskId)}?video_id=${encodeURIComponent(video.id)}&project_id=${encodeURIComponent(video.projectId || projectId)}&readonly=1`)
-      return
-    }
-    if (video.uri) window.open(video.uri, '_blank', 'noopener,noreferrer')
+    const effectiveProjectId = video.projectId || projectId
+    if (effectiveProjectId && video.id) navigate(`/projects/${encodeURIComponent(effectiveProjectId)}/videos/${encodeURIComponent(video.id)}/annotation?readonly=1`)
   }
 
   return <AppShell user={session.account}><section className="management-page"><section className="management-panel panel">
@@ -108,7 +105,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
         <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
         <td><span className="node-tag blue">{nodeLabels[video.currentNode]}</span></td><td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
         <td>{clockDuration(video.duration)}</td><td>{milliseconds(video.selectedDurationMs)}</td><td>{milliseconds(video.effectiveDurationMs)}</td><td>{milliseconds(video.invalidDurationMs)}</td><td>{milliseconds(video.unselectedDurationMs)}</td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td>
-        <td><div className="row-actions"><button type="button" disabled={!video.taskId && !video.uri} onClick={() => preview(video)}><Eye size={15} />预览</button></div></td>
+        <td><div className="row-actions"><button type="button" disabled={!video.id} onClick={() => preview(video)}><Eye size={15} />预览</button></div></td>
       </tr>)}
       {!loading && !items.length && <tr><td colSpan={14}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
     </tbody></table></div>

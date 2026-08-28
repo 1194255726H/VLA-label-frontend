@@ -176,36 +176,6 @@ function numberValue(...values: unknown[]) {
   return match === undefined ? 0 : Number(match)
 }
 
-function normalizeTask(item: Record<string, unknown>): WorkbenchTask {
-  const summary = (item.vlaSummary || {}) as Record<string, unknown>
-  const videoMeta = (item.video_meta || {}) as Record<string, unknown>
-  const wireNode = String(item.current_node || item.node || item.currentNodeKey || 'annotation')
-  const nodeByLabel: Record<string, WorkbenchTask['node']> = { '标注': 'annotation', '质检': 'review', '审核': 'quality', '验收': 'acceptance', quality_check: 'review', review: 'quality' }
-  const wireStatus = String(item.taskStatusKey || item.status || 'pending')
-  const statusByLabel: Record<string, WorkbenchTask['status']> = { '待处理': 'pending', '处理中': 'processing', '已提交': 'submitted', '已完成': 'completed', assigned: 'pending', claimed: 'pending', in_progress: 'processing' }
-  const assignee = (item.current_assignee || item.assignee || {}) as Record<string, unknown>
-  return {
-    id: String(item.id || item.taskId || item.taskCode || ''),
-    dataId: String(item.external_task_id || item.dataId || item.dataCode || item.id || ''),
-    dataName: String(item.title || item.dataName || item.fileName || item.taskName || item.external_task_id || ''),
-    node: nodeByLabel[wireNode] || wireNode as WorkbenchTask['node'],
-    workType: ['returned', '退回', '退回返修'].includes(String(item.workType || item.status)) ? 'returned' : 'normal',
-    status: statusByLabel[wireStatus] || wireStatus as WorkbenchTask['status'],
-    totalDuration: numberValue(item.total_duration_ms, videoMeta.duration_ms, item.totalDuration, numberValue(item.durationMs)) / 1000,
-    selectedDuration: numberValue(item.selected_duration_ms, item.selectedDuration, numberValue(summary.selectedDurationSeconds) * 1000) / 1000,
-    validDuration: numberValue(item.effective_duration_ms, item.validDuration, numberValue(summary.validDurationSeconds) * 1000) / 1000,
-    invalidDuration: numberValue(item.invalid_duration_ms, item.invalidDuration, numberValue(summary.invalidDurationSeconds) * 1000) / 1000,
-    unselectedDuration: numberValue(item.unselected_duration_ms, item.unselectedDuration, numberValue(summary.unselectedDurationSeconds) * 1000) / 1000,
-    goalCount: numberValue(item.atomic_task_count, item.goalCount, summary.timelineTaskCount),
-    actionCount: numberValue(item.atomic_action_count, item.actionCount, summary.smallGoalCount),
-    startedAt: String(item.claimed_at || item.startedAt || item.startTime || '-'),
-    updatedAt: String(item.updated_at || item.updatedAt || item.updateTime || '-'),
-    submittedAt: item.submitted_at || item.submittedAt || item.submitTime ? String(item.submitted_at || item.submittedAt || item.submitTime) : undefined,
-    durationText: String(item.durationText || item.duration || '-'),
-    assignee: String(assignee.display_name || assignee.username || item.handlerName || ''),
-  }
-}
-
 function normalizeNode(value: unknown): TaskNode {
   const wireNode = String(value || 'annotation')
   const nodeMap: Record<string, TaskNode> = { '标注': 'annotation', '质检': 'review', '审核': 'quality', '验收': 'acceptance', quality_check: 'review', review: 'quality' }
@@ -216,35 +186,12 @@ function optionalString(value: unknown) {
   return value === null || value === undefined || value === '' ? undefined : String(value)
 }
 
-function objectValue(value: unknown) {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
-}
-
-function objectItems(value: unknown) {
-  if (Array.isArray(value)) return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
-  const object = objectValue(value)
-  return Array.isArray(object.items) ? object.items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : []
-}
-
-function mediaName(value: unknown) {
-  const raw = String(value || '').split('?')[0]
-  const name = raw.slice(raw.lastIndexOf('/') + 1)
-  try { return decodeURIComponent(name).toLowerCase().replace(/\.[^.]+$/, '') }
-  catch { return name.toLowerCase().replace(/\.[^.]+$/, '') }
-}
-
 function normalizeVideo(item: Record<string, unknown>): VideoListItem {
   return {
     id: String(item.id || ''),
     projectId: String(item.project_id || ''),
     projectName: String(item.project_name || ''),
-    taskId: String(item.task_id || ''),
-    taskExternalTaskId: String(item.task_external_task_id || ''),
-    taskTitle: String(item.task_title || ''),
-    taskStatus: String(item.task_status || ''),
-    taskCurrentNode: normalizeNode(item.task_current_node),
-    taskCurrentAssigneeId: optionalString(item.task_current_assignee_id),
-    taskCurrentAssigneeName: optionalString(item.task_current_assignee_name),
+    fleetVideoId: optionalString(item.fleet_video_id),
     currentNode: normalizeNode(item.current_node),
     currentAssigneeId: optionalString(item.current_assignee_id || item.video_current_assignee_id),
     currentAssigneeName: optionalString(item.current_assignee_name || item.video_current_assignee_name),
@@ -287,11 +234,6 @@ function mockVideo(task: WorkbenchTask, index: number): VideoListItem {
     id: `video-${index + 1}`,
     project_id: '1',
     project_name: mockProjects[0].name,
-    task_id: task.id,
-    task_external_task_id: task.dataId,
-    task_title: task.dataName,
-    task_status: task.status,
-    task_current_node: task.node,
     current_node: task.node,
     current_assignee_id: mockUser.id,
     video_status: task.status === 'processing' ? 'in_progress' : task.status === 'pending' ? 'assigned' : task.status,
@@ -363,7 +305,7 @@ export const workbenchApi = {
       } : dailyStats,
     }
   },
-  async claim(projectId: string, node: string): Promise<WorkbenchTask> {
+  async claim(projectId: string, node: string): Promise<VideoListItem> {
     if (runtimeConfig.apiMode === 'mock') {
       await sleep()
       const pool = mutablePool.find((item) => item.node === node)
@@ -371,34 +313,19 @@ export const workbenchApi = {
       pool.count -= 1
       const claimed = { ...mockTasks[1], id: `TASK-MOCK-${Date.now()}`, node: node as WorkbenchTask['node'], status: 'pending' as const }
       mutableTasks = [claimed, ...mutableTasks]
-      return claimed
+      return mockVideo(claimed, 0)
     }
-    const pool = await request<{ items: Array<Record<string, unknown>> }>('/api/tasks/pool?page_size=100')
-    const candidate = pool.items.find((item) => String(item.project_id || (item.project as Record<string, unknown> | undefined)?.id || '') === projectId && normalizeTask(item).node === node)
-    if (!candidate) throw new Error('当前没有可领取任务')
-    const claimed = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(String(candidate.id))}/claim`, { method: 'POST', body: '{}' })
-    return normalizeTask((claimed.task || claimed) as Record<string, unknown>)
+    const pool = await request<{ items: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/videos/pool`)
+    const candidate = pool.items.find((item) => normalizeNode(item.current_node) === node)
+    if (!candidate) throw new Error('当前没有可领取视频')
+    const videoId = String(candidate.id || '')
+    const claimed = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/claim`, { method: 'POST', body: '{}' })
+    return normalizeVideo(claimed)
   },
-  async resolveTaskId(video: VideoListItem): Promise<string> {
-    if (video.taskId) return video.taskId
-    if (runtimeConfig.apiMode === 'mock') return mockTasks[0]?.id || ''
-    const response = await request<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>('/api/tasks/my?page_size=100')
-    const tasks = Array.isArray(response) ? response : objectItems(response)
-    const videoRecordId = String(video.id)
-    const externalVideoId = String(video.externalVideoId || video.videoId || '')
-    const filename = mediaName(video.filename)
-    const matched = tasks.find((raw) => {
-      const task = Object.keys(objectValue(raw.task)).length ? objectValue(raw.task) : raw
-      const projectId = String(task.project_id || objectValue(task.project).id || '')
-      if (video.projectId && projectId && projectId !== video.projectId) return false
-      const nestedVideos = [task.videos, task.task_videos, task.video_items, raw.videos, raw.task_videos].flatMap(objectItems)
-      if (nestedVideos.some((item) => String(item.id || item.video_id || '') === videoRecordId)) return true
-      if (externalVideoId && nestedVideos.some((item) => String(item.external_video_id || item.video_id || '') === externalVideoId)) return true
-      if (String(task.video_id || task.task_video_id || '') === videoRecordId) return true
-      const taskMediaName = mediaName(task.video_uri || task.uri || task.preview_url)
-      return Boolean(taskMediaName && (taskMediaName === filename || taskMediaName === mediaName(video.uri)))
-    })
-    const task = matched && (Object.keys(objectValue(matched.task)).length ? objectValue(matched.task) : matched)
-    return task ? String(task.id || task.task_id || '') : ''
+  async claimVideo(projectId: string, videoId: string): Promise<VideoListItem> {
+    if (runtimeConfig.apiMode === 'mock') { await sleep(); const video = mutableTasks.find((item) => item.id === videoId); return mockVideo(video || mockTasks[0], 0) }
+    const claimed = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/claim`, { method: 'POST', body: '{}' })
+    const video = normalizeVideo(claimed)
+    return video.projectId ? video : { ...video, projectId }
   },
 }

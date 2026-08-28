@@ -6,8 +6,7 @@ import { request } from './api'
 const mockResults = new Map<string, AnnotationResult>()
 const mockRevisions = new Map<string, number>()
 const workspaceRequests = new Map<string, Promise<AnnotationWorkspace>>()
-const taskNodes = new Map<string, TaskNode>()
-const taskVideoIds = new Map<string, string>()
+const videoNodes = new Map<string, TaskNode>()
 const mockVideoComments = new Map<string, VideoComment[]>()
 
 export interface VideoHeartbeatResult { locked: boolean; lockedById: string | null }
@@ -24,8 +23,8 @@ function emptyResult(frameRate = 30, totalFrames = 911): AnnotationResult {
   return { schemaVersion: 'vla-video-hierarchy@11.0.0', coordinateSystem: 'zero-based-frame', intervalConvention: 'half-open', frameRate, totalFrames, mediaStartTime: 0, goals: [], actions: [], invalidRanges: [], usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: 1, nextActionSequenceByGoal: {}, nextInvalidSequence: 1 }
 }
 
-function mockResult(taskId: string) {
-  if (!mockResults.has(taskId)) {
+function mockResult(videoKey: string) {
+  if (!mockResults.has(videoKey)) {
     const result = emptyResult()
     result.goals = [
       { id: 'goal-1', sequence: 1, code: 'roadside_obstacle_018-001', type: 'goal', startFrame: 60, endFrame: 300, labelId: '201', labelName: '通过路口', color: '#2563EB', descriptionZh: '车辆通过园区路口' },
@@ -35,12 +34,12 @@ function mockResult(taskId: string) {
       { id: 'action-1', sequence: 1, code: 'roadside_obstacle_018-001-A001', parentId: 'goal-1', type: 'action', startFrame: 90, endFrame: 180, labelId: '204', labelName: '直行', color: '#16A34A', descriptionZh: '保持直行', keyFrames: [] },
       { id: 'action-2', sequence: 2, code: 'roadside_obstacle_018-001-A002', parentId: 'goal-1', type: 'action', startFrame: 190, endFrame: 270, labelId: '205', labelName: '等待', color: '#D97706', descriptionZh: '', keyFrames: [] },
     ]
-    mockResults.set(taskId, result)
+    mockResults.set(videoKey, result)
     result.nextGoalSequence = 3
     result.nextActionSequenceByGoal = { 'goal-1': 3, 'goal-2': 1 }
-    mockRevisions.set(taskId, 1)
+    mockRevisions.set(videoKey, 1)
   }
-  return mockResults.get(taskId) as AnnotationResult
+  return mockResults.get(videoKey) as AnnotationResult
 }
 
 function wireNode(value: unknown): TaskNode {
@@ -53,7 +52,7 @@ function backendNode(value: TaskNode) {
 
 function normalizeVideoComment(item: Record<string, unknown>): VideoComment {
   return {
-    id: String(item.id || ''), videoId: String(item.video_id || ''), taskId: String(item.task_id || ''),
+    id: String(item.id || ''), videoId: String(item.video_id || ''),
     node: wireNode(item.node), sequence: Number(item.sequence || 0),
     positionX: Number(item.position_x || 0), positionY: Number(item.position_y || 0), content: String(item.content || ''),
     resolved: Boolean(item.resolved), createdById: String(item.created_by_id || ''), createdByName: String(item.created_by_name || ''),
@@ -61,16 +60,7 @@ function normalizeVideoComment(item: Record<string, unknown>): VideoComment {
   }
 }
 
-function videoQuery(taskId: string) {
-  const videoId = taskVideoIds.get(taskId)
-  return videoId ? `?video_id=${encodeURIComponent(videoId)}` : ''
-}
-
-function decisionVideoId(taskId: string) {
-  const videoId = Number(taskVideoIds.get(taskId))
-  if (!Number.isInteger(videoId)) throw new Error('video_id 必须传入有效的视频 ID')
-  return videoId
-}
+function videoContextKey(projectId: string, videoId: string) { return `${projectId}:${videoId}` }
 
 function msToFrame(value: unknown, frameRate: number) { return Math.max(0, Math.round(Number(value || 0) / 1000 * frameRate)) }
 function frameToMs(value: number, frameRate: number) { return Math.max(0, Math.round(value / frameRate * 1000)) }
@@ -171,7 +161,7 @@ async function loadTaskConfiguration(projectId: string) {
   return { labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0, operationLibraryId: String(config.operation_library_id || ''), operationLibraryName: String(config.operation_library_name || '') }
 }
 
-function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, operationLibraryId: string, operationLibraryName: string, viewOnly: boolean, selectedProjectId = ''): AnnotationWorkspace {
+function normalizeWorkspace(projectId: string, videoId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, operationLibraryId: string, operationLibraryName: string, viewOnly: boolean): AnnotationWorkspace {
   const task = (raw.task || raw) as Record<string, unknown>
   const selectedVideo = (raw.selected_video || task.selected_video || {}) as Record<string, unknown>
   const project = (task.project || raw.project || {}) as Record<string, unknown>
@@ -182,7 +172,8 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
   const preserved = meta.frontend_result && typeof meta.frontend_result === 'object' ? meta.frontend_result as AnnotationResult : undefined
   const frameRate = Number(preserved?.frameRate || meta.frame_rate || videoMeta.frame_rate || 30)
   const mediaStartTime = Number(preserved?.mediaStartTime || meta.media_start_time || videoMeta.media_start_time || videoMeta.start_time_ms && Number(videoMeta.start_time_ms) / 1000 || 0)
-  const durationSeconds = Number(videoMeta.duration_ms || selectedVideo.duration_ms || task.duration_ms || 0) / 1000
+  const durationMilliseconds = Number(videoMeta.duration_ms || selectedVideo.duration_ms || task.duration_ms || 0)
+  const durationSeconds = durationMilliseconds > 0 ? durationMilliseconds / 1000 : Number(selectedVideo.duration || task.duration || 0)
   const rawGoals = Array.isArray(revisionPayload.atomic_tasks) ? revisionPayload.atomic_tasks as Array<Record<string, unknown>> : []
   const goals = rawGoals.map((goal, index) => ({ id: String(goal.id || `goal-${goal.sequence ?? index + 1}`), sequence: Number(goal.sequence ?? index + 1), type: 'goal' as const, startFrame: goal.start_frame == null ? msToFrame(goal.start_ms, frameRate) : Number(goal.start_frame), endFrame: goal.end_frame == null ? msToFrame(goal.end_ms, frameRate) : Number(goal.end_frame), labelId: goal.label_id == null ? undefined : String(goal.label_id), labelCode: String(goal.label_code || ''), labelName: labels.find((label) => label.id === String(goal.label_id))?.name, color: labels.find((label) => label.id === String(goal.label_id))?.color || '#2563EB', descriptionZh: String(goal.description || '') }))
   const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => { const noAction = action.segment_type === 'no_action' || action.system_code === 'NO_ACTION'; const rawKeyFrames = Array.isArray(action.keyframes) ? action.keyframes : Array.isArray(action.key_frames) ? action.key_frames : []; return ({ id: String(action.id || `${parent.id}-A${String(action.sequence ?? index + 1).padStart(3, '0')}`), sequence: Number(action.sequence ?? index + 1), parentId: parent.id, type: noAction ? 'no_action' as const : 'action' as const, startFrame: action.start_frame == null ? msToFrame(action.start_ms, frameRate) : Number(action.start_frame), endFrame: action.end_frame == null ? msToFrame(action.end_ms, frameRate) : Number(action.end_frame), labelId: action.label_id == null ? undefined : String(action.label_id), labelCode: String(action.label_code || ''), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: noAction ? '#64748B' : labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: String(action.description_zh || action.description || (noAction ? '未执行有效动作' : '')), descriptionEn: String(action.description_en || (noAction ? 'No valid action is performed.' : '')), systemCode: noAction ? 'NO_ACTION' as const : undefined, descriptionSource: noAction ? 'system' as const : 'user' as const, modelDescriptionRequired: noAction ? false : undefined, ...normalizeOperationObjectRefs(action), keyFrames: (rawKeyFrames as Array<Record<string, unknown>>).map(normalizeKeyFrame) }) }) })
@@ -206,9 +197,9 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
     usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: goals.length + 1, nextActionSequenceByGoal: Object.fromEntries(goals.map((goal) => [goal.id, actions.filter((action) => action.parentId === goal.id).length + 1])), nextInvalidSequence: 1,
   }
   return {
-    taskId,
-    taskCode: String(task.external_task_id || task.id || taskId), dataId: String(selectedVideo.external_video_id || task.external_task_id || selectedVideo.id || task.id || ''), dataName: String(selectedVideo.filename || task.title || task.external_task_id || 'VLA 视频数据'),
-    projectId: String(task.project_id || project.id || selectedProjectId), projectName: String(project.name || ''), node,
+    videoId,
+    videoCode: String(selectedVideo.external_video_id || selectedVideo.id || videoId), dataId: String(selectedVideo.external_video_id || selectedVideo.id || videoId), dataName: String(selectedVideo.filename || 'VLA 视频数据'),
+    projectId: String(selectedVideo.project_id || project.id || projectId), projectName: String(project.name || ''), node,
     readonly: viewOnly || ['submitted', 'completed'].includes(status),
     videoUrl: /^https?:\/\//i.test(videoUri) ? videoUri : '',
     frameRate,
@@ -218,26 +209,25 @@ function normalizeWorkspace(taskId: string, raw: Record<string, unknown>, labels
 }
 
 export const annotationApi = {
-  async listVideoComments(taskId: string, videoId: string): Promise<VideoComment[]> {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(mockVideoComments.get(`${taskId}:${videoId}`) || []) }
-    const params = new URLSearchParams({ video_id: videoId })
-    const response = await request<{ items: Array<Record<string, unknown>> }>(`/api/tasks/${encodeURIComponent(taskId)}/comments?${params}`)
+  async listVideoComments(projectId: string, videoId: string): Promise<VideoComment[]> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(mockVideoComments.get(videoContextKey(projectId, videoId)) || []) }
+    const response = await request<{ items: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/comments`)
     return (response.items || []).map(normalizeVideoComment)
   },
 
-  async createVideoComment(taskId: string, payload: { videoId: string; node: TaskNode; sequence: number; content: string; positionX: number; positionY: number }): Promise<VideoComment> {
+  async createVideoComment(projectId: string, videoId: string, payload: { node: TaskNode; sequence: number; content: string; positionX: number; positionY: number }): Promise<VideoComment> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
-      const key = `${taskId}:${payload.videoId}`
-      const comment: VideoComment = { id: crypto.randomUUID(), videoId: payload.videoId, taskId, node: payload.node, sequence: payload.sequence, positionX: payload.positionX, positionY: payload.positionY, content: payload.content, resolved: false, createdById: 'mock-user', createdByName: '当前用户', createdAt: new Date().toISOString() }
+      const key = videoContextKey(projectId, videoId)
+      const comment: VideoComment = { id: crypto.randomUUID(), videoId, node: payload.node, sequence: payload.sequence, positionX: payload.positionX, positionY: payload.positionY, content: payload.content, resolved: false, createdById: 'mock-user', createdByName: '当前用户', createdAt: new Date().toISOString() }
       mockVideoComments.set(key, [...(mockVideoComments.get(key) || []), comment])
       return clone(comment)
     }
-    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/comments`, { method: 'POST', body: JSON.stringify({ video_id: Number(payload.videoId), node: backendNode(payload.node), sequence: payload.sequence, content: payload.content, position_x: payload.positionX, position_y: payload.positionY }) })
+    const response = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/comments`, { method: 'POST', body: JSON.stringify({ node: backendNode(payload.node), sequence: payload.sequence, content: payload.content, position_x: payload.positionX, position_y: payload.positionY }) })
     return normalizeVideoComment(response)
   },
 
-  async resolveVideoComment(taskId: string, commentId: string): Promise<VideoComment> {
+  async resolveVideoComment(projectId: string, videoId: string, commentId: string): Promise<VideoComment> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       for (const [key, comments] of mockVideoComments) {
@@ -246,25 +236,25 @@ export const annotationApi = {
       }
       throw new Error('批注不存在')
     }
-    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/comments/${encodeURIComponent(commentId)}/resolve`, { method: 'POST', body: '{}' })
+    const response = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/comments/${encodeURIComponent(commentId)}/resolve`, { method: 'POST', body: '{}' })
     return normalizeVideoComment(response)
   },
 
-  async createKeyFrame(taskId: string, videoId: string, actionId: string, keyFrame: AnnotationKeyFrame): Promise<AnnotationKeyFrame> {
+  async createKeyFrame(projectId: string, videoId: string, actionId: string, keyFrame: AnnotationKeyFrame): Promise<AnnotationKeyFrame> {
     if (runtimeConfig.apiMode === 'mock' || !/^\d+$/.test(actionId)) { await delay(); return { ...keyFrame, id: crypto.randomUUID() } }
-    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/keyframes`, { method: 'POST', body: JSON.stringify({ video_id: Number(videoId), action_id: Number(actionId), ...keyFramePayload(keyFrame) }) })
+    const response = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/keyframes`, { method: 'POST', body: JSON.stringify({ action_id: Number(actionId), ...keyFramePayload(keyFrame) }) })
     return normalizeKeyFrame(response)
   },
 
-  async updateKeyFrame(taskId: string, videoId: string, keyFrame: AnnotationKeyFrame): Promise<AnnotationKeyFrame> {
+  async updateKeyFrame(projectId: string, videoId: string, keyFrame: AnnotationKeyFrame): Promise<AnnotationKeyFrame> {
     if (runtimeConfig.apiMode === 'mock' || !/^\d+$/.test(keyFrame.id)) { await delay(); return keyFrame }
-    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/keyframes/${encodeURIComponent(keyFrame.id)}?video_id=${encodeURIComponent(videoId)}`, { method: 'PATCH', body: JSON.stringify(keyFramePayload(keyFrame)) })
+    const response = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/keyframes/${encodeURIComponent(keyFrame.id)}`, { method: 'PATCH', body: JSON.stringify(keyFramePayload(keyFrame)) })
     return normalizeKeyFrame(response)
   },
 
-  async deleteKeyFrame(taskId: string, videoId: string, keyFrameId: string): Promise<void> {
+  async deleteKeyFrame(projectId: string, videoId: string, keyFrameId: string): Promise<void> {
     if (runtimeConfig.apiMode === 'mock' || !/^\d+$/.test(keyFrameId)) { await delay(); return }
-    await request(`/api/tasks/${encodeURIComponent(taskId)}/keyframes/${encodeURIComponent(keyFrameId)}?video_id=${encodeURIComponent(videoId)}`, { method: 'DELETE' })
+    await request(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/keyframes/${encodeURIComponent(keyFrameId)}`, { method: 'DELETE' })
   },
 
   async nextVideo(projectId: string, node: TaskNode): Promise<string | null> {
@@ -282,73 +272,64 @@ export const annotationApi = {
     return { locked: Boolean(response.locked), lockedById: response.locked_by_id === null || response.locked_by_id === undefined ? null : String(response.locked_by_id) }
   },
 
-  async getWorkspace(taskId: string, viewOnly = false, videoId = '', projectId = ''): Promise<AnnotationWorkspace> {
+  async getWorkspace(projectId: string, videoId: string, viewOnly = false): Promise<AnnotationWorkspace> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
-      const task = mockTasks.find((item) => item.id === taskId) || mockTasks[0]
-      const result = clone(mockResult(taskId))
+      const task = mockTasks[0]
+      const key = videoContextKey(projectId, videoId)
+      const result = clone(mockResult(key))
       return {
-        taskId, taskCode: task.id, dataId: task.dataId, dataName: task.dataName,
-        projectId: '1', projectName: '清华路端项目', node: task.node, readonly: task.status === 'submitted' || task.status === 'completed',
+        videoId, videoCode: videoId, dataId: videoId, dataName: task.dataName,
+        projectId, projectName: '清华路端项目', node: task.node, readonly: viewOnly || task.status === 'submitted' || task.status === 'completed',
         videoUrl: '/temp.mp4', frameRate: result.frameRate, durationSeconds: result.totalFrames / result.frameRate, mediaStartTime: result.mediaStartTime,
-        currentRevision: mockRevisions.get(taskId) || 0,
+        currentRevision: mockRevisions.get(key) || 0,
         labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), labelLibraryBound: true, operationLibraryId: '1', operationLibraryName: '常用操作对象库', result,
       }
     }
     if (!videoId) throw new Error('缺少视频记录 ID，无法进入作业页')
-    const requestKey = `${taskId}:${videoId}:${viewOnly ? 'view' : 'edit'}`
+    const requestKey = `${projectId}:${videoId}:${viewOnly ? 'view' : 'edit'}`
     const pending = workspaceRequests.get(requestKey)
     if (pending) return pending
     const workspaceRequest = (async () => {
-      const params = new URLSearchParams({ video_id: videoId })
-      const raw = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}?${params}`)
-      const task = (raw.task || raw) as Record<string, unknown>
-      const effectiveProjectId = String(task.project_id || (task.project as Record<string, unknown> | undefined)?.id || projectId)
-      const configuration = await loadTaskConfiguration(effectiveProjectId)
-      const workspace = normalizeWorkspace(taskId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly, effectiveProjectId)
-      taskNodes.set(taskId, workspace.node)
-      if (videoId) taskVideoIds.set(taskId, videoId)
+      const raw = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}`)
+      const configuration = await loadTaskConfiguration(projectId)
+      const workspace = normalizeWorkspace(projectId, videoId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly)
+      videoNodes.set(videoContextKey(projectId, videoId), workspace.node)
       return workspace
     })()
     workspaceRequests.set(requestKey, workspaceRequest)
     try { return await workspaceRequest } finally { workspaceRequests.delete(requestKey) }
   },
 
-  async startTask(_taskId: string) {
-    void _taskId
-    if (runtimeConfig.apiMode === 'mock') { await delay(); return }
-    return
-  },
-
-  async save(taskId: string, result: AnnotationResult, baseRevision: number): Promise<number> {
+  async save(projectId: string, videoId: string, result: AnnotationResult, baseRevision: number): Promise<number> {
     if (runtimeConfig.apiMode === 'mock') {
-      await delay(); mockResults.set(taskId, clone(result)); const revision = (mockRevisions.get(taskId) || 0) + 1; mockRevisions.set(taskId, revision); return revision
+      const key = videoContextKey(projectId, videoId); await delay(); mockResults.set(key, clone(result)); const revision = (mockRevisions.get(key) || 0) + 1; mockRevisions.set(key, revision); return revision
     }
-    const response = await request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/annotation-draft${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
+    const response = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/annotation-draft`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
     const revision = (response.revision || response.current_revision || response) as Record<string, unknown>
     return Number(response.version || revision.version || revision.revision || revision.revision_no || response.revision_id || revision.id || baseRevision + 1)
   },
 
-  async submit(taskId: string, result: AnnotationResult, _revision: number) {
+  async submit(projectId: string, videoId: string, result: AnnotationResult, _revision: number) {
     void _revision
-    if (runtimeConfig.apiMode === 'mock') { await delay(); mockResults.set(taskId, clone(result)); return }
-    const node = taskNodes.get(taskId) || 'annotation'
-    if (node === 'annotation') await request(`/api/tasks/${encodeURIComponent(taskId)}/submit-annotation${videoQuery(taskId)}`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
-    else await request(`/api/tasks/${encodeURIComponent(taskId)}/decision`, { method: 'POST', body: JSON.stringify({ video_id: decisionVideoId(taskId), node: backendNode(node), decision: 'approved', opinion: '通过' }) })
+    const key = videoContextKey(projectId, videoId)
+    if (runtimeConfig.apiMode === 'mock') { await delay(); mockResults.set(key, clone(result)); return }
+    const node = videoNodes.get(key) || 'annotation'
+    if (node === 'annotation') await request(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/submit-annotation`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
+    else await request(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/decision`, { method: 'POST', body: JSON.stringify({ node: backendNode(node), decision: 'approved', opinion: '通过' }) })
   },
-  clearTaskContext(taskId: string) {
-    taskNodes.delete(taskId)
-    taskVideoIds.delete(taskId)
+  clearVideoContext(projectId: string, videoId: string) {
+    videoNodes.delete(videoContextKey(projectId, videoId))
   },
-  async cancelVideo(taskId: string) {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); return { videoId: Number(taskVideoIds.get(taskId) || 0), currentNode: 'annotation', status: 'cancelled', currentAssigneeId: null, cancelled: true } }
-    const response = await request<{ video_id: number; current_node: string; status: string; current_assignee_id: number | null; cancelled: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}/cancel-video`, { method: 'POST', body: JSON.stringify({ video_id: decisionVideoId(taskId) }) })
+  async cancelVideo(projectId: string, videoId: string) {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return { videoId: Number(videoId), currentNode: 'annotation', status: 'cancelled', currentAssigneeId: null, cancelled: true } }
+    const response = await request<{ video_id: number; current_node: string; status: string; current_assignee_id: number | null; cancelled: boolean }>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/cancel`, { method: 'POST', body: '{}' })
     return { videoId: Number(response.video_id), currentNode: response.current_node, status: response.status, currentAssigneeId: response.current_assignee_id === null ? null : String(response.current_assignee_id), cancelled: Boolean(response.cancelled) }
   },
-  async reject(taskId: string, reason: string) {
+  async reject(projectId: string, videoId: string, reason: string) {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return }
-    const node = taskNodes.get(taskId) || 'review'
+    const node = videoNodes.get(videoContextKey(projectId, videoId)) || 'review'
     if (node === 'annotation') throw new Error('标注环节不支持退回')
-    await request(`/api/tasks/${encodeURIComponent(taskId)}/decision`, { method: 'POST', body: JSON.stringify({ video_id: decisionVideoId(taskId), node: backendNode(node), decision: 'rejected', opinion: reason }) })
+    await request(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/decision`, { method: 'POST', body: JSON.stringify({ node: backendNode(node), decision: 'rejected', opinion: reason }) })
   },
 }
