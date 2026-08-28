@@ -998,7 +998,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const goalOverlap = firstOverlap(result.goals)
     if (goalOverlap) { setSelectedId(goalOverlap.right.id); seek(goalOverlap.right.startFrame); return setToast('单次任务存在历史重叠，必须修正后才能提交') }
     const goalGaps = coverageGaps(0, result.totalFrames, [...result.goals, ...result.invalidRanges])
-    if (goalGaps.length && !options.ignoreGoalGaps) { seek(goalGaps[0].startFrame); setSubmitIssue({ type: 'goal-gap', gaps: goalGaps }); return }
+    if (goalGaps.length && !options.ignoreGoalGaps) { setSubmitIssue({ type: 'goal-gap', gaps: goalGaps }); return }
     for (const goal of result.goals) {
       const actions = result.actions.filter((action) => action.parentId === goal.id)
       const actionOverlap = firstOverlap(actions)
@@ -1009,9 +1009,9 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const invalidKeyFrame = result.actions.flatMap((action) => (action.keyFrames || []).map((keyFrame) => ({ action, keyFrame }))).find(({ action, keyFrame }) => !Number.isInteger(keyFrame.frame) || keyFrame.frame < action.startFrame || keyFrame.frame >= action.endFrame)
     if (invalidKeyFrame) { setSelectedId(invalidKeyFrame.action.id); seek(invalidKeyFrame.keyFrame.frame); return setToast('存在越过小目标半开区间的关键帧') }
     const actionGap = result.goals.map((goal) => ({ goal, gaps: coverageGaps(goal.startFrame, goal.endFrame, [...result.actions.filter((action) => action.parentId === goal.id), ...result.invalidRanges]) })).find((item) => item.gaps.length)
-    if (actionGap && !options.ignoreActionGaps) { setActiveGoalId(actionGap.goal.id); setSelectedId(actionGap.goal.id); seek(actionGap.gaps[0].startFrame); setSubmitIssue({ type: 'action-gap', goal: actionGap.goal, gaps: actionGap.gaps }); return }
+    if (actionGap && !options.ignoreActionGaps) { setSubmitIssue({ type: 'action-gap', goal: actionGap.goal, gaps: actionGap.gaps }); return }
     const missingObject = result.actions.find((item) => item.type === 'action' && !item.operationObjectIds?.length)
-    if (missingObject) { const parentIndex = result.goals.findIndex((goal) => goal.id === missingObject.parentId); const actionIndex = result.actions.filter((action) => action.parentId === missingObject.parentId).findIndex((action) => action.id === missingObject.id); setActiveGoalId(missingObject.parentId); setSelectedId(missingObject.id); seek(missingObject.startFrame); setSubmitIssue({ type: 'missing-object', action: missingObject, title: `小目标 ${parentIndex + 1}-${actionIndex + 1}` }); return }
+    if (missingObject) { const parentIndex = result.goals.findIndex((goal) => goal.id === missingObject.parentId); const actionIndex = result.actions.filter((action) => action.parentId === missingObject.parentId).findIndex((action) => action.id === missingObject.id); setSubmitIssue({ type: 'missing-object', action: missingObject, title: `小目标 ${parentIndex + 1}-${actionIndex + 1}` }); return }
     const fullyInvalid = result.actions.find((item) => result.invalidRanges.some((range) => range.startFrame <= item.startFrame && range.endFrame >= item.endFrame))
     if (fullyInvalid) { setSelectedId(fullyInvalid.id); return setToast('小目标被无效区间完全覆盖，请调整或删除') }
     try {
