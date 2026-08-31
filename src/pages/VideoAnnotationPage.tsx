@@ -389,7 +389,20 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
       const number = segmentNumber(item, index)
       const children = item.type === 'goal' ? childItems.filter((child) => child.parentId === item.id) : []
       const childDraft = item.type === 'goal' && draft?.level === 'action' && draft.parentId === item.id ? draft : undefined
-      return [<button className={`timeline-block ${item.type}${children.length || childDraft ? ' has-child-overview' : ''}${selectedId === item.id ? ' selected' : ''}${item.startFrame < safeStart ? ' clipped-start' : ''}${item.endFrame > safeEnd ? ' clipped-end' : ''}`} type="button" key={item.id} title={`${item.code || number} · ${item.labelName || (item.type === 'no_action' ? '无动作' : '未选择标签')}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%`, '--segment-color': item.color } as React.CSSProperties} onPointerDown={(event) => startRangeDrag(event, item)} onClick={(event) => { event.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return }; const now = performance.now(); const previous = lastSegmentClickRef.current; const precise = previous?.id === item.id && now - previous.at <= 400 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 6 && !(event.target as HTMLElement).closest('.range-handle'); lastSegmentClickRef.current = precise ? undefined : { id: item.id, at: now, x: event.clientX, y: event.clientY }; const rect = event.currentTarget.parentElement!.getBoundingClientRect(); const clickedFrame = frameFromPointer(event.clientX, rect, normalizedViewport); if (precise) { onPreciseSeek?.(level, clickedFrame); return } onSelect(item, clickedFrame) }}><span className="timeline-block-bar"><span className="timeline-block-copy">{number} · {item.endFrame - item.startFrame}帧{item.type === 'goal' && ` · ${timeText((item.endFrame - item.startFrame) / frameRate)}`}</span>{item.keyFrames?.map((frame) => <i className="timeline-keyframe" key={frame.id} style={{ left: `${(frame.frame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />)}{item.type === 'goal' && <span className="timeline-child-overview" aria-hidden="true">{children.map((child) => <i key={child.id} style={{ left: `${(child.startFrame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(child.endFrame - child.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, '--child-color': child.color } as React.CSSProperties} />)}{invalidRanges?.filter((range) => range.startFrame < item.endFrame && range.endFrame > item.startFrame).map((range) => <i className="invalid" key={range.id} style={{ left: `${(Math.max(range.startFrame, item.startFrame) - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(Math.min(range.endFrame, item.endFrame) - Math.max(range.startFrame, item.startFrame)) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />)}{childDraft && (() => { const draftStart = Math.max(item.startFrame, childDraft.startFrame); const draftEnd = Math.min(item.endFrame, childDraft.endFrame); return draftEnd > draftStart ? <i className="draft" style={{ left: `${(draftStart - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(draftEnd - draftStart) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} /> : null })()}</span>}</span>{selectedId === item.id && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>]
+      return [<button className={`timeline-block ${item.type}${children.length || childDraft ? ' has-child-overview' : ''}${selectedId === item.id ? ' selected' : ''}${item.startFrame < safeStart ? ' clipped-start' : ''}${item.endFrame > safeEnd ? ' clipped-end' : ''}`} type="button" key={item.id} title={`${item.code || number} · ${item.labelName || (item.type === 'no_action' ? '无动作' : '未选择标签')}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%`, '--segment-color': item.color } as React.CSSProperties} onPointerDown={(event) => {
+        if (event.button !== 0) return
+        if (selectedId !== item.id) {
+          // Selection must not depend on the later click event: a preceding pan/drag
+          // may intentionally suppress that click and used to make action blocks
+          // appear unresponsive.
+          suppressClickRef.current = false
+          event.stopPropagation()
+          const rect = event.currentTarget.parentElement?.getBoundingClientRect()
+          onSelect(item, rect ? frameFromPointer(event.clientX, rect, normalizedViewport) : undefined)
+          return
+        }
+        startRangeDrag(event, item)
+      }} onClick={(event) => { event.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return }; const now = performance.now(); const previous = lastSegmentClickRef.current; const precise = previous?.id === item.id && now - previous.at <= 400 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 6 && !(event.target as HTMLElement).closest('.range-handle'); lastSegmentClickRef.current = precise ? undefined : { id: item.id, at: now, x: event.clientX, y: event.clientY }; const rect = event.currentTarget.parentElement!.getBoundingClientRect(); const clickedFrame = frameFromPointer(event.clientX, rect, normalizedViewport); if (precise) { onPreciseSeek?.(level, clickedFrame); return } onSelect(item, clickedFrame) }}><span className="timeline-block-bar"><span className="timeline-block-copy">{number} · {item.endFrame - item.startFrame}帧{item.type === 'goal' && ` · ${timeText((item.endFrame - item.startFrame) / frameRate)}`}</span>{item.keyFrames?.map((frame) => <i className="timeline-keyframe" key={frame.id} style={{ left: `${(frame.frame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />)}{item.type === 'goal' && <span className="timeline-child-overview" aria-hidden="true">{children.map((child) => <i key={child.id} style={{ left: `${(child.startFrame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(child.endFrame - child.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, '--child-color': child.color } as React.CSSProperties} />)}{invalidRanges?.filter((range) => range.startFrame < item.endFrame && range.endFrame > item.startFrame).map((range) => <i className="invalid" key={range.id} style={{ left: `${(Math.max(range.startFrame, item.startFrame) - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(Math.min(range.endFrame, item.endFrame) - Math.max(range.startFrame, item.startFrame)) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />)}{childDraft && (() => { const draftStart = Math.max(item.startFrame, childDraft.startFrame); const draftEnd = Math.min(item.endFrame, childDraft.endFrame); return draftEnd > draftStart ? <i className="draft" style={{ left: `${(draftStart - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(draftEnd - draftStart) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} /> : null })()}</span>}</span>{selectedId === item.id && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>]
     })}
     {items.flatMap((item) => (item.keyFrames || []).filter((keyFrame) => keyFrame.frame >= safeStart && keyFrame.frame < safeEnd).map((keyFrame) => <i className="timeline-keyframe-overlay" aria-hidden="true" key={`${item.id}:${keyFrame.id}`} style={{ left: `${(keyFrame.frame - safeStart) / safeSpan * 100}%` }} />))}
     {draft && (draft.level === (label === '单次任务' ? 'goal' : 'action') || level === 'action' && draft.level === 'invalid') && draft.endFrame >= safeStart && draft.startFrame <= safeEnd && <span className={`timeline-draft${draft.level === 'invalid' ? ' invalid' : ''}`} style={{ left: `${(Math.max(safeStart, draft.startFrame) - safeStart) / safeSpan * 100}%`, width: `${Math.max(1, Math.min(safeEnd, draft.endFrame) - Math.max(safeStart, draft.startFrame)) / safeSpan * 100}%` }} />}
@@ -476,6 +489,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [result, setResult] = useState<AnnotationResult>()
   const [revision, setRevision] = useState(0)
   const [selectedId, setSelectedId] = useState<string>()
+  const [selectedLevel, setSelectedLevel] = useState<'goal' | 'action' | 'invalid'>()
   const [activeGoalId, setActiveGoalId] = useState<string>()
   const [currentFrame, setCurrentFrame] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -510,7 +524,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [candidateModalOpen, setCandidateModalOpen] = useState(false)
   const [candidateForm, setCandidateForm] = useState({ name: '', alias: '', attribute: '' })
   const [candidateSaving, setCandidateSaving] = useState(false)
-  const [keyFrameSaving, setKeyFrameSaving] = useState(false)
   const [submitIssue, setSubmitIssue] = useState<
     | { type: 'goal-gap'; gaps: Array<{ startFrame: number; endFrame: number }> }
     | { type: 'action-gap'; goal: AnnotationSegment; gaps: Array<{ startFrame: number; endFrame: number }> }
@@ -569,6 +582,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         redoStack.current = []
         setHistory({ undo: 0, redo: 0 })
         setSelectedId(undefined)
+        setSelectedLevel(undefined)
         setActiveGoalId(undefined)
         setAtomicViewports({})
         setEditing(undefined)
@@ -678,8 +692,10 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       .finally(() => { if (active) setOperationObjectsLoading(false) })
     return () => { active = false }
   }, [workspace?.operationLibraryId, workspace?.operationLibraryName])
-  const selected = useMemo(() => result && [...result.goals, ...result.actions].find((item) => item.id === selectedId), [result, selectedId])
-  const selectedInvalidRange = useMemo(() => selectedId?.startsWith('invalid:') ? result?.invalidRanges.find((range) => `invalid:${range.id}` === selectedId) : undefined, [result, selectedId])
+  const selected = useMemo(() => !result || !selectedId ? undefined : selectedLevel === 'goal'
+    ? result.goals.find((item) => item.id === selectedId)
+    : selectedLevel === 'action' ? result.actions.find((item) => item.id === selectedId) : undefined, [result, selectedId, selectedLevel])
+  const selectedInvalidRange = useMemo(() => selectedLevel === 'invalid' && selectedId?.startsWith('invalid:') ? result?.invalidRanges.find((range) => `invalid:${range.id}` === selectedId) : undefined, [result, selectedId, selectedLevel])
   const selectedGoal = selected?.type === 'goal'
     ? selected
     : result?.goals.find((item) => item.id === selected?.parentId || item.id === activeGoalId || (selectedInvalidRange && item.startFrame <= selectedInvalidRange.startFrame && item.endFrame >= selectedInvalidRange.endFrame))
@@ -730,6 +746,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const nextGoal = item.type === 'goal' ? item : result?.goals.find((goal) => goal.id === item.parentId)
     if (nextGoal && (item.type === 'goal' || nextGoal.id !== selectedGoal?.id)) resetAtomicViewport(nextGoal)
     setSelectedId(item.id)
+    setSelectedLevel(item.type === 'goal' ? 'goal' : 'action')
     setActiveGoalId(item.type === 'goal' ? item.id : item.parentId)
     if (clickedFrame === undefined) seek(item.startFrame)
     if (item.type === 'goal') {
@@ -813,6 +830,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   function clearSelection(level?: 'goal' | 'action') {
     setSelectedId(undefined)
+    setSelectedLevel(undefined)
     if (!level || level === 'goal') setActiveGoalId(undefined)
   }
 
@@ -882,7 +900,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       const item: AnnotationSegment = { id, sequence, code: id, labelCode: '', type: 'goal', segmentType: 'goal', startFrame, endFrame, color: '#2563EB', descriptionZh: '', descriptionSource: 'user', nextAtomicSequence: 1, atomicActions: [] }
       const actionId = `${item.id}-A001`
       const action: AnnotationSegment = { id: actionId, sequence: 1, code: actionId, labelCode: '', parentId: item.id, type: 'action', segmentType: 'atomic', startFrame, endFrame, color: '#16A34A', descriptionZh: '', descriptionSource: 'user', operationObjectIds: [], operationObjectNames: [], keyFrames: [], keyframeNoneConfirmed: false }
-      mutate({ ...result, nextGoalSequence: sequence + 1, nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [item.id]: 2 }, goals: [...result.goals, { ...item, nextAtomicSequence: 2, atomicActions: [action] }].sort((a, b) => a.startFrame - b.startFrame), actions: [...result.actions, action].sort((a, b) => a.startFrame - b.startFrame) }); resetAtomicViewport(item); setActiveGoalId(item.id); setSelectedId(action.id); return
+      mutate({ ...result, nextGoalSequence: sequence + 1, nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [item.id]: 2 }, goals: [...result.goals, { ...item, nextAtomicSequence: 2, atomicActions: [action] }].sort((a, b) => a.startFrame - b.startFrame), actions: [...result.actions, action].sort((a, b) => a.startFrame - b.startFrame) }); resetAtomicViewport(item); setActiveGoalId(item.id); setSelectedId(action.id); setSelectedLevel('action'); return
     }
     if (!selectedGoal) return setToast('请先选择一个单次任务')
     const siblings = result.actions.filter((item) => item.parentId === selectedGoal.id)
@@ -893,13 +911,17 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const noAction = kind === 'no_action'
     const id = `${selectedGoal.id}-A${String(sequence).padStart(3, '0')}`
     const item: AnnotationSegment = { id, sequence, code: id, labelCode: '', parentId: selectedGoal.id, type: noAction ? 'no_action' : 'action', segmentType: noAction ? 'no_action' : 'atomic', startFrame, endFrame, color: noAction ? '#64748B' : '#16A34A', descriptionZh: noAction ? '未执行有效动作' : '', descriptionEn: noAction ? 'No valid action is performed.' : undefined, systemCode: noAction ? 'NO_ACTION' : undefined, descriptionSource: noAction ? 'system' : 'user', modelDescriptionRequired: noAction ? false : undefined, keyFrames: [], keyframeNoneConfirmed: noAction }
-    mutate({ ...result, nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [selectedGoal.id]: sequence + 1 }, actions: [...result.actions, item].sort((a, b) => a.startFrame - b.startFrame) }); setSelectedId(item.id)
+    mutate({ ...result, nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [selectedGoal.id]: sequence + 1 }, actions: [...result.actions, item].sort((a, b) => a.startFrame - b.startFrame) }); setSelectedId(item.id); setSelectedLevel('action')
+  }
+
+  function updateSegment(target: AnnotationSegment, changes: Partial<AnnotationSegment>) {
+    if (!result) return
+    const key = target.type === 'goal' ? 'goals' : 'actions'
+    mutate({ ...result, [key]: result[key].map((item) => item.id === target.id ? { ...item, ...changes } : item) })
   }
 
   function updateSelected(changes: Partial<AnnotationSegment>) {
-    if (!result || !selected) return
-    const key = selected.type === 'goal' ? 'goals' : 'actions'
-    mutate({ ...result, [key]: result[key].map((item) => item.id === selected.id ? { ...item, ...changes } : item) })
+    if (selected) updateSegment(selected, changes)
   }
 
   function previewSegmentRange(target: AnnotationSegment, requestedStart: number, requestedEnd: number, mode: TimelineEditMode) {
@@ -978,6 +1000,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     }
     else mutate({ ...result, actions: result.actions.filter((item) => item.id !== selected.id) })
     setSelectedId(undefined)
+    setSelectedLevel(undefined)
   }
 
   async function save(showToast = true) {
@@ -995,24 +1018,24 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const malformed = [...result.goals, ...result.actions, ...result.invalidRanges].find((item) => invalidFrameRange(item, result.totalFrames))
     if (malformed) { seek(Math.max(0, Math.round(malformed.startFrame))); return setToast('存在非整数帧、零长度或越界区间，请先修正') }
     const goalOverlap = firstOverlap(result.goals)
-    if (goalOverlap) { setSelectedId(goalOverlap.right.id); seek(goalOverlap.right.startFrame); return setToast('单次任务存在历史重叠，必须修正后才能提交') }
+    if (goalOverlap) { setSelectedId(goalOverlap.right.id); setSelectedLevel('goal'); seek(goalOverlap.right.startFrame); return setToast('单次任务存在历史重叠，必须修正后才能提交') }
     const goalGaps = coverageGaps(0, result.totalFrames, [...result.goals, ...result.invalidRanges])
     if (goalGaps.length && !options.ignoreGoalGaps) { setSubmitIssue({ type: 'goal-gap', gaps: goalGaps }); return }
     for (const goal of result.goals) {
       const actions = result.actions.filter((action) => action.parentId === goal.id)
       const actionOverlap = firstOverlap(actions)
-      if (actionOverlap) { setSelectedId(actionOverlap.right.id); seek(actionOverlap.right.startFrame); return setToast('同一单次任务内存在小目标历史重叠，必须修正后才能提交') }
+      if (actionOverlap) { setSelectedId(actionOverlap.right.id); setSelectedLevel('action'); seek(actionOverlap.right.startFrame); return setToast('同一单次任务内存在小目标历史重叠，必须修正后才能提交') }
       const outside = actions.find((action) => action.startFrame < goal.startFrame || action.endFrame > goal.endFrame)
-      if (outside) { setSelectedId(outside.id); seek(outside.startFrame); return setToast('存在越过父单次任务边界的小目标') }
+      if (outside) { setSelectedId(outside.id); setSelectedLevel('action'); seek(outside.startFrame); return setToast('存在越过父单次任务边界的小目标') }
     }
     const invalidKeyFrame = result.actions.flatMap((action) => (action.keyFrames || []).map((keyFrame) => ({ action, keyFrame }))).find(({ action, keyFrame }) => !Number.isInteger(keyFrame.frame) || keyFrame.frame < action.startFrame || keyFrame.frame >= action.endFrame)
-    if (invalidKeyFrame) { setSelectedId(invalidKeyFrame.action.id); seek(invalidKeyFrame.keyFrame.frame); return setToast('存在越过小目标半开区间的关键帧') }
+    if (invalidKeyFrame) { setSelectedId(invalidKeyFrame.action.id); setSelectedLevel('action'); seek(invalidKeyFrame.keyFrame.frame); return setToast('存在越过小目标半开区间的关键帧') }
     const actionGap = result.goals.map((goal) => ({ goal, gaps: coverageGaps(goal.startFrame, goal.endFrame, [...result.actions.filter((action) => action.parentId === goal.id), ...result.invalidRanges]) })).find((item) => item.gaps.length)
     if (actionGap && !options.ignoreActionGaps) { setSubmitIssue({ type: 'action-gap', goal: actionGap.goal, gaps: actionGap.gaps }); return }
     const missingObject = result.actions.find((item) => item.type === 'action' && !item.operationObjectIds?.length)
     if (missingObject) { const parentIndex = result.goals.findIndex((goal) => goal.id === missingObject.parentId); const actionIndex = result.actions.filter((action) => action.parentId === missingObject.parentId).findIndex((action) => action.id === missingObject.id); setSubmitIssue({ type: 'missing-object', action: missingObject, title: `小目标 ${parentIndex + 1}-${actionIndex + 1}` }); return }
     const fullyInvalid = result.actions.find((item) => result.invalidRanges.some((range) => range.startFrame <= item.startFrame && range.endFrame >= item.endFrame))
-    if (fullyInvalid) { setSelectedId(fullyInvalid.id); return setToast('小目标被无效区间完全覆盖，请调整或删除') }
+    if (fullyInvalid) { setSelectedId(fullyInvalid.id); setSelectedLevel('action'); return setToast('小目标被无效区间完全覆盖，请调整或删除') }
     try {
       const nextRevision = dirty ? await save(false) : revision
       await annotationApi.submit(projectId, videoId, result, nextRevision)
@@ -1099,12 +1122,17 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     } catch (reason) { setToast(reason instanceof Error ? reason.message : '批注状态更新失败') }
   }
 
-  async function openKeyFrame(item?: AnnotationKeyFrame) {
-    if (!selected || selected.type !== 'action') return
-    if (!item && (currentFrame < selected.startFrame || currentFrame >= selected.endFrame)) return setToast('请先定位到当前小目标范围内')
-    if (!item && selected.keyFrames?.some((keyFrame) => keyFrame.frame === currentFrame)) return setToast('当前帧已经标记关键事件')
-    setEditingKeyFrame(item)
-    setKeyFrameForm({ type: item?.type || 'contact', operationObjectIds: item?.operationObjectIds || [], detail: item?.detail || '' })
+  async function openKeyFrame(item?: AnnotationKeyFrame, action = selected) {
+    if (!action || action.type !== 'action') return setToast('请先选中一个小目标')
+    if (!item && (currentFrame < action.startFrame || currentFrame >= action.endFrame)) return setToast('请先定位到当前小目标范围内')
+    if (!item && action.keyFrames?.some((keyFrame) => keyFrame.frame === currentFrame)) return setToast(`F${currentFrame} 已有关键帧，请在片段列表中点击该关键帧进行编辑`)
+    // E only creates a keyframe. Existing keyframes can only enter edit mode
+    // through their entry below the action in the segment list.
+    const targetKeyFrame = item
+    setSelectedId(action.id)
+    setSelectedLevel('action')
+    setEditingKeyFrame(targetKeyFrame)
+    setKeyFrameForm({ type: targetKeyFrame?.type || 'contact', operationObjectIds: targetKeyFrame?.operationObjectIds || [], detail: targetKeyFrame?.detail || '' })
     setKeyFrameModalOpen(true)
     if (!operationObjects.length) {
       if (!workspace?.operationLibraryId) { setToast('当前项目未关联操作对象库'); return }
@@ -1115,32 +1143,27 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     }
   }
 
-  async function saveKeyFrame() {
-    if (!selected || selected.type !== 'action' || keyFrameSaving || !keyFrameFormValid || !workspace) return
+  function saveKeyFrame() {
+    if (!selected || selected.type !== 'action' || !keyFrameFormValid || !result) return
     const selectedOperationObjects = operationObjects.filter((item) => keyFrameForm.operationObjectIds.includes(item.id))
     if (keyFrameNeedsObject && selectedOperationObjects.length !== keyFrameForm.operationObjectIds.length) return setToast('请选择有效的操作对象')
-    let target = selected
+    const target = selected
     const keyFrame: AnnotationKeyFrame = { id: editingKeyFrame?.id || crypto.randomUUID(), sequence: editingKeyFrame?.sequence || Math.max(0, ...(target.keyFrames || []).map((item) => item.sequence)) + 1, frame: editingKeyFrame?.frame ?? currentFrame, type: keyFrameForm.type, operationObjectIds: selectedOperationObjects.map((item) => item.id), operationObjectNames: selectedOperationObjects.map((item) => item.name), detail: keyFrameForm.type === 'contact' ? '' : keyFrameForm.detail.trim() }
-    setKeyFrameSaving(true)
-    try {
-      let refreshed: AnnotationWorkspace | undefined
-      if (!editingKeyFrame && !/^\d+$/.test(target.id)) {
-        const parent = result?.goals.find((goal) => goal.id === target.parentId)
-        await save(false)
-        refreshed = await annotationApi.getWorkspace(projectId, videoId, false)
-        const persistedParent = refreshed.result.goals.find((goal) => goal.sequence === parent?.sequence)
-        const persistedTarget = refreshed.result.actions.find((action) => action.parentId === persistedParent?.id && action.sequence === target.sequence)
-        if (!persistedTarget || !/^\d+$/.test(persistedTarget.id)) throw new Error('小目标保存后未取得有效 ID，请刷新页面后重试')
-        target = persistedTarget
-      }
-      const saved = editingKeyFrame ? await annotationApi.updateKeyFrame(projectId, videoId, keyFrame) : await annotationApi.createKeyFrame(projectId, videoId, target.id, keyFrame)
-      const base = refreshed?.result || result
-      if (!base) throw new Error('标注结果不存在')
-      const nextResult = normalizeAnnotationResult({ ...base, actions: base.actions.map((action) => action.id === target.id ? { ...action, keyFrames: editingKeyFrame ? (action.keyFrames || []).map((item) => item.id === editingKeyFrame.id ? saved : item) : [...(action.keyFrames || []), saved], keyframeNoneConfirmed: false } : action) })
-      setResult(nextResult); setWorkspace({ ...(refreshed || workspace), result: nextResult }); setSelectedId(target.id); setDirty(false)
-      setKeyFrameModalOpen(false); setEditingKeyFrame(undefined); setToast(editingKeyFrame ? '关键帧已更新' : '关键帧已添加')
-    } catch (reason) { setToast(reason instanceof Error ? reason.message : '关键帧保存失败') }
-    finally { setKeyFrameSaving(false) }
+    mutate({ ...result, actions: result.actions.map((action) => action.id === target.id ? { ...action, keyFrames: editingKeyFrame ? (action.keyFrames || []).map((item) => item.id === editingKeyFrame.id ? keyFrame : item) : [...(action.keyFrames || []), keyFrame], keyframeNoneConfirmed: false } : action) })
+    setSelectedId(target.id)
+    setSelectedLevel('action')
+    setKeyFrameModalOpen(false)
+    setEditingKeyFrame(undefined)
+    setToast(editingKeyFrame ? '关键帧已更新，正在保存草稿' : '关键帧已添加，正在保存草稿')
+  }
+
+  function deleteEditingKeyFrame() {
+    if (!editingKeyFrame || !selected || selected.type !== 'action' || !result) return
+    if (!window.confirm(`确认删除关键帧 F${editingKeyFrame.frame}？`)) return
+    mutate({ ...result, actions: result.actions.map((action) => action.id === selected.id ? { ...action, keyFrames: (action.keyFrames || []).filter((item) => item.id !== editingKeyFrame.id) } : action) })
+    setKeyFrameModalOpen(false)
+    setEditingKeyFrame(undefined)
+    setToast('关键帧已删除，正在保存草稿')
   }
 
   async function createOperationCandidate() {
@@ -1228,11 +1251,11 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       if (!readonly && event.key.toLowerCase() === 'q' && !mark) setMark({ kind: hoverPoint?.level === 'action' || (!hoverPoint && selectedGoal) ? 'action' : 'goal', frame: pointerFrame })
       if (!readonly && event.key.toLowerCase() === 'w' && !mark) {
         const hoveredGoal = hoverPoint?.level === 'goal' ? result?.goals.find((goal) => pointerFrame >= goal.startFrame && pointerFrame < goal.endFrame) : selectedGoal
-        if (hoveredGoal) { setActiveGoalId(hoveredGoal.id); if (hoveredGoal.id !== selectedGoal?.id) { resetAtomicViewport(hoveredGoal); setSelectedId(hoveredGoal.id) }; setMark({ kind: 'no_action', frame: pointerFrame }) }
+        if (hoveredGoal) { setActiveGoalId(hoveredGoal.id); if (hoveredGoal.id !== selectedGoal?.id) { resetAtomicViewport(hoveredGoal); setSelectedId(hoveredGoal.id); setSelectedLevel('goal') }; setMark({ kind: 'no_action', frame: pointerFrame }) }
       }
       if (!readonly && event.key.toLowerCase() === 'x' && !mark) {
         const parent = result?.goals.find((goal) => pointerFrame >= goal.startFrame && pointerFrame < goal.endFrame)
-        if (parent) { setActiveGoalId(parent.id); if (parent.id !== selectedGoal?.id) { resetAtomicViewport(parent); setSelectedId(parent.id) }; setMark({ kind: 'invalid', frame: pointerFrame }) }
+        if (parent) { setActiveGoalId(parent.id); if (parent.id !== selectedGoal?.id) { resetAtomicViewport(parent); setSelectedId(parent.id); setSelectedLevel('goal') }; setMark({ kind: 'invalid', frame: pointerFrame }) }
       }
       if ((event.key === 'Backspace' || event.key === 'Delete') && result && (selected || selectedId?.startsWith('invalid:'))) {
         event.preventDefault()
@@ -1240,6 +1263,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         if (selectedId?.startsWith('invalid:')) {
           mutate({ ...result, invalidRanges: result.invalidRanges.filter((item) => `invalid:${item.id}` !== selectedId) })
           setSelectedId(undefined)
+          setSelectedLevel(undefined)
           setToast('无效区间已删除，可通过撤销恢复')
         } else if (selected) {
           const typeName = selected.type === 'goal' ? '单次任务及其全部小目标' : '小目标'
@@ -1266,7 +1290,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   function segmentListButton(item: AnnotationSegment, title: string) {
     const label = item.type === 'no_action' ? '系统无动作' : item.labelName || '未选择标签'
-    return <button className={selectedId === item.id ? 'active' : ''} type="button" aria-pressed={selectedId === item.id} onClick={() => selectSegment(item)}><i style={{ background: item.color }} /><span className="segment-list-title"><b>{title}</b></span><span className="segment-list-copy"><small style={{ color: item.type === 'no_action' ? '#697782' : item.color }}>{label}</small><em>{item.descriptionZh || '暂无描述'}</em></span><span className="segment-list-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span></button>
+    const active = selectedId === item.id && selectedLevel === (item.type === 'goal' ? 'goal' : 'action')
+    return <button className={active ? 'active' : ''} type="button" aria-pressed={active} onClick={() => selectSegment(item)}><i style={{ background: item.color }} /><span className="segment-list-title"><b>{title}</b></span><span className="segment-list-copy"><small style={{ color: item.type === 'no_action' ? '#697782' : item.color }}>{label}</small><em>{item.descriptionZh || '暂无描述'}</em></span><span className="segment-list-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span></button>
   }
 
   function segmentKeyFrameMeta(item: AnnotationSegment) {
@@ -1274,7 +1299,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const keyFrames = item.keyFrames || []
     const namesByIds = (ids: string[], names: string[] = []) => ids.map((id, index) => names[index] || operationObjects.find((object) => object.id === id)?.name).filter(Boolean) as string[]
     const actionObjectNames = namesByIds(item.operationObjectIds || [], item.operationObjectNames)
-    return <div className="segment-keyframe-meta"><span>对象：<b>{actionObjectNames.length ? actionObjectNames.join('、') : '未关联'}</b></span><span>关键帧：{keyFrames.length ? keyFrames.map((frame) => { const names = namesByIds(frame.operationObjectIds, frame.operationObjectNames); return <button type="button" key={frame.id} onClick={() => { selectSegment(item, frame.frame); seek(frame.frame) }}>◆ F{frame.frame} {keyFrameTypeLabels[frame.type]}{names.length ? ` · ${names.join('、')}` : ''}</button> }) : <b>无</b>}</span></div>
+    return <div className="segment-keyframe-meta"><span>对象：<b>{actionObjectNames.length ? actionObjectNames.join('、') : '未关联'}</b></span><span>关键帧：{keyFrames.length ? keyFrames.map((frame) => { const names = namesByIds(frame.operationObjectIds, frame.operationObjectNames); return <button type="button" key={frame.id} title={readonly ? '定位到关键帧' : '点击编辑关键帧'} onClick={() => { selectSegment(item, frame.frame); seek(frame.frame); if (!readonly) void openKeyFrame(frame, item) }}>◆ F{frame.frame} {keyFrameTypeLabels[frame.type]}{names.length ? ` · ${names.join('、')}` : ''}</button> }) : <b>无</b>}</span></div>
   }
 
   function inlineSegmentEditor(item: AnnotationSegment) {
@@ -1284,8 +1309,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const selectedLabel = labels.find((label) => label.id === item.labelId)
     return <div className="segment-inline-editor" onClick={(event) => event.stopPropagation()}>
       {noAction ? <span className="segment-inline-system">系统无动作</span> : <div className="segment-inline-row">
-        {workspace!.labelLibraryBound && <label className="label-select"><select disabled={readonly} title={item.labelName || '请选择标签'} className={selectedLabel ? 'has-label-color' : ''} style={selectedLabel ? { '--selected-label-color': selectedLabel.color, '--selected-label-text': contrastTextColor(selectedLabel.color) } as React.CSSProperties : undefined} value={item.labelId || ''} onChange={(event) => { const label = labels.find((candidate) => candidate.id === event.target.value); if (label?.appliesTo === 'both') return; updateSelected({ labelId: label?.id, labelCode: label?.code || '', labelName: label?.name, color: label?.color || item.color }) }}><option value="">请选择标签</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label>}
-        <label className="segment-content"><input disabled={readonly} value={item.descriptionZh} maxLength={300} onChange={(event) => updateSelected({ descriptionZh: event.target.value })} placeholder="输入片段描述（选填）" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span>
+        {workspace!.labelLibraryBound && <label className="label-select"><select disabled={readonly} title={item.labelName || '请选择标签'} className={selectedLabel ? 'has-label-color' : ''} style={selectedLabel ? { '--selected-label-color': selectedLabel.color, '--selected-label-text': contrastTextColor(selectedLabel.color) } as React.CSSProperties : undefined} value={item.labelId || ''} onChange={(event) => { const label = labels.find((candidate) => candidate.id === event.target.value); if (label?.appliesTo === 'both') return; updateSegment(item, { labelId: label?.id, labelCode: label?.code || '', labelName: label?.name, color: label?.color || item.color }) }}><option value="">请选择标签</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label>}
+        <label className="segment-content"><input disabled={readonly} value={item.descriptionZh} maxLength={300} onChange={(event) => updateSegment(item, { descriptionZh: event.target.value })} placeholder="输入片段描述（选填）" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span>
         <button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button>
       </div>}
     </div>
@@ -1319,18 +1344,18 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <aside className="annotation-inspector">
         <header><div><strong>片段列表 <b>{result.goals.length + result.actions.length}</b></strong><span>{result.goals.length} 个单次任务 · {result.actions.length} 个小目标</span></div></header>
         <div className="segment-list-columns"><span>片段</span><span>标签与描述</span><span>总时长</span></div>
-        <div className="segment-tree">{result.goals.map((goal, index) => <div className="segment-group" key={goal.id}><div className={`segment-list-entry${selectedId === goal.id ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{selectedId === goal.id && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => <div className={`segment-action-wrap${selectedId === action.id ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${selectedId === action.id ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{selectedId === action.id && inlineSegmentEditor(action)}</div>{segmentKeyFrameMeta(action)}</div>)}</div>)}</div>
+        <div className="segment-tree">{result.goals.map((goal, index) => { const goalSelected = selectedLevel === 'goal' && selectedId === goal.id; return <div className="segment-group" key={goal.id}><div className={`segment-list-entry${goalSelected ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{goalSelected && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => { const actionSelected = selectedLevel === 'action' && selectedId === action.id; return <div className={`segment-action-wrap${actionSelected ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${actionSelected ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{actionSelected && inlineSegmentEditor(action)}</div>{segmentKeyFrameMeta(action)}</div> })}</div> })}</div>
       </aside>
     </section>
 
-    <section className={`annotation-timeline${workspace.labelLibraryBound || editing ? '' : ' no-label-library'}${workspace.operationLibraryId ? ' has-operation-bar' : ''}`}>
+    <section className={`annotation-timeline${workspace.labelLibraryBound || editing ? '' : ' no-label-library'}${workspace.operationLibraryId ? ' has-operation-bar' : ''}${selectedLevel ? ` selection-${selectedLevel === 'invalid' ? 'action' : selectedLevel}` : ''}`}>
       {(workspace.labelLibraryBound || editing) && <div className="annotation-label-bar">{workspace.labelLibraryBound && <><span>片段标签</span>{selected?.type === 'no_action' ? <small>无动作由系统定义，无需选择项目标签</small> : !visibleLabels.length ? <small>当前类型无可用标签</small> : visibleLabels.map((label) => <button type="button" disabled={!selected || readonly} className={selected?.labelId === label.id ? 'active' : ''} style={{ '--label-color': label.color } as React.CSSProperties} key={label.id} onClick={() => updateSelected(selected?.labelId === label.id ? { labelId: undefined, labelCode: '', labelName: undefined } : label.appliesTo === 'both' ? {} : { labelId: label.id, labelCode: label.code, labelName: label.name, color: label.color })}>{label.name}</button>)}</>}{editing && (selected || selectedInvalidRange) && <span className="timeline-edit-feedback"><strong>{editing}</strong><span>{timeText((selected || selectedInvalidRange)!.startFrame / result.frameRate)} - {timeText((selected || selectedInvalidRange)!.endFrame / result.frameRate)}</span><b>{(selected || selectedInvalidRange)!.endFrame - (selected || selectedInvalidRange)!.startFrame} 帧</b></span>}</div>}
       {workspace.operationLibraryId && <div className="annotation-operation-bar"><span>操作对象</span>{operationObjectsLoading ? <small>正在加载...</small> : !operationObjects.length ? <small>暂无已审核操作对象</small> : operationObjects.map((item) => <button type="button" className={selected?.operationObjectIds?.includes(item.id) ? 'active' : ''} disabled={readonly || selected?.type !== 'action'} onClick={() => { if (selected?.type !== 'action') return; const ids = selected.operationObjectIds || []; const nextIds = ids.includes(item.id) ? ids.filter((id) => id !== item.id) : [...ids, item.id]; updateSelected({ operationObjectIds: nextIds, operationObjectNames: nextIds.map((id) => operationObjects.find((object) => object.id === id)?.name || '') }) }} key={item.id}>{item.name}</button>)}<button className="candidate-button" type="button" disabled={readonly} onClick={() => { setCandidateForm({ name: '', alias: '', attribute: '' }); setCandidateModalOpen(true) }}><Plus size={13} />新增候选</button></div>}
       <header><div><strong>{draftRange ? `正在创建：${draftRange.level === 'goal' ? '单次任务' : draftRange.level === 'invalid' ? '视频无效区间' : '小目标'}` : selectedGoal ? `当前单次任务：${selectedGoal.labelName || selectedGoal.code || '未选择标签'}` : '当前创建：单次任务'}</strong><span>{draftRange ? `${timeText(draftRange.startFrame / result.frameRate)} - ${timeText(draftRange.endFrame / result.frameRate)} · 松开 ${mark?.kind === 'no_action' ? 'W' : mark?.kind === 'invalid' ? 'X' : 'Q'} 完成，Esc 取消` : 'Q 普通片段 · W 无动作 · X 视频无效区间'}</span></div><div>{selected && <button type="button" onClick={() => clearSelection()}>退出预览</button>}<button type="button" disabled={readonly || !history.undo} onClick={undo} title="撤销"><Undo2 size={14} />撤销</button><button type="button" disabled={readonly || !history.redo} onClick={redo} title="重做"><Redo2 size={14} />重做</button></div></header>
       <div className="timeline-body">
         <GlobalTimeline goals={result.goals} invalidRanges={result.invalidRanges} draft={draftRange} selectedRange={selected || selectedInvalidRange} totalFrames={result.totalFrames} frameRate={result.frameRate} currentFrame={currentFrame} viewport={goalTimelineViewport} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onClearSelection={() => clearSelection()} />
-        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onEditFinish={finishEdit} onSelect={selectSegment} />
-        {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedId} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`) }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
+        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'goal' ? selectedId : undefined} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onEditFinish={finishEdit} onSelect={selectSegment} />
+        {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'action' || selectedLevel === 'invalid' ? selectedId : undefined} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid') }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
     {commentsAvailable && videoComments.map((comment) => <button type="button" className={`page-comment-marker${comment.resolved ? ' resolved' : ''}`} style={{ left: `${comment.positionX * 100}%`, top: `${comment.positionY * 100}%` }} key={comment.id} title={`#${comment.sequence} ${comment.content}`} onClick={openComments}>{comment.sequence}</button>)}
@@ -1341,10 +1366,10 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <div className="page-comment-dialog-list">{commentsLoading ? <div className="comment-empty">批注加载中...</div> : visibleVideoComments.length === 0 ? <div className="comment-empty">暂无批注</div> : visibleVideoComments.map((comment) => <article className={comment.resolved ? 'resolved' : ''} key={comment.id}><header><span className="page-comment-sequence">{comment.sequence}</span><strong>{nodeLabels[comment.node]}批注</strong><span className={comment.resolved ? 'resolved' : 'pending'}>{comment.resolved ? '已解决' : '待处理'}</span></header><p>{comment.content}</p><footer><small>{comment.createdByName || '未知用户'} · {formatDateTime(comment.createdAt)} · 页面位置 {Math.round(comment.positionX * 100)}%, {Math.round(comment.positionY * 100)}%</small>{!comment.resolved && <button type="button" disabled={!canComment} onClick={() => resolveComment(comment.id)}>标记已解决</button>}</footer></article>)}</div>
       <footer><button className="secondary-button" type="button" onClick={() => setCommentsOpen(false)}>关闭</button></footer>
     </div>}
-    {submitIssue && <Modal title="当前标注未完成" onClose={() => setSubmitIssue(undefined)} footer={submitIssue.type === 'goal-gap' ? <><button className="secondary-button" type="button" onClick={() => { setSubmitIssue(undefined); void submit({ ignoreGoalGaps: true }) }}>确认不标注，继续提交</button><button className="primary-button" type="button" onClick={() => { seek(submitIssue.gaps[0].startFrame); setSubmitIssue(undefined) }}>返回检查第一个</button></> : submitIssue.type === 'action-gap' ? <><button className="secondary-button" type="button" onClick={() => { setSubmitIssue(undefined); void submit({ ignoreGoalGaps: true, ignoreActionGaps: true }) }}>确认不标注，继续提交</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.goal.id); setSelectedId(submitIssue.goal.id); seek(submitIssue.gaps[0].startFrame); setSubmitIssue(undefined) }}>返回检查第一个</button></> : <><button className="secondary-button" type="button" onClick={() => setSubmitIssue(undefined)}>返回补充</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.action.parentId); setSelectedId(submitIssue.action.id); seek(submitIssue.action.startFrame); setSubmitIssue(undefined) }}>定位首个问题</button></>}><div className="submit-validation-dialog">{submitIssue.type === 'goal-gap' ? <><strong>当前视频还有 {submitIssue.gaps.length} 个未覆盖区间，共 {submitIssue.gaps.reduce((sum, gap) => sum + gap.endFrame - gap.startFrame, 0)} 帧</strong><p>可确认这些区间不标注并继续，也可返回检查第一个并补充标注或标记无效。</p></> : submitIssue.type === 'action-gap' ? <><strong>当前单次任务还有 {submitIssue.gaps.length} 个小目标未覆盖区间，共 {submitIssue.gaps.reduce((sum, gap) => sum + gap.endFrame - gap.startFrame, 0)} 帧</strong><p>可确认这些区间不标注并继续，也可返回检查第一个并补充小目标或标记无效。</p></> : <><strong>{submitIssue.title} 尚未选择操作对象，请选择对象</strong><p>请定位并完成当前问题后再次提交。小目标标签可不选择。</p></>}</div></Modal>}
+    {submitIssue && <Modal title="当前标注未完成" onClose={() => setSubmitIssue(undefined)} footer={submitIssue.type === 'goal-gap' ? <><button className="secondary-button" type="button" onClick={() => { setSubmitIssue(undefined); void submit({ ignoreGoalGaps: true }) }}>确认不标注，继续提交</button><button className="primary-button" type="button" onClick={() => { seek(submitIssue.gaps[0].startFrame); setSubmitIssue(undefined) }}>返回检查第一个</button></> : submitIssue.type === 'action-gap' ? <><button className="secondary-button" type="button" onClick={() => { setSubmitIssue(undefined); void submit({ ignoreGoalGaps: true, ignoreActionGaps: true }) }}>确认不标注，继续提交</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.goal.id); setSelectedId(submitIssue.goal.id); setSelectedLevel('goal'); seek(submitIssue.gaps[0].startFrame); setSubmitIssue(undefined) }}>返回检查第一个</button></> : <><button className="secondary-button" type="button" onClick={() => setSubmitIssue(undefined)}>返回补充</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.action.parentId); setSelectedId(submitIssue.action.id); setSelectedLevel('action'); seek(submitIssue.action.startFrame); setSubmitIssue(undefined) }}>定位首个问题</button></>}><div className="submit-validation-dialog">{submitIssue.type === 'goal-gap' ? <><strong>当前视频还有 {submitIssue.gaps.length} 个未覆盖区间，共 {submitIssue.gaps.reduce((sum, gap) => sum + gap.endFrame - gap.startFrame, 0)} 帧</strong><p>可确认这些区间不标注并继续，也可返回检查第一个并补充标注或标记无效。</p></> : submitIssue.type === 'action-gap' ? <><strong>当前单次任务还有 {submitIssue.gaps.length} 个小目标未覆盖区间，共 {submitIssue.gaps.reduce((sum, gap) => sum + gap.endFrame - gap.startFrame, 0)} 帧</strong><p>可确认这些区间不标注并继续，也可返回检查第一个并补充小目标或标记无效。</p></> : <><strong>{submitIssue.title} 尚未选择操作对象，请选择对象</strong><p>请定位并完成当前问题后再次提交。小目标标签可不选择。</p></>}</div></Modal>}
     {shortcutsOpen && <Modal title="快捷键与操作" onClose={() => setShortcutsOpen(false)}><div className="shortcut-guide"><ShortcutColumn title="键盘快捷键" items={keyboardShortcuts} /><ShortcutColumn title="时间轴操作" items={timelineShortcuts} /></div></Modal>}
     {candidateModalOpen && <Modal title="新增操作对象候选" onClose={() => { if (!candidateSaving) setCandidateModalOpen(false) }} footer={<><button className="secondary-button" type="button" disabled={candidateSaving} onClick={() => setCandidateModalOpen(false)}>取消</button><button className="primary-button" type="button" disabled={candidateSaving || !candidateForm.name.trim()} onClick={() => void createOperationCandidate()}>{candidateSaving ? '正在提交...' : '提交候选'}</button></>}><div className="candidate-object-form"><p>候选对象将提交到“{workspace.operationLibraryName || '项目操作对象库'}”，审核通过后才可用于关键帧。</p><label><span>对象名称 <i className="required-mark">*</i></span><input autoFocus value={candidateForm.name} maxLength={100} onChange={(event) => setCandidateForm({ ...candidateForm, name: event.target.value })} placeholder="请输入对象名称" /></label><label><span>别名</span><input value={candidateForm.alias} maxLength={100} onChange={(event) => setCandidateForm({ ...candidateForm, alias: event.target.value })} placeholder="请输入对象别名（选填）" /></label><label><span>属性</span><input value={candidateForm.attribute} maxLength={500} onChange={(event) => setCandidateForm({ ...candidateForm, attribute: event.target.value })} placeholder="请输入对象属性（选填）" /></label></div></Modal>}
-    {keyFrameModalOpen && selected?.type === 'action' && <Modal title={editingKeyFrame ? '编辑关键帧' : '标记关键帧'} onClose={() => { if (!keyFrameSaving) setKeyFrameModalOpen(false) }} footer={<><button className="secondary-button" type="button" disabled={keyFrameSaving} onClick={() => setKeyFrameModalOpen(false)}>取消</button><button className="primary-button" type="button" disabled={keyFrameSaving || operationObjectsLoading || !keyFrameFormValid} onClick={() => void saveKeyFrame()}>{keyFrameSaving ? '正在保存...' : '保存关键帧'}</button></>}><div className="keyframe-modal-form"><div className="keyframe-summary"><strong>小目标 {selected.code || selected.sequence}</strong><span>当前帧 F{editingKeyFrame?.frame ?? currentFrame}</span></div><fieldset><legend>事件类型 <i className="required-mark">*</i></legend><div>{(Object.entries(keyFrameTypeLabels) as Array<[AnnotationKeyFrame['type'], string]>).map(([value, label]) => <label key={value}><input type="radio" name="keyframe-type" checked={keyFrameForm.type === value} onChange={() => setKeyFrameForm({ ...keyFrameForm, type: value, operationObjectIds: value === 'abnormal' ? [] : keyFrameForm.operationObjectIds, detail: value === 'contact' ? '' : keyFrameForm.detail })} />{label}</label>)}</div></fieldset>{keyFrameNeedsObject && <div className="keyframe-object-field"><span>关联对象 <i className="required-mark">*</i></span>{operationObjectsLoading ? <div className="keyframe-object-empty">正在加载操作对象...</div> : operationObjects.length ? <div className="keyframe-object-options">{operationObjects.map((item) => <label className={keyFrameForm.operationObjectIds.includes(item.id) ? 'selected' : ''} key={item.id}><input type="checkbox" value={item.id} checked={keyFrameForm.operationObjectIds.includes(item.id)} onChange={() => setKeyFrameForm((form) => ({ ...form, operationObjectIds: form.operationObjectIds.includes(item.id) ? form.operationObjectIds.filter((id) => id !== item.id) : [...form.operationObjectIds, item.id] }))} /><strong>{item.libraryName}：</strong><b>{item.name}</b>{item.alias && <small>{item.alias}</small>}</label>)}</div> : <small>暂无已审核操作对象，请先在标注配置中维护</small>}</div>}{keyFrameNeedsDetail && <label><span>{keyFrameForm.type === 'object_change' ? '变化说明' : '异常类型或说明'} <i className="required-mark">*</i></span><input value={keyFrameForm.detail} maxLength={500} onChange={(event) => setKeyFrameForm({ ...keyFrameForm, detail: event.target.value })} placeholder={keyFrameForm.type === 'object_change' ? '请输入变化说明' : '请输入异常类型或说明'} /></label>}</div></Modal>}
+    {keyFrameModalOpen && selected?.type === 'action' && <Modal title={editingKeyFrame ? '编辑关键帧' : '标记关键帧'} onClose={() => setKeyFrameModalOpen(false)} footer={<>{editingKeyFrame && <button className="secondary-button danger-button" type="button" onClick={deleteEditingKeyFrame}>删除关键帧</button>}<button className="secondary-button" type="button" onClick={() => setKeyFrameModalOpen(false)}>取消</button><button className="primary-button" type="button" disabled={operationObjectsLoading || !keyFrameFormValid} onClick={saveKeyFrame}>保存关键帧</button></>}><div className="keyframe-modal-form"><div className="keyframe-summary"><strong>小目标 {selected.code || selected.sequence}</strong><span>当前帧 F{editingKeyFrame?.frame ?? currentFrame}</span></div><fieldset><legend>事件类型 <i className="required-mark">*</i></legend><div>{(Object.entries(keyFrameTypeLabels) as Array<[AnnotationKeyFrame['type'], string]>).map(([value, label]) => <label key={value}><input type="radio" name="keyframe-type" checked={keyFrameForm.type === value} onChange={() => setKeyFrameForm({ ...keyFrameForm, type: value, operationObjectIds: value === 'abnormal' ? [] : keyFrameForm.operationObjectIds, detail: value === 'contact' ? '' : keyFrameForm.detail })} />{label}</label>)}</div></fieldset>{keyFrameNeedsObject && <div className="keyframe-object-field"><span>关联对象 <i className="required-mark">*</i></span>{operationObjectsLoading ? <div className="keyframe-object-empty">正在加载操作对象...</div> : operationObjects.length ? <div className="keyframe-object-options">{operationObjects.map((item) => <label className={keyFrameForm.operationObjectIds.includes(item.id) ? 'selected' : ''} key={item.id}><input type="checkbox" value={item.id} checked={keyFrameForm.operationObjectIds.includes(item.id)} onChange={() => setKeyFrameForm((form) => ({ ...form, operationObjectIds: form.operationObjectIds.includes(item.id) ? form.operationObjectIds.filter((id) => id !== item.id) : [...form.operationObjectIds, item.id] }))} /><strong>{item.libraryName}：</strong><b>{item.name}</b>{item.alias && <small>{item.alias}</small>}</label>)}</div> : <small>暂无已审核操作对象，请先在标注配置中维护</small>}</div>}{keyFrameNeedsDetail && <label><span>{keyFrameForm.type === 'object_change' ? '变化说明' : '异常类型或说明'} <i className="required-mark">*</i></span><input value={keyFrameForm.detail} maxLength={2000} onChange={(event) => setKeyFrameForm({ ...keyFrameForm, detail: event.target.value })} placeholder={keyFrameForm.type === 'object_change' ? '请输入变化说明' : '请输入异常类型或说明'} /></label>}</div></Modal>}
     {commentPoint && <Modal title="添加批注" onClose={() => { if (!commentSubmitting) setCommentPoint(undefined) }} footer={<><button className="secondary-button" type="button" disabled={commentSubmitting} onClick={() => setCommentPoint(undefined)}>取消</button><button className="primary-button" type="button" disabled={commentSubmitting || !commentDraft.trim()} onClick={createComment}>{commentSubmitting ? '正在添加...' : '添加批注'}</button></>}><div className="page-comment-form"><p>批注位置：横向 {Math.round(commentPoint.x * 100)}%，纵向 {Math.round(commentPoint.y * 100)}%</p><textarea autoFocus value={commentDraft} maxLength={100} onChange={(event) => setCommentDraft(event.target.value)} placeholder="请输入批注内容（最多 100 字）" /><small>{commentDraft.length}/100</small></div></Modal>}
     {toast && <div className="toast">{toast}</div>}
   </main>
