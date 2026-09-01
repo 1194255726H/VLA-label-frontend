@@ -14,6 +14,7 @@ import { formatDateTime } from '../utils/date'
 const nodeLabels = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const TIMELINE_FRAME_WIDTH = 6
 const keyFrameTypeLabels: Record<AnnotationKeyFrame['type'], string> = { contact: '接触', object_change: '物体变化', abnormal: '异常' }
+const invalidReasons = ['手部出框', '严重遮挡', '关键步骤缺失', '其他']
 
 const keyboardShortcuts = [
   { keys: ['Space'], title: '播放 / 暂停', description: '切换当前视频的播放状态' },
@@ -21,8 +22,8 @@ const keyboardShortcuts = [
   { keys: ['Q'], title: '创建普通动作', description: '暂停时悬停轨道按住 Q 取鼠标起点；播放时从播放头取点，移动后松开生成片段' },
   { keys: ['W'], title: '创建无动作', description: '在小目标轨道按住 W 并移动，松开后创建系统灰色无动作片段；无需选择标签或填写描述' },
   { keys: ['E'], title: '标记关键帧', description: '选中普通小目标并定位视频帧后，标记接触、物体变化或异常事件' },
-  { keys: ['X'], title: '标记无效区间', description: '在单次任务或小目标轨道按住 X 取点，移动后松开创建同一视频级无效区间；没有小目标时也可在小目标轨道创建' },
-  { keys: ['Backspace', 'Delete'], title: '删除 / 恢复', description: '删除选中的关键帧或标注片段；在小目标详情轨道选中无效区间时恢复为有效' },
+  { keys: ['X'], title: '标记无效区间', description: '在单次任务轨道未标记的空白位置按住 X，移动后松开并选择无效原因' },
+  { keys: ['Backspace', 'Delete'], title: '删除 / 恢复', description: '删除选中的关键帧或标注片段；在单次任务轨道选中无效区间后可删除恢复' },
   { keys: ['Ctrl + Z'], title: '撤销', description: '撤销最近一次时间轴标注操作' },
   { keys: ['Ctrl + Shift + Z'], title: '重做', description: '恢复最近一次被撤销的时间轴标注操作' },
   { keys: ['Esc'], title: '取消 / 退出预览', description: '取消创建或编辑，退出片段预览，也可关闭展开的菜单' },
@@ -97,7 +98,7 @@ function invalidFrameRange(item: { startFrame: number; endFrame: number }, total
   return !Number.isInteger(item.startFrame) || !Number.isInteger(item.endFrame) || item.startFrame < 0 || item.endFrame > totalFrames || item.endFrame - item.startFrame < 1
 }
 
-function resolveCreationRange(origin: number, target: number, siblings: AnnotationSegment[], domainStart: number, domainEnd: number) {
+function resolveCreationRange(origin: number, target: number, siblings: Array<{ startFrame: number; endFrame: number }>, domainStart: number, domainEnd: number) {
   const direction = Math.sign(target - origin)
   if (!direction) return undefined
   const ordered = [...siblings].sort((a, b) => a.startFrame - b.startFrame)
@@ -377,10 +378,10 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
     <button type="button" className="timeline-seek-strip" aria-label={`${label}时间定位区域`} title="点击定位当前帧" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); const rect = trackRef.current?.getBoundingClientRect(); if (rect) onSeek(frameFromPointer(event.clientX, rect, normalizedViewport)) }} onDoubleClick={(event) => event.stopPropagation()} />
     {(level === 'action' || zoomRatio >= 2) && <div className="timeline-ruler" aria-hidden="true">{rulerFrames.map((frame) => { const major = frame === safeStart || frame === safeEnd || frame % majorRulerStep === 0; const onDark = invalidRanges?.some((range) => frame >= range.startFrame && frame < range.endFrame) || items.some((item) => selectedId === item.id && frame >= item.startFrame && frame < item.endFrame); const pixel = Math.min(trackWidth - 1, Math.max(0, Math.round((frame - safeStart) / safeSpan * trackWidth))); return <i className={`${major ? 'major' : 'minor'}${onDark ? ' on-dark' : ''}`} key={frame} style={{ left: pixel }} /> })}</div>}
     <span className="timeline-zoom-readout">{zoomRatio.toFixed(zoomRatio < 10 ? 2 : 1)}x · {safeSpan}帧 · {pixelsPerFrame.toFixed(1)}px/帧</span>
-    {level === 'action' && invalidRanges?.flatMap((range) => {
+    {level === 'goal' && invalidRanges?.flatMap((range) => {
       const visibleStart = Math.max(safeStart, range.startFrame)
       const visibleEnd = Math.min(safeEnd, range.endFrame)
-      return visibleEnd > visibleStart ? [<button type="button" className={`invalid-block${selectedId === `invalid:${range.id}` ? ' selected' : ''}${range.startFrame < safeStart ? ' clipped-start' : ''}${range.endFrame > safeEnd ? ' clipped-end' : ''}`} key={range.id} title={`无效：${range.reason} · 点击选中后按 Backspace 或 Delete 删除`} aria-label={`视频无效区间，F${range.startFrame} 至 F${range.endFrame}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%` }} onPointerDown={(event) => startInvalidDrag(event, range)} onClick={(event) => { event.stopPropagation(); onSelectInvalid?.(range) }}>{selectedId === `invalid:${range.id}` && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>] : []
+      return visibleEnd > visibleStart ? [<button type="button" className={`invalid-block${selectedId === `invalid:${range.id}` ? ' selected' : ''}${range.startFrame < safeStart ? ' clipped-start' : ''}${range.endFrame > safeEnd ? ' clipped-end' : ''}`} key={range.id} title={`无效：${range.reason} · 点击选中后按 Backspace 或 Delete 删除`} aria-label={`视频无效区间 ${range.reason}，F${range.startFrame} 至 F${range.endFrame}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%` }} onPointerDown={(event) => startInvalidDrag(event, range)} onClick={(event) => { event.stopPropagation(); onSelectInvalid?.(range) }}><span className="invalid-block-label">{range.reason}</span>{selectedId === `invalid:${range.id}` && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>] : []
     })}
     {items.flatMap((item, index) => {
       const visibleStart = Math.max(safeStart, item.startFrame)
@@ -389,7 +390,7 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
       const number = segmentNumber(item, index)
       const children = item.type === 'goal' ? childItems.filter((child) => child.parentId === item.id) : []
       const childDraft = item.type === 'goal' && draft?.level === 'action' && draft.parentId === item.id ? draft : undefined
-      return [<button className={`timeline-block ${item.type}${children.length || childDraft ? ' has-child-overview' : ''}${selectedId === item.id ? ' selected' : ''}${item.startFrame < safeStart ? ' clipped-start' : ''}${item.endFrame > safeEnd ? ' clipped-end' : ''}`} type="button" key={item.id} title={`${item.code || number} · ${item.labelName || (item.type === 'no_action' ? '无动作' : '未选择标签')}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%`, '--segment-color': item.color } as React.CSSProperties} onPointerDown={(event) => {
+      return [<button className={`timeline-block ${item.type}${children.length || childDraft ? ' has-child-overview' : ''}${selectedId === item.id ? ' selected' : ''}${item.startFrame < safeStart ? ' clipped-start' : ''}${item.endFrame > safeEnd ? ' clipped-end' : ''}`} type="button" key={item.id} title={`${item.code || number} · ${item.labelName || (item.type === 'no_action' ? '无标签' : '未选择标签')}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%`, '--segment-color': item.color } as React.CSSProperties} onPointerDown={(event) => {
         if (event.button !== 0) return
         if (selectedId !== item.id) {
           // Selection must not depend on the later click event: a preceding pan/drag
@@ -405,7 +406,7 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
       }} onClick={(event) => { event.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return }; const now = performance.now(); const previous = lastSegmentClickRef.current; const precise = previous?.id === item.id && now - previous.at <= 400 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 6 && !(event.target as HTMLElement).closest('.range-handle'); lastSegmentClickRef.current = precise ? undefined : { id: item.id, at: now, x: event.clientX, y: event.clientY }; const rect = event.currentTarget.parentElement!.getBoundingClientRect(); const clickedFrame = frameFromPointer(event.clientX, rect, normalizedViewport); if (precise) { onPreciseSeek?.(level, clickedFrame); return } onSelect(item, clickedFrame) }}><span className="timeline-block-bar"><span className="timeline-block-copy">{number} · {item.endFrame - item.startFrame}帧{item.type === 'goal' && ` · ${timeText((item.endFrame - item.startFrame) / frameRate)}`}</span>{item.keyFrames?.map((frame) => <i className="timeline-keyframe" key={frame.id} style={{ left: `${(frame.frame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />)}{item.type === 'goal' && <span className="timeline-child-overview" aria-hidden="true">{children.map((child) => <i key={child.id} style={{ left: `${(child.startFrame - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(child.endFrame - child.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, '--child-color': child.color } as React.CSSProperties} />)}{invalidRanges?.filter((range) => range.startFrame < item.endFrame && range.endFrame > item.startFrame).map((range) => <i className="invalid" key={range.id} style={{ left: `${(Math.max(range.startFrame, item.startFrame) - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(Math.min(range.endFrame, item.endFrame) - Math.max(range.startFrame, item.startFrame)) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} />)}{childDraft && (() => { const draftStart = Math.max(item.startFrame, childDraft.startFrame); const draftEnd = Math.min(item.endFrame, childDraft.endFrame); return draftEnd > draftStart ? <i className="draft" style={{ left: `${(draftStart - item.startFrame) / Math.max(1, item.endFrame - item.startFrame) * 100}%`, width: `${(draftEnd - draftStart) / Math.max(1, item.endFrame - item.startFrame) * 100}%` }} /> : null })()}</span>}</span>{selectedId === item.id && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>]
     })}
     {items.flatMap((item) => (item.keyFrames || []).filter((keyFrame) => keyFrame.frame >= safeStart && keyFrame.frame < safeEnd).map((keyFrame) => <i className="timeline-keyframe-overlay" aria-hidden="true" key={`${item.id}:${keyFrame.id}`} style={{ left: `${(keyFrame.frame - safeStart) / safeSpan * 100}%` }} />))}
-    {draft && (draft.level === (label === '单次任务' ? 'goal' : 'action') || level === 'action' && draft.level === 'invalid') && draft.endFrame >= safeStart && draft.startFrame <= safeEnd && <span className={`timeline-draft${draft.level === 'invalid' ? ' invalid' : ''}`} style={{ left: `${(Math.max(safeStart, draft.startFrame) - safeStart) / safeSpan * 100}%`, width: `${Math.max(1, Math.min(safeEnd, draft.endFrame) - Math.max(safeStart, draft.startFrame)) / safeSpan * 100}%` }} />}
+    {draft && (draft.level === (label === '单次任务' ? 'goal' : 'action') || level === 'goal' && draft.level === 'invalid') && draft.endFrame >= safeStart && draft.startFrame <= safeEnd && <span className={`timeline-draft${draft.level === 'invalid' ? ' invalid' : ''}`} style={{ left: `${(Math.max(safeStart, draft.startFrame) - safeStart) / safeSpan * 100}%`, width: `${Math.max(1, Math.min(safeEnd, draft.endFrame) - Math.max(safeStart, draft.startFrame)) / safeSpan * 100}%` }} />}
     {!items.length && <span className="timeline-empty-hint">{label === '单次任务' ? '暂无单次任务片段' : '暂无小目标片段'}</span>}
     {showPlayhead && currentFrame >= safeStart && currentFrame <= safeEnd && <button type="button" className="annotation-playhead" aria-label={`${label}播放头 F${currentFrame}`} style={{ left: `${(currentFrame - safeStart) / safeSpan * 100}%` }} onPointerDown={startPlayheadScrub} />}
     <span className="timeline-boundary start">{timeText(safeStart / frameRate)}</span><span className="timeline-boundary end">{timeText(safeEnd / frameRate)}</span>
@@ -529,6 +530,11 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     | { type: 'action-gap'; goal: AnnotationSegment; gaps: Array<{ startFrame: number; endFrame: number }> }
     | { type: 'missing-object'; action: AnnotationSegment; title: string }
   >()
+  const [pendingInvalidRange, setPendingInvalidRange] = useState<{ startFrame: number; endFrame: number }>()
+  const [editingInvalidRangeId, setEditingInvalidRangeId] = useState<string>()
+  const [invalidReason, setInvalidReason] = useState(invalidReasons[0])
+  const [invalidReasonOther, setInvalidReasonOther] = useState('')
+  const [inspectorTab, setInspectorTab] = useState<'segments' | 'invalid'>('segments')
   const [hoverPoint, setHoverPoint] = useState<{ level: 'goal' | 'action'; frame: number }>()
   const [goalViewport, setGoalViewport] = useState<TimelineViewport>({ startFrame: 0, endFrame: 0 })
   const [atomicViewports, setAtomicViewports] = useState<Record<string, TimelineViewport>>({})
@@ -712,12 +718,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const draftRange = mark ? (() => {
     const pointerFrame = !playing && hoverPoint ? hoverPoint.frame : currentFrame
     if (mark.kind === 'goal') {
-      const range = result ? resolveCreationRange(mark.frame, pointerFrame, result.goals, 0, result.totalFrames) : undefined
+      const range = result ? resolveCreationRange(mark.frame, pointerFrame, [...result.goals, ...result.invalidRanges], 0, result.totalFrames) : undefined
       return range ? { level: 'goal', ...range } as TimelineDraft : undefined
     }
     if (mark.kind === 'invalid') {
-      if (!selectedGoal) return undefined
-      return { level: 'invalid', startFrame: Math.max(selectedGoal.startFrame, Math.min(mark.frame, pointerFrame)), endFrame: Math.min(selectedGoal.endFrame, Math.max(mark.frame, pointerFrame)), parentId: selectedGoal.id } as TimelineDraft
+      const range = result ? resolveCreationRange(mark.frame, pointerFrame, result.goals, 0, result.totalFrames) : undefined
+      return range ? { level: 'invalid', ...range } as TimelineDraft : undefined
     }
     if (!selectedGoal || !result) return undefined
     const range = resolveCreationRange(mark.frame, pointerFrame, result.actions.filter((item) => item.parentId === selectedGoal.id), selectedGoal.startFrame, selectedGoal.endFrame)
@@ -743,6 +749,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   function selectSegment(item: AnnotationSegment, clickedFrame?: number) {
     videoRef.current?.pause()
+    setInspectorTab('segments')
     const nextGoal = item.type === 'goal' ? item : result?.goals.find((goal) => goal.id === item.parentId)
     if (nextGoal && (item.type === 'goal' || nextGoal.id !== selectedGoal?.id)) resetAtomicViewport(nextGoal)
     setSelectedId(item.id)
@@ -887,9 +894,13 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     setMark(undefined)
     if (startFrame === endFrame) return setToast('起止帧相同，未创建区间')
     if (kind === 'invalid') {
-      if (!selectedGoal || startFrame < selectedGoal.startFrame || endFrame > selectedGoal.endFrame) return setToast('无效区间必须位于当前单次任务内')
-      const sequence = result.nextInvalidSequence
-      mutate({ ...result, nextInvalidSequence: sequence + 1, invalidRanges: normalizeInvalidRanges([...result.invalidRanges, { id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence).padStart(3, '0')}`, sequence, startFrame, endFrame, reason: '视频内容无效' }]) }); return
+      const resolved = resolveCreationRange(mark.frame, targetFrame, [...result.goals, ...result.invalidRanges], 0, result.totalFrames)
+      if (!resolved) return setToast('X 只能在单次任务轨道未标记的空白区间创建')
+      setInvalidReason(invalidReasons[0])
+      setInvalidReasonOther('')
+      setEditingInvalidRangeId(undefined)
+      setPendingInvalidRange(resolved)
+      return
     }
     if (kind === 'goal') {
       const resolved = resolveCreationRange(mark.frame, targetFrame, result.goals, 0, result.totalFrames)
@@ -912,6 +923,36 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const id = `${selectedGoal.id}-A${String(sequence).padStart(3, '0')}`
     const item: AnnotationSegment = { id, sequence, code: id, labelCode: '', parentId: selectedGoal.id, type: noAction ? 'no_action' : 'action', segmentType: noAction ? 'no_action' : 'atomic', startFrame, endFrame, color: noAction ? '#64748B' : '#16A34A', descriptionZh: noAction ? '未执行有效动作' : '', descriptionEn: noAction ? 'No valid action is performed.' : undefined, systemCode: noAction ? 'NO_ACTION' : undefined, descriptionSource: noAction ? 'system' : 'user', modelDescriptionRequired: noAction ? false : undefined, keyFrames: [], keyframeNoneConfirmed: noAction }
     mutate({ ...result, nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [selectedGoal.id]: sequence + 1 }, actions: [...result.actions, item].sort((a, b) => a.startFrame - b.startFrame) }); setSelectedId(item.id); setSelectedLevel('action')
+  }
+
+  function confirmInvalidRange() {
+    if (!result || !pendingInvalidRange || !invalidReason) return
+    const reason = invalidReason === '其他' ? `其他: ${invalidReasonOther.trim()}` : invalidReason
+    if (invalidReason === '其他' && !invalidReasonOther.trim()) return
+    if (editingInvalidRangeId) {
+      mutate({ ...result, invalidRanges: result.invalidRanges.map((range) => range.id === editingInvalidRangeId ? { ...range, reason } : range) })
+      setPendingInvalidRange(undefined)
+      setEditingInvalidRangeId(undefined)
+      setToast(`无效原因已修改为：${reason}`)
+      return
+    }
+    const sequence = result.nextInvalidSequence
+    const range = { id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence).padStart(3, '0')}`, sequence, ...pendingInvalidRange, reason }
+    mutate({ ...result, nextInvalidSequence: sequence + 1, invalidRanges: normalizeInvalidRanges([...result.invalidRanges, range]) })
+    setPendingInvalidRange(undefined)
+    setSelectedId(`invalid:${range.id}`)
+    setSelectedLevel('invalid')
+    setInspectorTab('invalid')
+    setToast(`已标记无效区间：${reason}`)
+  }
+
+  function editInvalidReason(range: AnnotationResult['invalidRanges'][number]) {
+    const otherPrefix = '其他:'
+    const predefined = invalidReasons.includes(range.reason) && range.reason !== '其他'
+    setInvalidReason(predefined ? range.reason : '其他')
+    setInvalidReasonOther(predefined ? '' : range.reason.startsWith(otherPrefix) ? range.reason.slice(otherPrefix.length).trim() : range.reason)
+    setEditingInvalidRangeId(range.id)
+    setPendingInvalidRange({ startFrame: range.startFrame, endFrame: range.endFrame })
   }
 
   function updateSegment(target: AnnotationSegment, changes: Partial<AnnotationSegment>) {
@@ -1229,8 +1270,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         return
       }
       if (target?.matches('input,textarea,select,[contenteditable="true"],[contenteditable=""]') || event.repeat) return
-      if (event.key.toLowerCase() === 'c' && canComment) {
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'c') {
         event.preventDefault()
+        if (!canComment) {
+          setToast(!approvalStage ? '添加批注仅在质检、审核或验收阶段可用' : hardReadonly ? '当前为只读状态，无法添加批注' : '当前状态无法添加批注')
+          return
+        }
         setCommentsOpen(false)
         setCommentPlacementMode(true)
         return
@@ -1249,13 +1294,21 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       }
       const pointerFrame = !playing && hoverPoint ? hoverPoint.frame : currentFrame
       if (!readonly && event.key.toLowerCase() === 'q' && !mark) setMark({ kind: hoverPoint?.level === 'action' || (!hoverPoint && selectedGoal) ? 'action' : 'goal', frame: pointerFrame })
-      if (!readonly && event.key.toLowerCase() === 'w' && !mark) {
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'w') {
+        event.preventDefault()
+        if (readonly) { setToast(hardReadonly ? '当前为只读状态或未持有视频锁，无法创建无动作区间' : '质检、审核和验收阶段不能修改标注'); return }
+        if (mark) { setToast('已有区间正在创建，请先松开对应快捷键或按 Esc 取消'); return }
         const hoveredGoal = hoverPoint?.level === 'goal' ? result?.goals.find((goal) => pointerFrame >= goal.startFrame && pointerFrame < goal.endFrame) : selectedGoal
-        if (hoveredGoal) { setActiveGoalId(hoveredGoal.id); if (hoveredGoal.id !== selectedGoal?.id) { resetAtomicViewport(hoveredGoal); setSelectedId(hoveredGoal.id); setSelectedLevel('goal') }; setMark({ kind: 'no_action', frame: pointerFrame }) }
+        if (!hoveredGoal) { setToast('请先选择一个单次任务，或将鼠标悬停在单次任务轨道内'); return }
+        setActiveGoalId(hoveredGoal.id); if (hoveredGoal.id !== selectedGoal?.id) { resetAtomicViewport(hoveredGoal); setSelectedId(hoveredGoal.id); setSelectedLevel('goal') }; setMark({ kind: 'no_action', frame: pointerFrame })
       }
-      if (!readonly && event.key.toLowerCase() === 'x' && !mark) {
-        const parent = result?.goals.find((goal) => pointerFrame >= goal.startFrame && pointerFrame < goal.endFrame)
-        if (parent) { setActiveGoalId(parent.id); if (parent.id !== selectedGoal?.id) { resetAtomicViewport(parent); setSelectedId(parent.id); setSelectedLevel('goal') }; setMark({ kind: 'invalid', frame: pointerFrame }) }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'x') {
+        event.preventDefault()
+        if (readonly) { setToast(hardReadonly ? '当前为只读状态或未持有视频锁，无法标记无效区间' : '质检、审核和验收阶段不能修改标注'); return }
+        if (mark) { setToast('已有区间正在创建，请先松开对应快捷键或按 Esc 取消'); return }
+        if (hoverPoint?.level !== 'goal') { setToast('请将鼠标悬停在单次任务进度条的空白位置后按 X'); return }
+        if ([...(result?.goals || []), ...(result?.invalidRanges || [])].some((range) => pointerFrame >= range.startFrame && pointerFrame < range.endFrame)) { setToast('当前位置已有标记，请在未标记的空白位置按 X'); return }
+        setMark({ kind: 'invalid', frame: pointerFrame })
       }
       if ((event.key === 'Backspace' || event.key === 'Delete') && result && (selected || selectedId?.startsWith('invalid:'))) {
         event.preventDefault()
@@ -1289,7 +1342,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   if (!workspace || !result) return <main className="annotation-load-state"><RotateCcw className="spinning" size={34} /><p>{videoLockState === 'checking' ? '正在获取视频锁...' : '正在加载任务和标注结果...'}</p></main>
 
   function segmentListButton(item: AnnotationSegment, title: string) {
-    const label = item.type === 'no_action' ? '系统无动作' : item.labelName || '未选择标签'
+    const label = item.type === 'no_action' ? '无标签' : item.labelName || '未选择标签'
     const active = selectedId === item.id && selectedLevel === (item.type === 'goal' ? 'goal' : 'action')
     return <button className={active ? 'active' : ''} type="button" aria-pressed={active} onClick={() => selectSegment(item)}><i style={{ background: item.color }} /><span className="segment-list-title"><b>{title}</b></span><span className="segment-list-copy"><small style={{ color: item.type === 'no_action' ? '#697782' : item.color }}>{label}</small><em>{item.descriptionZh || '暂无描述'}</em></span><span className="segment-list-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span></button>
   }
@@ -1308,7 +1361,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const labels = workspace!.labels.filter((label) => label.appliesTo === scope || (label.appliesTo === 'both' && label.id === item.labelId))
     const selectedLabel = labels.find((label) => label.id === item.labelId)
     return <div className="segment-inline-editor" onClick={(event) => event.stopPropagation()}>
-      {noAction ? <span className="segment-inline-system">系统无动作</span> : <div className="segment-inline-row">
+      {noAction ? <div className="segment-inline-row"><span className="segment-inline-system no-action-label">无标签</span><label className="segment-content"><input disabled value="未执行有效动作" aria-label="无动作片段描述" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span><button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button></div> : <div className="segment-inline-row">
         {workspace!.labelLibraryBound && <label className="label-select"><select disabled={readonly} title={item.labelName || '请选择标签'} className={selectedLabel ? 'has-label-color' : ''} style={selectedLabel ? { '--selected-label-color': selectedLabel.color, '--selected-label-text': contrastTextColor(selectedLabel.color) } as React.CSSProperties : undefined} value={item.labelId || ''} onChange={(event) => { const label = labels.find((candidate) => candidate.id === event.target.value); if (label?.appliesTo === 'both') return; updateSegment(item, { labelId: label?.id, labelCode: label?.code || '', labelName: label?.name, color: label?.color || item.color }) }}><option value="">请选择标签</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label>}
         <label className="segment-content"><input disabled={readonly} value={item.descriptionZh} maxLength={300} onChange={(event) => updateSegment(item, { descriptionZh: event.target.value })} placeholder="输入片段描述（选填）" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span>
         <button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button>
@@ -1342,19 +1395,18 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       </section>
 
       <aside className="annotation-inspector">
-        <header><div><strong>片段列表 <b>{result.goals.length + result.actions.length}</b></strong><span>{result.goals.length} 个单次任务 · {result.actions.length} 个小目标</span></div></header>
-        <div className="segment-list-columns"><span>片段</span><span>标签与描述</span><span>总时长</span></div>
-        <div className="segment-tree">{result.goals.map((goal, index) => { const goalSelected = selectedLevel === 'goal' && selectedId === goal.id; return <div className="segment-group" key={goal.id}><div className={`segment-list-entry${goalSelected ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{goalSelected && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => { const actionSelected = selectedLevel === 'action' && selectedId === action.id; return <div className={`segment-action-wrap${actionSelected ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${actionSelected ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{actionSelected && inlineSegmentEditor(action)}</div>{segmentKeyFrameMeta(action)}</div> })}</div> })}</div>
+        <header className="inspector-tabs"><button type="button" className={inspectorTab === 'segments' ? 'active' : ''} onClick={() => setInspectorTab('segments')}>片段 <b>{result.goals.length + result.actions.length}</b></button><button type="button" className={inspectorTab === 'invalid' ? 'active' : ''} onClick={() => setInspectorTab('invalid')}>无效区间 <b>{result.invalidRanges.length}</b></button></header>
+        {inspectorTab === 'segments' ? <><div className="segment-list-columns"><span>片段</span><span>标签与描述</span><span>总时长</span></div><div className="segment-tree">{result.goals.map((goal, index) => { const goalSelected = selectedLevel === 'goal' && selectedId === goal.id; return <div className="segment-group" key={goal.id}><div className={`segment-list-entry${goalSelected ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{goalSelected && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => { const actionSelected = selectedLevel === 'action' && selectedId === action.id; return <div className={`segment-action-wrap${actionSelected ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${actionSelected ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{actionSelected && inlineSegmentEditor(action)}</div>{segmentKeyFrameMeta(action)}</div> })}</div> })}</div></> : <><div className="segment-list-columns invalid-list-columns"><span>区间</span><span>无效原因</span><span>总时长</span><span>操作</span></div><div className="segment-tree invalid-segment-list">{result.invalidRanges.map((range, index) => { const active = selectedLevel === 'invalid' && selectedId === `invalid:${range.id}`; return <div className={`invalid-list-row${active ? ' selected' : ''}`} key={range.id}><button className="invalid-row-main" type="button" aria-pressed={active} onClick={() => { videoRef.current?.pause(); setActiveGoalId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); seek(range.startFrame) }}><i /><span className="segment-list-title"><b>无效区间 {index + 1}</b></span><span className="segment-list-copy"><small>{range.reason}</small><em>{timeText(range.startFrame / result.frameRate)} - {timeText(range.endFrame / result.frameRate)}</em></span><span className="segment-list-duration"><b>{timeText((range.endFrame - range.startFrame) / result.frameRate)}</b><small>F{range.startFrame}-{range.endFrame}</small></span></button><button className="invalid-reason-edit" type="button" disabled={readonly} onClick={() => editInvalidReason(range)}>修改原因</button></div> })}{!result.invalidRanges.length && <div className="inspector-empty">暂无无效区间，按 X 可在单次任务轨道空白处标记</div>}</div></>}
       </aside>
     </section>
 
-    <section className={`annotation-timeline${workspace.labelLibraryBound || editing ? '' : ' no-label-library'}${workspace.operationLibraryId ? ' has-operation-bar' : ''}${selectedLevel ? ` selection-${selectedLevel === 'invalid' ? 'action' : selectedLevel}` : ''}`}>
-      {(workspace.labelLibraryBound || editing) && <div className="annotation-label-bar">{workspace.labelLibraryBound && <><span>片段标签</span>{selected?.type === 'no_action' ? <small>无动作由系统定义，无需选择项目标签</small> : !visibleLabels.length ? <small>当前类型无可用标签</small> : visibleLabels.map((label) => <button type="button" disabled={!selected || readonly} className={selected?.labelId === label.id ? 'active' : ''} style={{ '--label-color': label.color } as React.CSSProperties} key={label.id} onClick={() => updateSelected(selected?.labelId === label.id ? { labelId: undefined, labelCode: '', labelName: undefined } : label.appliesTo === 'both' ? {} : { labelId: label.id, labelCode: label.code, labelName: label.name, color: label.color })}>{label.name}</button>)}</>}{editing && (selected || selectedInvalidRange) && <span className="timeline-edit-feedback"><strong>{editing}</strong><span>{timeText((selected || selectedInvalidRange)!.startFrame / result.frameRate)} - {timeText((selected || selectedInvalidRange)!.endFrame / result.frameRate)}</span><b>{(selected || selectedInvalidRange)!.endFrame - (selected || selectedInvalidRange)!.startFrame} 帧</b></span>}</div>}
+    <section className={`annotation-timeline${workspace.labelLibraryBound || editing ? '' : ' no-label-library'}${workspace.operationLibraryId ? ' has-operation-bar' : ''}${selectedLevel ? ` selection-${selectedLevel === 'invalid' ? 'goal' : selectedLevel}` : ''}`}>
+      {(workspace.labelLibraryBound || editing) && <div className="annotation-label-bar">{workspace.labelLibraryBound && <><span>片段标签</span>{selected?.type === 'no_action' ? <small>无动作片段不设置标签</small> : !visibleLabels.length ? <small>当前类型无可用标签</small> : visibleLabels.map((label) => <button type="button" disabled={!selected || readonly} className={selected?.labelId === label.id ? 'active' : ''} style={{ '--label-color': label.color } as React.CSSProperties} key={label.id} onClick={() => updateSelected(selected?.labelId === label.id ? { labelId: undefined, labelCode: '', labelName: undefined } : label.appliesTo === 'both' ? {} : { labelId: label.id, labelCode: label.code, labelName: label.name, color: label.color })}>{label.name}</button>)}</>}{editing && (selected || selectedInvalidRange) && <span className="timeline-edit-feedback"><strong>{editing}</strong><span>{timeText((selected || selectedInvalidRange)!.startFrame / result.frameRate)} - {timeText((selected || selectedInvalidRange)!.endFrame / result.frameRate)}</span><b>{(selected || selectedInvalidRange)!.endFrame - (selected || selectedInvalidRange)!.startFrame} 帧</b></span>}</div>}
       {workspace.operationLibraryId && <div className="annotation-operation-bar"><span>操作对象</span>{operationObjectsLoading ? <small>正在加载...</small> : !operationObjects.length ? <small>暂无已审核操作对象</small> : operationObjects.map((item) => <button type="button" className={selected?.operationObjectIds?.includes(item.id) ? 'active' : ''} disabled={readonly || selected?.type !== 'action'} onClick={() => { if (selected?.type !== 'action') return; const ids = selected.operationObjectIds || []; const nextIds = ids.includes(item.id) ? ids.filter((id) => id !== item.id) : [...ids, item.id]; updateSelected({ operationObjectIds: nextIds, operationObjectNames: nextIds.map((id) => operationObjects.find((object) => object.id === id)?.name || '') }) }} key={item.id}>{item.name}</button>)}<button className="candidate-button" type="button" disabled={readonly} onClick={() => { setCandidateForm({ name: '', alias: '', attribute: '' }); setCandidateModalOpen(true) }}><Plus size={13} />新增候选</button></div>}
       <header><div><strong>{draftRange ? `正在创建：${draftRange.level === 'goal' ? '单次任务' : draftRange.level === 'invalid' ? '视频无效区间' : '小目标'}` : selectedGoal ? `当前单次任务：${selectedGoal.labelName || selectedGoal.code || '未选择标签'}` : '当前创建：单次任务'}</strong><span>{draftRange ? `${timeText(draftRange.startFrame / result.frameRate)} - ${timeText(draftRange.endFrame / result.frameRate)} · 松开 ${mark?.kind === 'no_action' ? 'W' : mark?.kind === 'invalid' ? 'X' : 'Q'} 完成，Esc 取消` : 'Q 普通片段 · W 无动作 · X 视频无效区间'}</span></div><div>{selected && <button type="button" onClick={() => clearSelection()}>退出预览</button>}<button type="button" disabled={readonly || !history.undo} onClick={undo} title="撤销"><Undo2 size={14} />撤销</button><button type="button" disabled={readonly || !history.redo} onClick={redo} title="重做"><Redo2 size={14} />重做</button></div></header>
       <div className="timeline-body">
         <GlobalTimeline goals={result.goals} invalidRanges={result.invalidRanges} draft={draftRange} selectedRange={selected || selectedInvalidRange} totalFrames={result.totalFrames} frameRate={result.frameRate} currentFrame={currentFrame} viewport={goalTimelineViewport} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onClearSelection={() => clearSelection()} />
-        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'goal' ? selectedId : undefined} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onEditFinish={finishEdit} onSelect={selectSegment} />
+        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'goal' || selectedLevel === 'invalid' ? selectedId : undefined} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); setInspectorTab('invalid'); seek(range.startFrame) }} />
         {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'action' || selectedLevel === 'invalid' ? selectedId : undefined} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid') }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
@@ -1366,6 +1418,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <div className="page-comment-dialog-list">{commentsLoading ? <div className="comment-empty">批注加载中...</div> : visibleVideoComments.length === 0 ? <div className="comment-empty">暂无批注</div> : visibleVideoComments.map((comment) => <article className={comment.resolved ? 'resolved' : ''} key={comment.id}><header><span className="page-comment-sequence">{comment.sequence}</span><strong>{nodeLabels[comment.node]}批注</strong><span className={comment.resolved ? 'resolved' : 'pending'}>{comment.resolved ? '已解决' : '待处理'}</span></header><p>{comment.content}</p><footer><small>{comment.createdByName || '未知用户'} · {formatDateTime(comment.createdAt)} · 页面位置 {Math.round(comment.positionX * 100)}%, {Math.round(comment.positionY * 100)}%</small>{!comment.resolved && <button type="button" disabled={!canComment} onClick={() => resolveComment(comment.id)}>标记已解决</button>}</footer></article>)}</div>
       <footer><button className="secondary-button" type="button" onClick={() => setCommentsOpen(false)}>关闭</button></footer>
     </div>}
+    {pendingInvalidRange && <Modal title="选择无效原因" onClose={() => { setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined) }} footer={<><button className="secondary-button" type="button" onClick={() => { setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined) }}>取消</button><button className="primary-button" type="button" disabled={!invalidReason || invalidReason === '其他' && !invalidReasonOther.trim()} onClick={confirmInvalidRange}>{editingInvalidRangeId ? '确认修改' : '确认标记'}</button></>}><div className="invalid-reason-dialog"><p>无效区间：{timeText(pendingInvalidRange.startFrame / result.frameRate)} - {timeText(pendingInvalidRange.endFrame / result.frameRate)}</p><fieldset><legend>无效原因 <i className="required-mark">*</i></legend><div>{invalidReasons.map((reason) => <label key={reason}><input type="radio" name="invalid-reason" checked={invalidReason === reason} onChange={() => setInvalidReason(reason)} />{reason}</label>)}</div></fieldset>{invalidReason === '其他' && <label className="invalid-reason-other"><span>其他原因 <i className="required-mark">*</i></span><input autoFocus value={invalidReasonOther} maxLength={200} onChange={(event) => setInvalidReasonOther(event.target.value)} placeholder="请输入其他无效原因" /><small>{invalidReasonOther.length}/200</small></label>}</div></Modal>}
     {submitIssue && <Modal title="当前标注未完成" onClose={() => setSubmitIssue(undefined)} footer={submitIssue.type === 'goal-gap' ? <><button className="secondary-button" type="button" onClick={() => { setSubmitIssue(undefined); void submit({ ignoreGoalGaps: true }) }}>确认不标注，继续提交</button><button className="primary-button" type="button" onClick={() => { seek(submitIssue.gaps[0].startFrame); setSubmitIssue(undefined) }}>返回检查第一个</button></> : submitIssue.type === 'action-gap' ? <><button className="secondary-button" type="button" onClick={() => { setSubmitIssue(undefined); void submit({ ignoreGoalGaps: true, ignoreActionGaps: true }) }}>确认不标注，继续提交</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.goal.id); setSelectedId(submitIssue.goal.id); setSelectedLevel('goal'); seek(submitIssue.gaps[0].startFrame); setSubmitIssue(undefined) }}>返回检查第一个</button></> : <><button className="secondary-button" type="button" onClick={() => setSubmitIssue(undefined)}>返回补充</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.action.parentId); setSelectedId(submitIssue.action.id); setSelectedLevel('action'); seek(submitIssue.action.startFrame); setSubmitIssue(undefined) }}>定位首个问题</button></>}><div className="submit-validation-dialog">{submitIssue.type === 'goal-gap' ? <><strong>当前视频还有 {submitIssue.gaps.length} 个未覆盖区间，共 {submitIssue.gaps.reduce((sum, gap) => sum + gap.endFrame - gap.startFrame, 0)} 帧</strong><p>可确认这些区间不标注并继续，也可返回检查第一个并补充标注或标记无效。</p></> : submitIssue.type === 'action-gap' ? <><strong>当前单次任务还有 {submitIssue.gaps.length} 个小目标未覆盖区间，共 {submitIssue.gaps.reduce((sum, gap) => sum + gap.endFrame - gap.startFrame, 0)} 帧</strong><p>可确认这些区间不标注并继续，也可返回检查第一个并补充小目标或标记无效。</p></> : <><strong>{submitIssue.title} 尚未选择操作对象，请选择对象</strong><p>请定位并完成当前问题后再次提交。小目标标签可不选择。</p></>}</div></Modal>}
     {shortcutsOpen && <Modal title="快捷键与操作" onClose={() => setShortcutsOpen(false)}><div className="shortcut-guide"><ShortcutColumn title="键盘快捷键" items={keyboardShortcuts} /><ShortcutColumn title="时间轴操作" items={timelineShortcuts} /></div></Modal>}
     {candidateModalOpen && <Modal title="新增操作对象候选" onClose={() => { if (!candidateSaving) setCandidateModalOpen(false) }} footer={<><button className="secondary-button" type="button" disabled={candidateSaving} onClick={() => setCandidateModalOpen(false)}>取消</button><button className="primary-button" type="button" disabled={candidateSaving || !candidateForm.name.trim()} onClick={() => void createOperationCandidate()}>{candidateSaving ? '正在提交...' : '提交候选'}</button></>}><div className="candidate-object-form"><p>候选对象将提交到“{workspace.operationLibraryName || '项目操作对象库'}”，审核通过后才可用于关键帧。</p><label><span>对象名称 <i className="required-mark">*</i></span><input autoFocus value={candidateForm.name} maxLength={100} onChange={(event) => setCandidateForm({ ...candidateForm, name: event.target.value })} placeholder="请输入对象名称" /></label><label><span>别名</span><input value={candidateForm.alias} maxLength={100} onChange={(event) => setCandidateForm({ ...candidateForm, alias: event.target.value })} placeholder="请输入对象别名（选填）" /></label><label><span>属性</span><input value={candidateForm.attribute} maxLength={500} onChange={(event) => setCandidateForm({ ...candidateForm, attribute: event.target.value })} placeholder="请输入对象属性（选填）" /></label></div></Modal>}
