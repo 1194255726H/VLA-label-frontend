@@ -681,6 +681,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const keyFrameFormValid = (!keyFrameNeedsObject || keyFrameForm.operationObjectIds.length > 0) && (!keyFrameNeedsDetail || Boolean(keyFrameForm.detail.trim()))
   const unresolvedCommentCount = videoComments.filter((comment) => !comment.resolved).length
   const commentsAvailable = Boolean(approvalStage || videoComments.length)
+  const canResolveComment = Boolean(!hardReadonly && commentsAvailable)
   const visibleVideoComments = useMemo(() => videoComments.filter((comment) => commentFilter === 'all' || (commentFilter === 'resolved' ? comment.resolved : !comment.resolved)), [commentFilter, videoComments])
 
   useEffect(() => {
@@ -1064,6 +1065,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   async function submit(options: { ignoreGoalGaps?: boolean; ignoreActionGaps?: boolean } = {}) {
     if (!result) return
     if (editing) return setToast('请先完成或取消当前拖动')
+    if (workspace?.node === 'annotation' && commentsLoading) return setToast('批注仍在加载，请稍后再提交')
+    if (workspace?.node === 'annotation' && unresolvedCommentCount > 0) {
+      setCommentFilter('pending')
+      openComments()
+      return setToast(`还有 ${unresolvedCommentCount} 条批注未解决，全部处理后才能提交至质检`)
+    }
     if (!result.goals.length) return setToast('至少创建一个单次任务后才能提交')
     const malformed = [...result.goals, ...result.actions, ...result.invalidRanges].find((item) => invalidFrameRange(item, result.totalFrames))
     if (malformed) { seek(Math.max(0, Math.round(malformed.startFrame))); return setToast('存在非整数帧、零长度或越界区间，请先修正') }
@@ -1164,7 +1171,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   async function resolveComment(commentId: string) {
-    if (!canComment) return
+    if (!canResolveComment) return setToast('当前为只读状态，无法修改批注状态')
     try {
       const resolved = await annotationApi.resolveVideoComment(projectId, videoId, commentId)
       setVideoComments((items) => items.map((item) => item.id === commentId ? resolved : item))
@@ -1426,7 +1433,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     {commentsOpen && commentDialogPosition && <div ref={commentDialogRef} className="page-comment-dialog" style={{ left: commentDialogPosition.x, top: commentDialogPosition.y }} role="dialog" aria-label="全部批注">
       <header onPointerDown={startCommentDialogDrag} onPointerMove={moveCommentDialog} onPointerUp={stopCommentDialogDrag} onPointerCancel={stopCommentDialogDrag}><strong>全部批注</strong><div><GripVertical size={18} /><button type="button" onClick={() => setCommentsOpen(false)} aria-label="关闭"><X size={17} /></button></div></header>
       <nav><button className={commentFilter === 'all' ? 'active' : ''} type="button" onClick={() => setCommentFilter('all')}>全部 <b>{videoComments.length}</b></button><button className={commentFilter === 'pending' ? 'active' : ''} type="button" onClick={() => setCommentFilter('pending')}>待处理 <b>{videoComments.filter((item) => !item.resolved).length}</b></button><button className={commentFilter === 'resolved' ? 'active' : ''} type="button" onClick={() => setCommentFilter('resolved')}>已解决 <b>{videoComments.filter((item) => item.resolved).length}</b></button></nav>
-      <div className="page-comment-dialog-list">{commentsLoading ? <div className="comment-empty">批注加载中...</div> : visibleVideoComments.length === 0 ? <div className="comment-empty">暂无批注</div> : visibleVideoComments.map((comment) => <article className={comment.resolved ? 'resolved' : ''} key={comment.id}><header><span className="page-comment-sequence">{comment.sequence}</span><strong>{nodeLabels[comment.node]}批注</strong><span className={comment.resolved ? 'resolved' : 'pending'}>{comment.resolved ? '已解决' : '待处理'}</span></header><p>{comment.content}</p><footer><small>{comment.createdByName || '未知用户'} · {formatDateTime(comment.createdAt)} · 页面位置 {Math.round(comment.positionX * 100)}%, {Math.round(comment.positionY * 100)}%</small>{!comment.resolved && <button type="button" disabled={!canComment} onClick={() => resolveComment(comment.id)}>标记已解决</button>}</footer></article>)}</div>
+      <div className="page-comment-dialog-list">{commentsLoading ? <div className="comment-empty">批注加载中...</div> : visibleVideoComments.length === 0 ? <div className="comment-empty">暂无批注</div> : visibleVideoComments.map((comment) => <article className={comment.resolved ? 'resolved' : ''} key={comment.id}><header><span className="page-comment-sequence">{comment.sequence}</span><strong>{nodeLabels[comment.node]}批注</strong><span className={comment.resolved ? 'resolved' : 'pending'}>{comment.resolved ? '已解决' : '待处理'}</span></header><p>{comment.content}</p><footer><small>{comment.createdByName || '未知用户'} · {formatDateTime(comment.createdAt)} · 页面位置 {Math.round(comment.positionX * 100)}%, {Math.round(comment.positionY * 100)}%</small>{!comment.resolved && <button type="button" disabled={!canResolveComment} onClick={() => resolveComment(comment.id)}>标记已解决</button>}</footer></article>)}</div>
       <footer><button className="secondary-button" type="button" onClick={() => setCommentsOpen(false)}>关闭</button></footer>
     </div>}
     {pendingInvalidRange && <Modal title="选择无效原因" onClose={() => { setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined) }} footer={<><button className="secondary-button" type="button" onClick={() => { setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined) }}>取消</button><button className="primary-button" type="button" disabled={!invalidReason || invalidReason === '其他' && !invalidReasonOther.trim()} onClick={confirmInvalidRange}>{editingInvalidRangeId ? '确认修改' : '确认标记'}</button></>}><div className="invalid-reason-dialog"><p>无效区间：{timeText(pendingInvalidRange.startFrame / result.frameRate)} - {timeText(pendingInvalidRange.endFrame / result.frameRate)}</p><fieldset><legend>无效原因 <i className="required-mark">*</i></legend><div>{invalidReasons.map((reason) => <label key={reason}><input type="radio" name="invalid-reason" checked={invalidReason === reason} onChange={() => setInvalidReason(reason)} />{reason}</label>)}</div></fieldset>{invalidReason === '其他' && <label className="invalid-reason-other"><span>其他原因 <i className="required-mark">*</i></span><input autoFocus value={invalidReasonOther} maxLength={200} onChange={(event) => setInvalidReasonOther(event.target.value)} placeholder="请输入其他无效原因" /><small>{invalidReasonOther.length}/200</small></label>}</div></Modal>}

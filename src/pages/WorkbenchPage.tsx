@@ -59,7 +59,7 @@ function TaskTable({ items, tab, loading, onError }: { items: VideoListItem[]; t
         <thead><tr>
           <th>视频名称</th><th>一级场景</th><th>二级场景</th><th>供应商</th><th>状态</th><th>当前节点</th>
           {tab === 'submitted' && <th>提交节点</th>}
-          <th>流转类型</th><th>原视频时长</th><th>切片覆盖时长</th><th>有效片段时长</th><th>无效片段时长</th><th>未覆盖时长</th><th>单次任务数</th><th>小目标数</th><th>当前处理人</th><th>创建时间</th><th>更新时间</th><th className="action-column">操作</th>
+          <th>流转类型</th><th>原视频时长</th><th>切片覆盖时长</th><th className="segment-duration-column">有效片段时长</th><th className="segment-duration-column">无效片段时长</th><th>未覆盖时长</th><th>单次任务数</th><th className="count-column">小目标数</th><th className="assignee-column">当前处理人</th><th>创建时间</th><th>更新时间</th><th className="action-column">操作</th>
         </tr></thead>
         <tbody>
           {!loading && (items.length === 0 ? <tr><td colSpan={columnCount}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video, index) => {
@@ -72,7 +72,7 @@ function TaskTable({ items, tab, loading, onError }: { items: VideoListItem[]; t
               <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>
               {tab === 'submitted' && <td>{submittedNode ? <span className={`node-tag ${nodeTones[submittedNode]}`}>{nodeLabels[submittedNode]}</span> : '-'}</td>}
               <td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
-              <td>{formatClock(video.duration)}</td><td>{formatMilliseconds(video.selectedDurationMs)}</td><td>{formatMilliseconds(video.effectiveDurationMs)}</td><td>{formatMilliseconds(video.invalidDurationMs)}</td><td>{formatMilliseconds(video.unselectedDurationMs)}</td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td><td>{formatDateTime(video.updatedAt)}</td>
+              <td>{formatClock(video.duration)}</td><td>{formatMilliseconds(video.selectedDurationMs)}</td><td className="segment-duration-column">{formatMilliseconds(video.effectiveDurationMs)}</td><td className="segment-duration-column">{formatMilliseconds(video.invalidDurationMs)}</td><td>{formatMilliseconds(video.unselectedDurationMs)}</td><td>{video.atomicTaskCount}</td><td className="count-column">{video.atomicActionCount}</td><td className="assignee-column" title={video.currentAssigneeName || String(video.currentAssigneeId || '')}>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td><td>{formatDateTime(video.updatedAt)}</td>
               <td><div className="row-actions"><button type="button" disabled={action.disabled || Boolean(openingVideoId)} onClick={() => openVideo(video)}>{openingVideoId === video.id ? '正在打开...' : action.label}</button></div></td>
             </tr>
           }))}
