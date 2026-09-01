@@ -10,6 +10,7 @@ import { annotationApi, normalizeAnnotationResult } from '../services/annotation
 import { operationObjectApi } from '../services/managementApi'
 import type { AnnotationKeyFrame, AnnotationResult, AnnotationSegment, AnnotationWorkspace, OperationObject, SessionResponse, VideoComment } from '../types/api'
 import { formatDateTime } from '../utils/date'
+import { createClientId } from '../utils/id'
 
 const nodeLabels = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const TIMELINE_FRAME_WIDTH = 6
@@ -1205,7 +1206,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const selectedOperationObjects = operationObjects.filter((item) => keyFrameForm.operationObjectIds.includes(item.id))
     if (keyFrameNeedsObject && selectedOperationObjects.length !== keyFrameForm.operationObjectIds.length) return setToast('请选择有效的操作对象')
     const target = selected
-    const keyFrame: AnnotationKeyFrame = { id: editingKeyFrame?.id || crypto.randomUUID(), sequence: editingKeyFrame?.sequence || Math.max(0, ...(target.keyFrames || []).map((item) => item.sequence)) + 1, frame: editingKeyFrame?.frame ?? currentFrame, type: keyFrameForm.type, operationObjectIds: selectedOperationObjects.map((item) => item.id), operationObjectNames: selectedOperationObjects.map((item) => item.name), detail: keyFrameForm.type === 'contact' ? '' : keyFrameForm.detail.trim() }
+    const keyFrame: AnnotationKeyFrame = { id: editingKeyFrame?.id || createClientId(), sequence: editingKeyFrame?.sequence || Math.max(0, ...(target.keyFrames || []).map((item) => item.sequence)) + 1, frame: editingKeyFrame?.frame ?? currentFrame, type: keyFrameForm.type, operationObjectIds: selectedOperationObjects.map((item) => item.id), operationObjectNames: selectedOperationObjects.map((item) => item.name), detail: keyFrameForm.type === 'contact' ? '' : keyFrameForm.detail.trim() }
     mutate({ ...result, actions: result.actions.map((action) => action.id === target.id ? { ...action, keyFrames: editingKeyFrame ? (action.keyFrames || []).map((item) => item.id === editingKeyFrame.id ? keyFrame : item) : [...(action.keyFrames || []), keyFrame], keyframeNoneConfirmed: false } : action) })
     setSelectedId(target.id)
     setSelectedLevel('action')

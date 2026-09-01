@@ -324,10 +324,10 @@ export const operationObjectApi = {
     if (runtimeConfig.apiMode === 'mock') { await delay(); if (projects.some((item) => item.operationLibraryId === id)) throw new Error('对象库已被项目引用，不能删除'); operationLibraries = operationLibraries.filter((item) => item.id !== id); operationObjects = operationObjects.filter((item) => item.libraryId !== id); return }
     await request(`/api/data/operation-libraries/${encodeURIComponent(id)}`, { method: 'DELETE' })
   },
-  async listObjects(libraryId: string, query: { keyword?: string; page?: number; pageSize?: number } = {}): Promise<OperationObjectPage<OperationObject>> {
+  async listObjects(libraryId: string, query: { keyword?: string; approved?: boolean; page?: number; pageSize?: number } = {}): Promise<OperationObjectPage<OperationObject>> {
     const page = query.page || 1; const pageSize = query.pageSize || 10
-    if (runtimeConfig.apiMode === 'mock') { await delay(); const matched = operationObjects.filter((item) => item.libraryId === libraryId && (!query.keyword || `${item.id}${item.name}`.includes(query.keyword))); return clone({ items: matched.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: matched.length }) }
-    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) }); if (query.keyword) params.set('keyword', query.keyword)
+    if (runtimeConfig.apiMode === 'mock') { await delay(); const matched = operationObjects.filter((item) => item.libraryId === libraryId && (query.approved === undefined || item.approved === query.approved) && (!query.keyword || `${item.id}${item.name}`.includes(query.keyword))); return clone({ items: matched.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: matched.length }) }
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) }); if (query.keyword) params.set('keyword', query.keyword); if (query.approved !== undefined) params.set('approved', String(query.approved))
     const result = await request<{ items: Array<Record<string, unknown>>; page?: number; page_size?: number; total?: number }>(`/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects?${params}`)
     return { items: (result.items || []).map(normalizeOperationObject), page: result.page || page, pageSize: result.page_size || pageSize, total: result.total ?? result.items?.length ?? 0 }
   },

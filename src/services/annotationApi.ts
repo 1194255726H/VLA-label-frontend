@@ -1,6 +1,7 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockTasks } from '../mocks/data'
 import type { AnnotationKeyFrame, AnnotationResult, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
+import { createClientId } from '../utils/id'
 import { request } from './api'
 
 const mockResults = new Map<string, AnnotationResult>()
@@ -80,7 +81,7 @@ function normalizeKeyFrame(item: Record<string, unknown>, index = 0): Annotation
   const type = String(item.event_type || item.type || 'contact') as AnnotationKeyFrame['type']
   const detail = String(type === 'contact' ? item.contact_description || item.detail || '' : type === 'object_change' ? item.object_change_description || item.detail || '' : item.abnormal_description || item.detail || '')
   const { operationObjectIds, operationObjectNames } = normalizeOperationObjectRefs(item)
-  return { id: String(item.id || crypto.randomUUID()), sequence: Number(item.sequence ?? index + 1), frame: Number(item.frame || 0), type, operationObjectIds, operationObjectNames, detail }
+  return { id: String(item.id || createClientId()), sequence: Number(item.sequence ?? index + 1), frame: Number(item.frame || 0), type, operationObjectIds, operationObjectNames, detail }
 }
 
 function keyFramePayload(keyFrame: AnnotationKeyFrame) {
@@ -222,7 +223,7 @@ export const annotationApi = {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const key = videoContextKey(projectId, videoId)
-      const comment: VideoComment = { id: crypto.randomUUID(), videoId, node: payload.node, sequence: payload.sequence, positionX: payload.positionX, positionY: payload.positionY, content: payload.content, resolved: false, createdById: 'mock-user', createdByName: '当前用户', createdAt: new Date().toISOString() }
+      const comment: VideoComment = { id: createClientId(), videoId, node: payload.node, sequence: payload.sequence, positionX: payload.positionX, positionY: payload.positionY, content: payload.content, resolved: false, createdById: 'mock-user', createdByName: '当前用户', createdAt: new Date().toISOString() }
       mockVideoComments.set(key, [...(mockVideoComments.get(key) || []), comment])
       return clone(comment)
     }
@@ -244,7 +245,7 @@ export const annotationApi = {
   },
 
   async createKeyFrame(projectId: string, videoId: string, actionId: string, keyFrame: AnnotationKeyFrame): Promise<AnnotationKeyFrame> {
-    if (runtimeConfig.apiMode === 'mock' || !/^\d+$/.test(actionId)) { await delay(); return { ...keyFrame, id: crypto.randomUUID() } }
+    if (runtimeConfig.apiMode === 'mock' || !/^\d+$/.test(actionId)) { await delay(); return { ...keyFrame, id: createClientId() } }
     const response = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/keyframes`, { method: 'POST', body: JSON.stringify({ action_id: Number(actionId), ...keyFramePayload(keyFrame) }) })
     return normalizeKeyFrame(response)
   },
