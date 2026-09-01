@@ -226,7 +226,7 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
   showPlayhead?: boolean
   onEditStart?: (label: string) => void
   onSegmentPreview?: (item: AnnotationSegment, startFrame: number, endFrame: number, mode: TimelineEditMode) => TimelineViewport | undefined
-  onInvalidPreview?: (range: AnnotationResult['invalidRanges'][number], startFrame: number, endFrame: number, mode: TimelineEditMode) => void
+  onInvalidPreview?: (range: AnnotationResult['invalidRanges'][number], startFrame: number, endFrame: number, mode: TimelineEditMode) => TimelineViewport | undefined
   onEditFinish?: (commit: boolean) => void
   onViewportChange?: (viewport: TimelineViewport) => void
 }) {
@@ -345,16 +345,24 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
     if (readonly || !onInvalidPreview || selectedId !== `invalid:${range.id}`) return
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId)
     const rect = event.currentTarget.parentElement?.getBoundingClientRect(); if (!rect) return
+    const dragTrackWidth = rect.width
     const mode: TimelineEditMode = handle?.dataset.handle === 'start' ? 'start' : handle?.dataset.handle === 'end' ? 'end' : 'move'
-    const originX = event.clientX; const originStart = range.startFrame; const originEnd = range.endFrame; let changed = false
+    const originX = event.clientX; const originStart = range.startFrame; const originEnd = range.endFrame
+    const playheadInside = currentFrame >= originStart && currentFrame < originEnd
+    const moveAnchorFrame = playheadInside ? currentFrame : originStart
+    const moveAnchorOffset = moveAnchorFrame - originStart
+    let changed = false
     onEditStart?.(`${mode === 'move' ? '移动' : mode === 'start' ? '调整起点' : '调整终点'}无效区间`)
     function move(pointer: PointerEvent) {
       if (mode === 'move' && Math.abs(pointer.clientX - originX) <= 5) return
-      const delta = Math.round((pointer.clientX - originX) / trackWidth * safeSpan)
+      const delta = Math.round((pointer.clientX - originX) / dragTrackWidth * safeSpan)
       const startFrame = mode === 'end' ? originStart : originStart + delta
       const endFrame = mode === 'start' ? originEnd : originEnd + delta
       changed = changed || startFrame !== originStart || endFrame !== originEnd
-      onInvalidPreview?.(range, startFrame, endFrame, mode)
+      const preview = onInvalidPreview?.(range, startFrame, endFrame, mode)
+      const actualStart = preview?.startFrame ?? startFrame
+      const actualEnd = preview?.endFrame ?? endFrame
+      onSeek(mode === 'move' ? actualStart + moveAnchorOffset : mode === 'start' ? actualStart : actualEnd)
     }
     function cleanup() { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', cancel); window.removeEventListener('blur', cancel); window.removeEventListener('keydown', keydown) }
     function end() { suppressClickRef.current = changed; cleanup(); onEditFinish?.(changed) }
@@ -391,7 +399,7 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
     {level === 'goal' && invalidRanges?.flatMap((range) => {
       const visibleStart = Math.max(safeStart, range.startFrame)
       const visibleEnd = Math.min(safeEnd, range.endFrame)
-      return visibleEnd > visibleStart ? [<button type="button" className={`invalid-block${selectedId === `invalid:${range.id}` ? ' selected' : ''}${range.startFrame < safeStart ? ' clipped-start' : ''}${range.endFrame > safeEnd ? ' clipped-end' : ''}`} key={range.id} title={`无效：${range.reason} · 点击选中后按 Backspace 或 Delete 删除`} aria-label={`视频无效区间 ${range.reason}，F${range.startFrame} 至 F${range.endFrame}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%` }} onPointerDown={(event) => startInvalidDrag(event, range)} onClick={(event) => { event.stopPropagation(); onSelectInvalid?.(range) }}><span className="invalid-block-label">{range.reason}</span>{selectedId === `invalid:${range.id}` && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>] : []
+      return visibleEnd > visibleStart ? [<button type="button" className={`invalid-block${selectedId === `invalid:${range.id}` ? ' selected' : ''}${range.startFrame < safeStart ? ' clipped-start' : ''}${range.endFrame > safeEnd ? ' clipped-end' : ''}`} key={range.id} title={`无效：${range.reason} · 选中后可拖动或调整两侧边缘`} aria-label={`视频无效区间 ${range.reason}，F${range.startFrame} 至 F${range.endFrame}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%` }} onPointerDown={(event) => { if (event.button !== 0) return; if (selectedId !== `invalid:${range.id}`) { suppressClickRef.current = false; event.stopPropagation(); onSelectInvalid?.(range); return } startInvalidDrag(event, range) }} onClick={(event) => { event.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return } onSelectInvalid?.(range) }}><span className="invalid-block-label">{range.reason}</span>{selectedId === `invalid:${range.id}` && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>] : []
     })}
     {items.flatMap((item, index) => {
       const visibleStart = Math.max(safeStart, item.startFrame)
@@ -1017,15 +1025,13 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   function previewInvalidRange(target: AnnotationResult['invalidRanges'][number], requestedStart: number, requestedEnd: number, mode: TimelineEditMode) {
-    if (!result || readonly || !selectedGoal) return
+    if (!result || readonly) return
     const base = editSnapshotRef.current || result
-    const fullyInside = target.startFrame >= selectedGoal.startFrame && target.endFrame <= selectedGoal.endFrame
-    if (!fullyInside) return setToast('跨单次任务边界的无效区间不能整体编辑')
-    const siblings = base.invalidRanges.filter((range) => range.id !== target.id).sort((a, b) => a.startFrame - b.startFrame)
-    const previous = siblings.filter((range) => range.endFrame <= target.startFrame).at(-1)
-    const next = siblings.find((range) => range.startFrame >= target.endFrame)
-    const lower = Math.max(selectedGoal.startFrame, previous?.endFrame ?? selectedGoal.startFrame)
-    const upper = Math.min(selectedGoal.endFrame, next?.startFrame ?? selectedGoal.endFrame)
+    const blockers = [...base.goals, ...base.invalidRanges.filter((range) => range.id !== target.id)].sort((a, b) => a.startFrame - b.startFrame)
+    const previous = blockers.filter((range) => range.endFrame <= target.startFrame).at(-1)
+    const next = blockers.find((range) => range.startFrame >= target.endFrame)
+    const lower = Math.max(0, previous?.endFrame ?? 0)
+    const upper = Math.min(base.totalFrames, next?.startFrame ?? base.totalFrames)
     const duration = target.endFrame - target.startFrame
     let startFrame = Math.round(requestedStart); let endFrame = Math.round(requestedEnd)
     if (mode === 'move') { startFrame = Math.max(lower, Math.min(startFrame, upper - duration)); endFrame = startFrame + duration }
@@ -1034,6 +1040,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const nextResult = normalizeAnnotationResult({ ...base, invalidRanges: base.invalidRanges.map((range) => range.id === target.id ? { ...range, startFrame, endFrame } : range) })
     editResultRef.current = nextResult
     setResult(nextResult)
+    return { startFrame, endFrame }
   }
 
   function removeSelected() {
@@ -1425,7 +1432,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <header><div><strong>{draftRange ? `正在创建：${draftRange.level === 'goal' ? '单次任务' : draftRange.level === 'invalid' ? '视频无效区间' : '小目标'}` : selectedGoal ? `当前单次任务：${selectedGoal.labelName || selectedGoal.code || '未选择标签'}` : '当前创建：单次任务'}</strong><span>{draftRange ? `${timeText(draftRange.startFrame / result.frameRate)} - ${timeText(draftRange.endFrame / result.frameRate)} · 松开 ${mark?.kind === 'no_action' ? 'W' : mark?.kind === 'invalid' ? 'X' : 'Q'} 完成，Esc 取消` : 'Q 普通片段 · W 无动作 · X 视频无效区间'}</span></div><div>{selected && <button type="button" onClick={() => clearSelection()}>退出预览</button>}<button type="button" disabled={readonly || !history.undo} onClick={undo} title="撤销"><Undo2 size={14} />撤销</button><button type="button" disabled={readonly || !history.redo} onClick={redo} title="重做"><Redo2 size={14} />重做</button></div></header>
       <div className="timeline-body">
         <GlobalTimeline goals={result.goals} invalidRanges={result.invalidRanges} draft={draftRange} selectedRange={selected || selectedInvalidRange} totalFrames={result.totalFrames} frameRate={result.frameRate} currentFrame={currentFrame} viewport={goalTimelineViewport} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onClearSelection={() => clearSelection()} />
-        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'goal' || selectedLevel === 'invalid' ? selectedId : undefined} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); setInspectorTab('invalid'); seek(range.startFrame) }} />
+        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'goal' || selectedLevel === 'invalid' ? selectedId : undefined} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); setInspectorTab('invalid'); seek(range.startFrame) }} />
         {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'action' || selectedLevel === 'invalid' ? selectedId : undefined} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid') }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
