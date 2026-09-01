@@ -16,6 +16,15 @@ const TIMELINE_FRAME_WIDTH = 6
 const keyFrameTypeLabels: Record<AnnotationKeyFrame['type'], string> = { contact: '接触', object_change: '物体变化', abnormal: '异常' }
 const invalidReasons = ['手部出框', '严重遮挡', '关键步骤缺失', '其他']
 
+function sortOperationObjects<T extends OperationObject>(items: T[]) {
+  return [...items].sort((left, right) => {
+    if (left.approved !== right.approved) return left.approved ? -1 : 1
+    const leftTime = Date.parse(left.createdAt) || 0
+    const rightTime = Date.parse(right.createdAt) || 0
+    return leftTime - rightTime || left.id.localeCompare(right.id, 'zh-CN', { numeric: true })
+  })
+}
+
 const keyboardShortcuts = [
   { keys: ['Space'], title: '播放 / 暂停', description: '切换当前视频的播放状态' },
   { keys: ['C'], title: '添加批注', description: '按 C 进入十字光标放置模式，单击业务内容确定批注位置；再次按 C 或 Esc 取消' },
@@ -693,7 +702,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (!workspace?.operationLibraryId) return
     let active = true
     Promise.resolve().then(() => { if (active) setOperationObjectsLoading(true); return operationObjectApi.listObjects(workspace.operationLibraryId, { pageSize: 100 }) })
-      .then((page) => { if (active) setOperationObjects(page.items.map((item) => ({ ...item, libraryName: workspace.operationLibraryName || '项目操作对象库' }))) })
+      .then((page) => { if (active) setOperationObjects(sortOperationObjects(page.items.map((item) => ({ ...item, libraryName: workspace.operationLibraryName || '项目操作对象库' })))) })
       .catch((reason) => { if (active) setToast(reason instanceof Error ? reason.message : '操作对象加载失败') })
       .finally(() => { if (active) setOperationObjectsLoading(false) })
     return () => { active = false }
@@ -1178,7 +1187,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (!operationObjects.length) {
       if (!workspace?.operationLibraryId) { setToast('当前项目未关联操作对象库'); return }
       setOperationObjectsLoading(true)
-      try { const page = await operationObjectApi.listObjects(workspace.operationLibraryId, { pageSize: 100 }); setOperationObjects(page.items.map((item) => ({ ...item, libraryName: workspace.operationLibraryName || '项目操作对象库' }))) }
+      try { const page = await operationObjectApi.listObjects(workspace.operationLibraryId, { pageSize: 100 }); setOperationObjects(sortOperationObjects(page.items.map((item) => ({ ...item, libraryName: workspace.operationLibraryName || '项目操作对象库' })))) }
       catch (reason) { setToast(reason instanceof Error ? reason.message : '操作对象加载失败') }
       finally { setOperationObjectsLoading(false) }
     }
@@ -1213,7 +1222,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     try {
       await operationObjectApi.saveObject(workspace.operationLibraryId, { name: candidateForm.name.trim(), alias: candidateForm.alias.trim(), attribute: candidateForm.attribute.trim(), approved: false })
       const page = await operationObjectApi.listObjects(workspace.operationLibraryId, { pageSize: 100 })
-      setOperationObjects(page.items.map((item) => ({ ...item, libraryName: workspace.operationLibraryName || '项目操作对象库' })))
+      setOperationObjects(sortOperationObjects(page.items.map((item) => ({ ...item, libraryName: workspace.operationLibraryName || '项目操作对象库' }))))
       setCandidateModalOpen(false); setCandidateForm({ name: '', alias: '', attribute: '' }); setToast('候选对象已创建，可立即选择使用')
     } catch (reason) { setToast(reason instanceof Error ? reason.message : '候选对象创建失败') }
     finally { setCandidateSaving(false) }
