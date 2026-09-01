@@ -90,6 +90,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [tab, setTab] = useState<TaskTab>('pending')
   const [tabTotals, setTabTotals] = useState<Record<TaskTab, number>>({ pending: 0, submitted: 0 })
   const [pageNo, setPageNo] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -101,7 +102,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     if (!projectId) throw new Error('请先选择作业项目')
     const otherTab: TaskTab = tab === 'pending' ? 'submitted' : 'pending'
     const [result, otherTabResult] = await Promise.all([
-      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize: 10, includeOverview: true }),
+      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize, includeOverview: true }),
       workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab: otherTab, pageNo: 1, pageSize: 1, includeOverview: false }),
     ])
     return {
@@ -111,7 +112,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
         [otherTab]: otherTabResult.tasks.page.total,
       } as Record<TaskTab, number>,
     }
-  }, [pageNo, projectId, session.account.id, tab])
+  }, [pageNo, pageSize, projectId, session.account.id, tab])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -213,7 +214,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
               <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { if (tab === 'submitted') return; setLoading(true); setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
             </div>
             <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} onError={setToast} />
-            <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={(next) => { setLoading(true); setPageNo(next) }} /></footer>
+            <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={(next) => { setLoading(true); setPageNo(next) }} pageSize={pageSize} onPageSizeChange={(size) => { setLoading(true); setPageSize(size); setPageNo(1) }} /></footer>
           </section>
 
           <aside className="workbench-side">

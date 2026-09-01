@@ -28,6 +28,7 @@ export function FleetSyncModal({ projectId, projectName, onClose, onSynced }: { 
   const [videoKeywordInput, setVideoKeywordInput] = useState('')
   const [videoKeyword, setVideoKeyword] = useState('')
   const [videoPage, setVideoPage] = useState(1)
+  const [videoPageSize, setVideoPageSize] = useState(10)
   const [videoPages, setVideoPages] = useState(1)
   const [videoTotal, setVideoTotal] = useState(0)
   const [videosLoading, setVideosLoading] = useState(false)
@@ -76,12 +77,12 @@ export function FleetSyncModal({ projectId, projectName, onClose, onSynced }: { 
   useEffect(() => {
     if (level !== 3 || !previewScene1Id || !previewScene2Id) return
     let active = true
-    fleetApi.videos(projectId, { scene1Id: previewScene1Id, scene2Id: previewScene2Id, supplierId: supplierId ? Number(supplierId) : undefined, keyword: videoKeyword, page: videoPage, pageSize: 20 })
+    fleetApi.videos(projectId, { scene1Id: previewScene1Id, scene2Id: previewScene2Id, supplierId: supplierId ? Number(supplierId) : undefined, keyword: videoKeyword, page: videoPage, pageSize: videoPageSize })
       .then((result) => { if (active) { setVideos(result.items); setVideoTotal(result.total); setVideoPages(result.pages) } })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Fleet 视频明细加载失败') })
       .finally(() => { if (active) setVideosLoading(false) })
     return () => { active = false }
-  }, [level, previewScene1Id, previewScene2Id, projectId, supplierId, videoKeyword, videoPage])
+  }, [level, previewScene1Id, previewScene2Id, projectId, supplierId, videoKeyword, videoPage, videoPageSize])
   async function sync() {
     if (!projectId || (level === 3 ? !selectedVideoIds.size : !selectedGroups.length) || syncing) return
     setSyncing(true); setError('')
@@ -102,7 +103,7 @@ export function FleetSyncModal({ projectId, projectName, onClose, onSynced }: { 
       <div className="fleet-project-target"><span>同步到当前项目</span><strong>{projectName}</strong><small>{projectId}</small></div>
       <div className="fleet-dialog-heading"><div><h3>{level === 1 ? '选择一级场景' : level === 2 ? '选择二级场景' : '选择具体视频'}</h3><p>{level === 1 ? '可直接同步一级场景，或继续细分' : level === 2 ? '可直接同步二级场景，预览视频时请单选一个二级场景' : `${selectedScene2?.scene1Name || ''} / ${selectedScene2?.scene2Name || ''}`}</p></div>{level < 3 ? <><div className="fleet-search"><Search size={16} /><input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={`搜索${level === 1 ? '一级' : '二级'}场景名称`} /></div><label className="fleet-search"><select value={supplierId} onChange={(event) => { setSupplierId(event.target.value); if (level === 1) setSelectedScene1Ids(new Set()); setSelectedScene2Keys(new Set()) }}><option value="">全部供应商</option>{suppliers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label></> : <form className="fleet-search" onSubmit={(event) => { event.preventDefault(); setVideosLoading(true); setVideoPage(1); setVideoKeyword(videoKeywordInput.trim()) }}><Search size={16} /><input value={videoKeywordInput} onChange={(event) => setVideoKeywordInput(event.target.value)} placeholder="搜索视频文件名" /><button type="submit">查询</button></form>}</div>
       <div className="fleet-task-table-wrap"><table className="fleet-task-table"><thead>{level < 3 ? <tr><th><input type="checkbox" checked={allVisibleSelected} disabled={loading || !(level === 1 ? selectableScene1Rows.length : selectableScene2Rows.length)} onChange={toggleVisible} aria-label="全选当前场景" /></th><th>一级场景</th>{level === 2 && <th>二级场景</th>}<th>来源供应商</th><th>视频数量</th><th>可同步数量</th></tr> : <tr><th><input type="checkbox" checked={allVisibleSelected} disabled={videosLoading || !videos.some((video) => !video.synced)} onChange={toggleVisible} aria-label="全选当前页未同步视频" /></th><th>视频文件名</th><th>场景 / 供应商</th><th>时长</th><th>文件大小</th><th>状态</th></tr>}</thead><tbody>{level < 3 ? loading ? <tr><td colSpan={level === 1 ? 5 : 6}><div className="fleet-dialog-empty">正在读取 Fleet 视频分组...</div></td></tr> : level === 1 ? scene1Rows.map((row) => <tr key={row.id}><td><input type="checkbox" checked={selectedScene1Ids.has(row.id)} disabled={!row.syncableCount} onChange={() => toggleScene1(row.id)} /></td><td><strong>{row.name || '-'}</strong></td><td>{row.supplierCount} 个供应商</td><td>{row.videoCount}</td><td><b className={row.syncableCount ? 'available' : ''}>{row.syncableCount}</b></td></tr>) : scene2Rows.map((row) => <tr key={scene2Key(row)}><td><input type="checkbox" checked={selectedScene2Keys.has(scene2Key(row))} disabled={!row.syncableCount} onChange={() => toggleScene2(row)} /></td><td>{row.scene1Name || '-'}</td><td><strong>{row.scene2Name || '-'}</strong></td><td>{row.supplierCount} 个供应商</td><td>{row.videoCount}</td><td><b className={row.syncableCount ? 'available' : ''}>{row.syncableCount}</b></td></tr>) : videosLoading ? <tr><td colSpan={6}><div className="fleet-dialog-empty">正在读取 Fleet 视频...</div></td></tr> : videos.map((video) => <tr key={video.fleetVideoId}><td><input type="checkbox" checked={selectedVideoIds.has(video.fleetVideoId)} disabled={video.synced} onChange={() => setSelectedVideoIds((current) => { const next = new Set(current); if (next.has(video.fleetVideoId)) next.delete(video.fleetVideoId); else next.add(video.fleetVideoId); return next })} /></td><td><strong>{video.filename}</strong><small>ID: {video.fleetVideoId}</small></td><td>{video.scene1Name} / {video.scene2Name}<small>{video.supplierName}</small></td><td>{video.duration == null ? '-' : duration(video.duration)}</td><td>{video.fileSize == null ? '-' : `${(video.fileSize / 1024 / 1024).toFixed(1)} MB`}</td><td><b className={video.synced ? '' : 'available'}>{video.synced ? '已同步' : '可同步'}</b></td></tr>)}{!loading && !videosLoading && !(level === 1 ? scene1Rows.length : level === 2 ? scene2Rows.length : videos.length) && <tr><td colSpan={level === 1 ? 5 : 6}><div className="fleet-dialog-empty">{level === 3 ? '未找到匹配视频' : '未找到可同步场景'}</div></td></tr>}</tbody></table></div>
-      <div className="fleet-task-summary"><span>已选 <b>{selectedCount}</b> 个{level === 1 ? '一级场景' : level === 2 ? '二级场景' : '视频'}</span>{level < 3 ? <span>预计同步 <b>{selectedVideoCount}</b> 个视频</span> : <><span>共 <b>{videoTotal}</b> 个视频</span><PaginationJump page={videoPage} pages={videoPages} disabled={videosLoading} onChange={(next) => { setVideosLoading(true); setVideoPage(next) }} /></>}</div>
+      <div className="fleet-task-summary"><span>已选 <b>{selectedCount}</b> 个{level === 1 ? '一级场景' : level === 2 ? '二级场景' : '视频'}</span>{level < 3 ? <span>预计同步 <b>{selectedVideoCount}</b> 个视频</span> : <><span>共 <b>{videoTotal}</b> 个视频</span><PaginationJump page={videoPage} pages={videoPages} disabled={videosLoading} onChange={(next) => { setVideosLoading(true); setVideoPage(next) }} pageSize={videoPageSize} onPageSizeChange={(size) => { setVideosLoading(true); setVideoPageSize(size); setVideoPage(1) }} /></>}</div>
       {error && <p className="inline-error fleet-sync-error">{error}</p>}
     </div>
   </Modal>
@@ -116,6 +117,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   const [keyword, setKeyword] = useState('')
   const [team, setTeam] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [modalOpen, setModalOpen] = useState(false)
   const [step, setStep] = useState<1 | 2>(1)
   const [editingId, setEditingId] = useState<string>()
@@ -143,9 +145,9 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
 
   const counts = useMemo(() => Object.fromEntries(Object.keys(statusLabels).map((key) => [key, items.filter((item) => item.status === key).length])), [items])
   const filtered = useMemo(() => items.filter((item) => (status === 'all' || item.status === status) && (!keyword || `${item.name}${item.code}`.toLowerCase().includes(keyword.toLowerCase())) && (!team || item.teams.includes(team))), [items, keyword, status, team])
-  const pages = Math.max(1, Math.ceil(filtered.length / 10))
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const currentPage = Math.min(page, pages)
-  const visibleProjects = filtered.slice((currentPage - 1) * 10, currentPage * 10)
+  const visibleProjects = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   async function loadLabelLibraryOptions() {
     setLoadingLabelLibraries(true)
@@ -213,7 +215,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
           {loading ? <tr><td colSpan={15}><div className="management-empty">正在加载项目...</div></td></tr> : visibleProjects.map((item) => <tr key={item.id}><td><div className="entity-name"><strong>{item.name}</strong><small>{item.code}</small></div></td><td><span className={`project-status ${item.status}`}>{statusLabels[item.status]}</span></td><td title={item.teams.join('、')}>{item.teams.join('、')}</td><td>{item.memberCount}</td><td>{item.dataCount}</td><td>{duration(item.validDuration)}</td><td>{duration(item.invalidDuration)}</td><td>{duration(item.unselectedDuration)}</td><td>{item.goalCount}</td><td>{item.actionCount}</td><td>{item.currentNode ? <span className="node-tag blue">{item.currentNode}</span> : '-'}</td><td><div className="progress-cell"><span><i style={{ width: `${item.progress}%` }} /></span><b>{item.progress}%</b></div></td><td>{item.owner}</td><td><span className={new Date(item.deliveryAt) < new Date() && item.status !== 'finished' ? 'risk-date' : ''}>{item.deliveryAt || '-'}</span></td><td><div className="row-actions"><button type="button" onClick={() => { window.location.hash = `/projects/${encodeURIComponent(item.id)}/annotation-data` }}><Eye size={15} />查看</button><button type="button" disabled={item.status === 'archived' || Boolean(openingProjectId)} title={item.status === 'archived' ? '已归档项目不可编辑' : undefined} onClick={() => void openEdit(item)}><Edit3 size={15} />{openingProjectId === item.id ? '加载中' : '编辑'}</button>{statusActions[item.status].map(({ label, status: next, icon: Icon }) => <button key={label} type="button" onClick={() => changeStatus(item, next)}><Icon size={15} />{label}</button>)}<button className="danger-action" type="button" onClick={() => removeProject(item)}><Trash2 size={15} />删除</button></div></td></tr>)}
           {!loading && !filtered.length && <tr><td colSpan={15}><div className="management-empty"><CircleAlert size={32} />未找到匹配项目</div></td></tr>}
         </tbody></table></div>
-        <footer className="management-footer"><span>共 {filtered.length} 条</span><div className="pagination-with-size"><PaginationJump page={page} pages={pages} disabled={loading} onChange={setPage} /><span>10条/页</span></div></footer>
+        <footer className="management-footer"><span>共 {filtered.length} 条</span><PaginationJump page={page} pages={pages} disabled={loading} onChange={setPage} pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></footer>
       </section>
     </section>
     {modalOpen && <Modal title={editingId ? '编辑项目' : '创建项目'} onClose={() => setModalOpen(false)} footer={<><button className="secondary-button" type="button" disabled={uploadingGuideline} onClick={() => step === 2 ? setStep(1) : setModalOpen(false)}>{step === 2 ? '上一步' : '取消'}</button><button className="primary-button" type="submit" form="project-form" disabled={uploadingGuideline}>{uploadingGuideline ? '文件上传中...' : step === 1 ? '下一步' : editingId ? '保存' : '创建项目'}</button></>}>

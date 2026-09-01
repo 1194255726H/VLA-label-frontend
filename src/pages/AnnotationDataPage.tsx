@@ -13,7 +13,6 @@ const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '�
 const videoStatusTabs = [{ value: '', label: '全部' }, { value: 'pending', label: '待处理' }, { value: 'in_progress', label: '处理中' }, { value: 'describing', label: '模型描述中' }, { value: 'cutting', label: '切割中' }, { value: 'completed', label: '已完成' }, { value: 'cancelled', label: '已作废' }, { value: 'abnormal', label: '异常' }]
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
 const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
-const pageSize = 20
 const initialVideoStatusTotals = Object.fromEntries(videoStatusTabs.map((item) => [item.value, 0])) as Record<string, number>
 
 function clockDuration(value: number | null) {
@@ -41,6 +40,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const [createdAtStart, setCreatedAtStart] = useState('')
   const [createdAtEnd, setCreatedAtEnd] = useState('')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState(0)
   const [pages, setPages] = useState(1)
   const [videoStatusTotals, setVideoStatusTotals] = useState(initialVideoStatusTotals)
@@ -54,7 +54,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       setItems(result.items); setTotal(result.total); setPages(Math.max(1, result.pages))
     } catch (reason) { setError(reason instanceof Error ? reason.message : '项目视频加载失败') }
     finally { setLoading(false) }
-  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, projectId, videoStatus])
+  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, projectId, videoStatus])
 
   const loadVideoStatusTotals = useCallback(async () => {
     try {
@@ -70,7 +70,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       setItems(result.items); setTotal(result.total); setPages(Math.max(1, result.pages)); setError('')
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '项目视频加载失败') }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, projectId, videoStatus])
+  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, projectId, videoStatus])
   useEffect(() => {
     let active = true
     async function loadTotals() { await Promise.resolve(); if (active) await loadVideoStatusTotals() }
@@ -110,6 +110,6 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       </tr>)}
       {!loading && !items.length && <tr><td colSpan={18}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
     </tbody></table></div>
-    <footer className="management-footer"><span>共 {total} 条</span><div className="pagination-with-size"><PaginationJump page={page} pages={pages} disabled={loading} onChange={(next) => { setLoading(true); setPage(next) }} /><span>{pageSize}条/页</span></div></footer>
+    <footer className="management-footer"><span>共 {total} 条</span><PaginationJump page={page} pages={pages} disabled={loading} onChange={(next) => { setLoading(true); setPage(next) }} pageSize={pageSize} onPageSizeChange={(size) => { setLoading(true); setPageSize(size); setPage(1) }} /></footer>
   </section></section>{fleetOpen && <FleetSyncModal projectId={projectId} projectName={projectName} onClose={() => setFleetOpen(false)} onSynced={fleetSynced} />}{toast && <div className="toast">{toast}</div>}</AppShell>
 }

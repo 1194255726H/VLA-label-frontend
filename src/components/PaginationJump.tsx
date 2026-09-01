@@ -6,6 +6,8 @@ interface PaginationJumpProps {
   pages: number
   disabled?: boolean
   onChange: (page: number) => void
+  pageSize?: number
+  onPageSizeChange?: (pageSize: number) => void
 }
 
 type PaginationItem = number | 'ellipsis'
@@ -17,7 +19,7 @@ function paginationItems(page: number, pages: number): PaginationItem[] {
   return [1, 'ellipsis', page - 1, page, page + 1, 'ellipsis', pages]
 }
 
-export function PaginationJump({ page, pages, disabled = false, onChange }: PaginationJumpProps) {
+export function PaginationJump({ page, pages, disabled = false, onChange, pageSize, onPageSizeChange }: PaginationJumpProps) {
   const maxPage = Math.max(1, pages)
   const currentPage = Math.min(maxPage, Math.max(1, page))
 
@@ -30,11 +32,11 @@ export function PaginationJump({ page, pages, disabled = false, onChange }: Pagi
     onChange(next)
   }
 
-  return <nav className="pagination pagination-numbers" aria-label="分页">
+  return <div className="pagination-control"><nav className="pagination pagination-numbers" aria-label="分页">
     <button type="button" disabled={disabled || currentPage <= 1} onClick={() => move(currentPage - 1)} aria-label="上一页"><ChevronLeft size={16} /></button>
     {paginationItems(currentPage, maxPage).map((item, index) => item === 'ellipsis'
       ? <span className="pagination-ellipsis" aria-hidden="true" key={`ellipsis-${index}`}>…</span>
       : <button type="button" className={item === currentPage ? 'active' : ''} aria-current={item === currentPage ? 'page' : undefined} disabled={disabled} onClick={() => move(item)} key={item}>{item}</button>)}
     <button type="button" disabled={disabled || currentPage >= maxPage} onClick={() => move(currentPage + 1)} aria-label="下一页"><ChevronRight size={16} /></button>
-  </nav>
+  </nav>{pageSize && onPageSizeChange && <select className="page-size-select" aria-label="每页条数" value={pageSize} disabled={disabled} onChange={(event) => onPageSizeChange(Number(event.target.value))}>{[10, 20, 50, 100].map((size) => <option value={size} key={size}>{size}条/页</option>)}</select>}</div>
 }
