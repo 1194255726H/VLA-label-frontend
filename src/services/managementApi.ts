@@ -1,11 +1,11 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
-import type { FleetSyncResult, FleetVideoGroup, FleetVideoPreviewPage, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
+import type { FleetSyncResult, FleetVideoGroup, FleetVideoPreviewPage, ImportResult, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
 import { request } from './api'
 
 let projects = mockManagedProjects.map((item) => ({ ...item, teams: [...item.teams], labelLibraryIds: [...item.labelLibraryIds] }))
 let libraries = mockLabelLibraries.map((item) => ({ ...item, tags: item.tags.map((tag) => ({ ...tag })) }))
-let operationLibraries: OperationObjectLibrary[] = [{ id: '1', name: '常用操作对象库', desc: '标注常用对象', createdAt: '2026-08-25 06:15' }]
+let operationLibraries: OperationObjectLibrary[] = [{ id: '1', name: '常用操作对象库', desc: '标注常用对象', createdAt: '2026-08-25 06:15', objectCount: 1, pendingApprovalCount: 0 }]
 let operationObjects: OperationObject[] = [{ id: '1', libraryId: '1', name: '水杯', alias: '杯子', attribute: '容器', approved: true, createdAt: '2026-08-25 06:16' }]
 let teams = mockTeams.map((item) => ({ ...item }))
 let members = mockMembers.map((item) => ({ ...item, roles: [...item.roles], projects: [...item.projects] }))
@@ -31,6 +31,35 @@ function itemsOf(value: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(value)) return value as Array<Record<string, unknown>>
   const valueRecord = record(value)
   return Array.isArray(valueRecord.items) ? valueRecord.items as Array<Record<string, unknown>> : []
+}
+
+function triggerJsonDownload(content: BlobPart, filename: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: 'application/json;charset=utf-8' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function downloadTemplate(path: string, fallbackFilename: string, mockPayload: Record<string, unknown>) {
+  if (runtimeConfig.apiMode === 'mock') {
+    await delay()
+    triggerJsonDownload(JSON.stringify(mockPayload, null, 2), fallbackFilename)
+    return
+  }
+  const response = await fetch(`${runtimeConfig.apiBaseUrl}${path}`, { credentials: 'include', headers: { Accept: 'application/json' } })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>
+    throw new Error(String(payload.message || `模板下载失败（${response.status}）`))
+  }
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  const plainFilename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+  const filename = encodedFilename ? decodeURIComponent(encodedFilename) : plainFilename || fallbackFilename
+  triggerJsonDownload(await response.blob(), filename)
 }
 
 function normalizeProject(item: Record<string, unknown>): ManagedProject {
@@ -188,6 +217,25 @@ async function loadLibrary(item: Record<string, unknown>) {
 }
 
 export const labelApi = {
+  async downloadImportTemplate() {
+    return downloadTemplate('/api/data/label-import-template', 'label-import-template.json', {
+      _说明: ['name：标签名称（必填）', 'color：六位十六进制颜色（必填）', 'applies_to：goal/action（必填）'],
+      labels: [{ name: '拿起杯子', color: '#31AC39', applies_to: 'action', enabled: true, sort_order: 1 }, { name: '车辆行驶', color: '#56CCF2', applies_to: 'goal' }],
+    })
+  },
+  async importLabels(libraryId: string, payload: Record<string, unknown>): Promise<ImportResult> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const rawLabels = Array.isArray(payload.labels) ? payload.labels.map(record) : []
+      const library = libraries.find((item) => item.id === libraryId)
+      if (!library) throw new Error('标签库不存在')
+      const created = rawLabels.map((item, index) => ({ id: `${Date.now()}-${index}`, name: String(item.name || ''), code: String(item.code || `LBL-${Date.now().toString(36).toUpperCase()}-${index + 1}`), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as LabelItem['appliesTo'], enabled: item.enabled !== false, createdAt: new Date().toISOString() }))
+      libraries = libraries.map((item) => item.id === libraryId ? { ...item, tags: [...item.tags, ...created], count: item.count + created.filter((label) => label.enabled).length } : item)
+      return { importedCount: created.length }
+    }
+    const result = await request<{ imported_count?: number }>(`/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels/import`, { method: 'POST', body: JSON.stringify(payload) })
+    return { importedCount: num(result.imported_count) }
+  },
   async listSummaries(): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(libraries.map((library) => ({ ...library, tags: [] }))) }
     const result = await request<{ items: Array<Record<string, unknown>> }>('/api/data/label-libraries')
@@ -235,7 +283,7 @@ export const labelApi = {
 }
 
 function normalizeOperationLibrary(item: Record<string, unknown>): OperationObjectLibrary {
-  return { id: String(item.id || ''), name: String(item.name || ''), desc: String(item.description || ''), createdAt: String(item.created_at || '') }
+  return { id: String(item.id || ''), name: String(item.name || ''), desc: String(item.description || ''), createdAt: String(item.created_at || ''), objectCount: num(item.object_count ?? item.objectCount), pendingApprovalCount: num(item.pending_approval_count ?? item.pendingApprovalCount) }
 }
 
 function normalizeOperationObject(item: Record<string, unknown>): OperationObject {
@@ -243,6 +291,24 @@ function normalizeOperationObject(item: Record<string, unknown>): OperationObjec
 }
 
 export const operationObjectApi = {
+  async downloadImportTemplate() {
+    return downloadTemplate('/api/data/operation-object-import-template', 'operation-object-import-template.json', {
+      _说明: ['name：操作对象名称（必填）', 'alias：别名（可选）', 'attribute：属性说明（可选）', 'approved：是否审核通过（可选）'],
+      objects: [{ name: '杯子', alias: '水杯', attribute: '易碎陶瓷', approved: true }, { name: '勺子', alias: '汤勺' }],
+    })
+  },
+  async importObjects(libraryId: string, payload: Record<string, unknown>): Promise<ImportResult> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const rawObjects = Array.isArray(payload.objects) ? payload.objects.map(record) : []
+      const created = rawObjects.map((item, index) => ({ id: `${Date.now()}-${index}`, libraryId, name: String(item.name || ''), alias: String(item.alias || ''), attribute: String(item.attribute || ''), approved: item.approved === true, createdAt: new Date().toISOString() }))
+      operationObjects = [...operationObjects, ...created]
+      operationLibraries = operationLibraries.map((library) => library.id === libraryId ? { ...library, objectCount: library.objectCount + created.length, pendingApprovalCount: library.pendingApprovalCount + created.filter((item) => !item.approved).length } : library)
+      return { importedCount: created.length }
+    }
+    const result = await request<{ imported_count?: number }>(`/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects/import`, { method: 'POST', body: JSON.stringify(payload) })
+    return { importedCount: num(result.imported_count) }
+  },
   async listLibraries(query: { keyword?: string; page?: number; pageSize?: number } = {}): Promise<OperationObjectPage<OperationObjectLibrary>> {
     const page = query.page || 1; const pageSize = query.pageSize || 10
     if (runtimeConfig.apiMode === 'mock') { await delay(); const matched = operationLibraries.filter((item) => !query.keyword || `${item.name}${item.desc}`.includes(query.keyword)); return clone({ items: matched.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: matched.length }) }
@@ -251,7 +317,7 @@ export const operationObjectApi = {
     return { items: (result.items || []).map(normalizeOperationLibrary), page: result.page || page, pageSize: result.page_size || pageSize, total: result.total ?? result.items?.length ?? 0 }
   },
   async saveLibrary(payload: { id?: string; name: string; desc: string }) {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); operationLibraries = payload.id ? operationLibraries.map((item) => item.id === payload.id ? { ...item, name: payload.name, desc: payload.desc } : item) : [{ id: String(Date.now()), name: payload.name, desc: payload.desc, createdAt: new Date().toISOString() }, ...operationLibraries]; return }
+    if (runtimeConfig.apiMode === 'mock') { await delay(); operationLibraries = payload.id ? operationLibraries.map((item) => item.id === payload.id ? { ...item, name: payload.name, desc: payload.desc } : item) : [{ id: String(Date.now()), name: payload.name, desc: payload.desc, createdAt: new Date().toISOString(), objectCount: 0, pendingApprovalCount: 0 }, ...operationLibraries]; return }
     await request(payload.id ? `/api/data/operation-libraries/${encodeURIComponent(payload.id)}` : '/api/data/operation-libraries', { method: payload.id ? 'PATCH' : 'POST', body: JSON.stringify({ name: payload.name, description: payload.desc }) })
   },
   async deleteLibrary(id: string) {
@@ -266,12 +332,12 @@ export const operationObjectApi = {
     return { items: (result.items || []).map(normalizeOperationObject), page: result.page || page, pageSize: result.page_size || pageSize, total: result.total ?? result.items?.length ?? 0 }
   },
   async saveObject(libraryId: string, payload: { id?: string; name: string; alias: string; attribute: string; approved: boolean }) {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); operationObjects = payload.id ? operationObjects.map((item) => item.id === payload.id ? { ...item, ...payload } : item) : [...operationObjects, { ...payload, id: String(Date.now()), libraryId, createdAt: new Date().toISOString() }]; return }
+    if (runtimeConfig.apiMode === 'mock') { await delay(); operationObjects = payload.id ? operationObjects.map((item) => item.id === payload.id ? { ...item, ...payload } : item) : [...operationObjects, { ...payload, id: String(Date.now()), libraryId, createdAt: new Date().toISOString() }]; const related = operationObjects.filter((item) => item.libraryId === libraryId); operationLibraries = operationLibraries.map((library) => library.id === libraryId ? { ...library, objectCount: related.length, pendingApprovalCount: related.filter((item) => !item.approved).length } : library); return }
     const path = payload.id ? `/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects/${encodeURIComponent(payload.id)}` : `/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects`
     await request(path, { method: payload.id ? 'PATCH' : 'POST', body: JSON.stringify({ name: payload.name, alias: payload.alias, attribute: payload.attribute, approved: payload.approved }) })
   },
   async deleteObject(libraryId: string, objectId: string) {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); operationObjects = operationObjects.filter((item) => item.id !== objectId); return }
+    if (runtimeConfig.apiMode === 'mock') { await delay(); operationObjects = operationObjects.filter((item) => item.id !== objectId); const related = operationObjects.filter((item) => item.libraryId === libraryId); operationLibraries = operationLibraries.map((library) => library.id === libraryId ? { ...library, objectCount: related.length, pendingApprovalCount: related.filter((item) => !item.approved).length } : library); return }
     await request(`/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects/${encodeURIComponent(objectId)}`, { method: 'DELETE' })
   },
   async listApprovedObjects(): Promise<Array<OperationObject & { libraryName: string }>> {

@@ -1,6 +1,7 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockClaimPool, mockProjects, mockTasks, mockUser } from '../mocks/data'
 import type {
+  ImportValidationError,
   PasswordResetChallenge,
   Project,
   SessionResponse,
@@ -62,9 +63,15 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const businessFailed = payload?.success === false || (typeof payload?.code === 'string' && payload.code !== 'ok')
   if (!response.ok || businessFailed) {
     const validationMessages = collectErrorMessages(payload?.errors)
-    const error = new Error(validationMessages.length ? validationMessages.join('；') : payload?.message || `请求失败（${response.status}）`) as Error & { code?: string; status?: number }
+    const error = new Error(validationMessages.length ? validationMessages.join('；') : payload?.message || `请求失败（${response.status}）`) as Error & { code?: string; status?: number; errors?: ImportValidationError[] }
     error.code = payload?.code
     error.status = response.status
+    if (Array.isArray(payload?.errors)) {
+      error.errors = payload.errors.map((item: unknown, index: number) => {
+        const detail = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+        return { index: Number.isFinite(Number(detail.index)) ? Number(detail.index) : index, code: String(detail.code || ''), message: String(detail.message || '') }
+      })
+    }
     throw error
   }
   return (payload?.success === true || payload?.code === 'ok' ? payload.data : payload) as T
@@ -186,6 +193,18 @@ function optionalString(value: unknown) {
   return value === null || value === undefined || value === '' ? undefined : String(value)
 }
 
+function normalizeScene(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined
+  const item = value as Record<string, unknown>
+  return { id: String(item.id || ''), fleetSceneId: String(item.fleet_scene_id || ''), name: String(item.name || ''), level: String(item.level || '') }
+}
+
+function normalizeSupplier(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined
+  const item = value as Record<string, unknown>
+  return { id: String(item.id || ''), fleetSupplierId: String(item.fleet_supplier_id || ''), name: String(item.name || ''), code: String(item.code || ''), type: String(item.type || '') }
+}
+
 function normalizeVideo(item: Record<string, unknown>): VideoListItem {
   return {
     id: String(item.id || ''),
@@ -215,6 +234,9 @@ function normalizeVideo(item: Record<string, unknown>): VideoListItem {
     videoMeta: item.video_meta && typeof item.video_meta === 'object' ? item.video_meta as Record<string, unknown> : {},
     createdAt: String(item.created_at || ''),
     updatedAt: String(item.updated_at || ''),
+    scene1: normalizeScene(item.scene1),
+    scene2: normalizeScene(item.scene2),
+    supplier: normalizeSupplier(item.supplier),
     submittedNode: optionalString(item.submitted_node),
     submittedById: optionalString(item.submitted_by_id),
     submittedAt: optionalString(item.submitted_at),

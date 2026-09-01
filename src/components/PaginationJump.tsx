@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { useRef } from 'react'
+import { useEffect } from 'react'
 
 interface PaginationJumpProps {
   page: number
@@ -8,31 +8,33 @@ interface PaginationJumpProps {
   onChange: (page: number) => void
 }
 
-export function PaginationJump({ page, pages, disabled = false, onChange }: PaginationJumpProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const maxPage = Math.max(1, pages)
+type PaginationItem = number | 'ellipsis'
 
-  function jump() {
-    const requested = Number.parseInt(inputRef.current?.value || '', 10)
-    if (!Number.isFinite(requested)) {
-      if (inputRef.current) inputRef.current.value = String(page)
-      return
-    }
-    const next = Math.min(maxPage, Math.max(1, requested))
-    if (inputRef.current) inputRef.current.value = String(next)
-    if (next !== page) onChange(next)
-  }
+function paginationItems(page: number, pages: number): PaginationItem[] {
+  if (pages <= 7) return Array.from({ length: pages }, (_, index) => index + 1)
+  if (page <= 4) return [1, 2, 3, 4, 5, 'ellipsis', pages]
+  if (page >= pages - 3) return [1, 'ellipsis', pages - 4, pages - 3, pages - 2, pages - 1, pages]
+  return [1, 'ellipsis', page - 1, page, page + 1, 'ellipsis', pages]
+}
+
+export function PaginationJump({ page, pages, disabled = false, onChange }: PaginationJumpProps) {
+  const maxPage = Math.max(1, pages)
+  const currentPage = Math.min(maxPage, Math.max(1, page))
+
+  useEffect(() => {
+    if (page !== currentPage) onChange(currentPage)
+  }, [currentPage, onChange, page])
 
   function move(next: number) {
-    if (next < 1 || next > maxPage) return
+    if (disabled || next < 1 || next > maxPage || next === currentPage) return
     onChange(next)
   }
 
-  return <div className="pagination pagination-jump">
-    <button type="button" disabled={disabled || page <= 1} onClick={() => move(page - 1)} aria-label="上一页"><ChevronLeft size={16} /></button>
-    <input key={page} ref={inputRef} defaultValue={page} inputMode="numeric" aria-label="跳转页码" disabled={disabled} onChange={(event) => { event.currentTarget.value = event.currentTarget.value.replace(/\D/g, '') }} onKeyDown={(event) => { if (event.key === 'Enter') jump() }} />
-    <span>/ {maxPage}</span>
-    <button type="button" className="pagination-go" disabled={disabled} onClick={jump}>跳转</button>
-    <button type="button" disabled={disabled || page >= maxPage} onClick={() => move(page + 1)} aria-label="下一页"><ChevronRight size={16} /></button>
-  </div>
+  return <nav className="pagination pagination-numbers" aria-label="分页">
+    <button type="button" disabled={disabled || currentPage <= 1} onClick={() => move(currentPage - 1)} aria-label="上一页"><ChevronLeft size={16} /></button>
+    {paginationItems(currentPage, maxPage).map((item, index) => item === 'ellipsis'
+      ? <span className="pagination-ellipsis" aria-hidden="true" key={`ellipsis-${index}`}>…</span>
+      : <button type="button" className={item === currentPage ? 'active' : ''} aria-current={item === currentPage ? 'page' : undefined} disabled={disabled} onClick={() => move(item)} key={item}>{item}</button>)}
+    <button type="button" disabled={disabled || currentPage >= maxPage} onClick={() => move(currentPage + 1)} aria-label="下一页"><ChevronRight size={16} /></button>
+  </nav>
 }

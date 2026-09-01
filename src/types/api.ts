@@ -55,6 +55,21 @@ export interface WorkbenchTask {
 
 export type StorageStatus = 'available' | 'missing' | 'unchecked'
 
+export interface VideoScene {
+  id: string
+  fleetSceneId: string
+  name: string
+  level: string
+}
+
+export interface VideoSupplier {
+  id: string
+  fleetSupplierId: string
+  name: string
+  code: string
+  type: string
+}
+
 export interface VideoListItem {
   id: string
   projectId: string
@@ -83,6 +98,9 @@ export interface VideoListItem {
   videoMeta: Record<string, unknown>
   createdAt: string
   updatedAt: string
+  scene1?: VideoScene
+  scene2?: VideoScene
+  supplier?: VideoSupplier
   submittedNode?: string
   submittedById?: string
   submittedAt?: string
@@ -296,6 +314,18 @@ export interface OperationObjectLibrary {
   name: string
   desc: string
   createdAt: string
+  objectCount: number
+  pendingApprovalCount: number
+}
+
+export interface ImportValidationError {
+  index: number
+  code: string
+  message: string
+}
+
+export interface ImportResult {
+  importedCount: number
 }
 
 export interface OperationObject {

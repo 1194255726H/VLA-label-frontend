@@ -99,15 +99,16 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       <button className="primary-button compact" type="button" onClick={applySearch}>查询</button><button className="secondary-button compact" type="button" onClick={resetFilters}>重置</button>
     </div>
     {error && <div className="error-banner"><CircleAlert size={18} /><span>{error}</span><button type="button" onClick={loadVideos}>重新加载</button></div>}
-    <div className="management-table-wrap"><table className="management-table annotation-data-table project-video-table"><thead><tr><th>视频名称</th><th>状态</th><th>作业节点</th><th>流转类型</th><th>原视频时长</th><th>切片覆盖时长</th><th>有效片段时长</th><th>无效片段时长</th><th>未覆盖时长</th><th>单次任务数</th><th>小目标数</th><th>处理人</th><th>创建时间</th><th>操作</th></tr></thead><tbody>
-      {loading ? <tr><td colSpan={14}><div className="management-empty">正在加载项目视频...</div></td></tr> : items.map((video) => <tr key={video.id}>
+    <div className="management-table-wrap"><table className="management-table annotation-data-table project-video-table"><thead><tr><th>视频名称</th><th>一级场景</th><th>二级场景</th><th>供应商</th><th>状态</th><th>作业节点</th><th>流转类型</th><th>原视频时长</th><th>切片覆盖时长</th><th>有效片段时长</th><th>无效片段时长</th><th>未覆盖时长</th><th>单次任务数</th><th>小目标数</th><th>处理人</th><th>创建时间</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
+      {loading ? <tr><td colSpan={18}><div className="management-empty">正在加载项目视频...</div></td></tr> : items.map((video) => <tr key={video.id}>
         <td><div className="entity-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `视频记录 #${video.id}`}</small></div></td>
+        <td title={video.scene1?.name}>{video.scene1?.name || '-'}</td><td title={video.scene2?.name}>{video.scene2?.name || '-'}</td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
         <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
         <td><span className="node-tag blue">{nodeLabels[video.currentNode]}</span></td><td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
-        <td>{clockDuration(video.duration)}</td><td>{milliseconds(video.selectedDurationMs)}</td><td>{milliseconds(video.effectiveDurationMs)}</td><td>{milliseconds(video.invalidDurationMs)}</td><td>{milliseconds(video.unselectedDurationMs)}</td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td>
+        <td>{clockDuration(video.duration)}</td><td>{milliseconds(video.selectedDurationMs)}</td><td>{milliseconds(video.effectiveDurationMs)}</td><td>{milliseconds(video.invalidDurationMs)}</td><td>{milliseconds(video.unselectedDurationMs)}</td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td><td>{formatDateTime(video.updatedAt)}</td>
         <td><div className="row-actions"><button type="button" disabled={!video.id} onClick={() => preview(video)}><Eye size={15} />预览</button></div></td>
       </tr>)}
-      {!loading && !items.length && <tr><td colSpan={14}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
+      {!loading && !items.length && <tr><td colSpan={18}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
     </tbody></table></div>
     <footer className="management-footer"><span>共 {total} 条</span><div className="pagination-with-size"><PaginationJump page={page} pages={pages} disabled={loading} onChange={(next) => { setLoading(true); setPage(next) }} /><span>{pageSize}条/页</span></div></footer>
   </section></section>{fleetOpen && <FleetSyncModal projectId={projectId} projectName={projectName} onClose={() => setFleetOpen(false)} onSynced={fleetSynced} />}{toast && <div className="toast">{toast}</div>}</AppShell>
