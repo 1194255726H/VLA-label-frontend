@@ -44,13 +44,20 @@ function triggerJsonDownload(content: BlobPart, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-async function downloadTemplate(path: string, fallbackFilename: string, mockPayload: Record<string, unknown>) {
+async function downloadTemplate(path: string, fallbackFilename: string, mockPayload: Record<string, unknown>, init?: RequestInit) {
   if (runtimeConfig.apiMode === 'mock') {
     await delay()
     triggerJsonDownload(JSON.stringify(mockPayload, null, 2), fallbackFilename)
     return
   }
-  const response = await fetch(`${runtimeConfig.apiBaseUrl}${path}`, { credentials: 'include', headers: { Accept: 'application/json' } })
+  const headers = new Headers(init?.headers)
+  headers.set('Accept', 'application/json')
+  if (init?.body) headers.set('Content-Type', 'application/json')
+  try {
+    const csrfToken = String((JSON.parse(sessionStorage.getItem('ilabel.session') || '{}') as Record<string, unknown>).csrfToken || '')
+    if (csrfToken) headers.set('X-CSRF-Token', csrfToken)
+  } catch { /* Session parsing failures are handled by the API response. */ }
+  const response = await fetch(`${runtimeConfig.apiBaseUrl}${path}`, { ...init, credentials: 'include', headers })
   if (!response.ok) {
     const payload = await response.json().catch(() => ({})) as Record<string, unknown>
     throw new Error(String(payload.message || `模板下载失败（${response.status}）`))
@@ -236,6 +243,28 @@ export const labelApi = {
     const result = await request<{ imported_count?: number }>(`/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels/import`, { method: 'POST', body: JSON.stringify(payload) })
     return { importedCount: num(result.imported_count) }
   },
+  async exportLabels(libraryId: string, labelIds: string[] = []) {
+    const library = libraries.find((item) => item.id === libraryId)
+    const selectedIds = new Set(labelIds)
+    const labels = (library?.tags || []).filter((item) => !selectedIds.size || selectedIds.has(item.id)).map((item) => ({ name: item.name, color: item.color, applies_to: item.appliesTo, enabled: item.enabled, sort_order: 0, ...(item.code ? { code: item.code } : {}) }))
+    const body = labelIds.length ? { label_ids: labelIds.map(Number).filter(Number.isFinite) } : {}
+    return downloadTemplate(`/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels/export`, `label-export-${libraryId}-${Date.now()}.json`, { _说明: ['name：标签名称（必填）', 'color：六位十六进制颜色（必填）', 'applies_to：goal/action（必填）'], labels }, { method: 'POST', body: JSON.stringify(body) })
+  },
+  async batchDeleteLabels(libraryId: string, labelIds: string[]): Promise<{ deletedCount: number; libraries: LabelLibrary[] }> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const selectedIds = new Set(labelIds)
+      let deletedCount = 0
+      libraries = libraries.map((library) => {
+        if (library.id !== libraryId) return library
+        const tags = library.tags.filter((tag) => { if (!selectedIds.has(tag.id)) return true; deletedCount += 1; return false })
+        return { ...library, tags, count: tags.filter((tag) => tag.enabled).length }
+      })
+      return { deletedCount, libraries: clone(libraries) }
+    }
+    const result = await request<{ deleted_count?: number }>(`/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels/batch-delete`, { method: 'POST', body: JSON.stringify({ label_ids: labelIds.map(Number).filter(Number.isFinite) }) })
+    return { deletedCount: num(result.deleted_count), libraries: await this.list() }
+  },
   async listSummaries(): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(libraries.map((library) => ({ ...library, tags: [] }))) }
     const result = await request<{ items: Array<Record<string, unknown>> }>('/api/data/label-libraries')
@@ -308,6 +337,25 @@ export const operationObjectApi = {
     }
     const result = await request<{ imported_count?: number }>(`/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects/import`, { method: 'POST', body: JSON.stringify(payload) })
     return { importedCount: num(result.imported_count) }
+  },
+  async exportObjects(libraryId: string, objectIds: string[] = []) {
+    const selectedIds = new Set(objectIds)
+    const objects = operationObjects.filter((item) => item.libraryId === libraryId && (!selectedIds.size || selectedIds.has(item.id))).map((item) => ({ name: item.name, alias: item.alias, attribute: item.attribute, approved: item.approved }))
+    const body = objectIds.length ? { object_ids: objectIds.map(Number).filter(Number.isFinite) } : {}
+    return downloadTemplate(`/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects/export`, `operation-object-export-${libraryId}-${Date.now()}.json`, { _说明: ['name：操作对象名称（必填）', 'alias：别名（可选）', 'attribute：属性说明（可选）', 'approved：是否审核通过（可选）'], objects }, { method: 'POST', body: JSON.stringify(body) })
+  },
+  async batchDeleteObjects(libraryId: string, objectIds: string[]): Promise<number> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const selectedIds = new Set(objectIds)
+      const before = operationObjects.length
+      operationObjects = operationObjects.filter((item) => item.libraryId !== libraryId || !selectedIds.has(item.id))
+      const related = operationObjects.filter((item) => item.libraryId === libraryId)
+      operationLibraries = operationLibraries.map((library) => library.id === libraryId ? { ...library, objectCount: related.length, pendingApprovalCount: related.filter((item) => !item.approved).length } : library)
+      return before - operationObjects.length
+    }
+    const result = await request<{ deleted_count?: number }>(`/api/data/operation-libraries/${encodeURIComponent(libraryId)}/objects/batch-delete`, { method: 'POST', body: JSON.stringify({ object_ids: objectIds.map(Number).filter(Number.isFinite) }) })
+    return num(result.deleted_count)
   },
   async listLibraries(query: { keyword?: string; page?: number; pageSize?: number } = {}): Promise<OperationObjectPage<OperationObjectLibrary>> {
     const page = query.page || 1; const pageSize = query.pageSize || 10
