@@ -13,7 +13,7 @@ npm run dev
 
 ## 连接真实 API
 
-开发服务器会将同源 `/api` 请求代理到 `http://120.55.50.203:18080`，避免浏览器跨域和 session cookie 域不一致。可直接执行：
+开发服务器会将同源 `/api` 请求代理到 `http://47.108.78.62:18081`，避免浏览器跨域和 session cookie 域不一致。可直接执行：
 
 ```bash
 npm run dev:real
@@ -24,7 +24,7 @@ npm run dev:real
 ```dotenv
 VITE_API_MODE=real
 VITE_API_BASE_URL=
-VITE_PROXY_TARGET=http://120.55.50.203:18080
+VITE_PROXY_TARGET=http://47.108.78.62:18081
 ```
 
 页面通过 `src/services` 下的请求模块访问后端。Mock 启动脚本和环境入口已关闭；仓库内保留的 mock 数据只作为历史开发夹具，不会被当前环境加载。

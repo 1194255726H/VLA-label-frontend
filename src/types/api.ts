@@ -473,6 +473,10 @@ export interface AnnotationResult {
 }
 
 export interface AnnotationWorkspace {
+  scene1?: VideoScene
+  scene2?: VideoScene
+  supplier?: VideoSupplier
+  currentAssigneeId?: string
   videoId: string
   videoCode: string
   dataId: string

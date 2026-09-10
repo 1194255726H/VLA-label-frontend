@@ -2,7 +2,7 @@ import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockTasks } from '../mocks/data'
 import type { AnnotationKeyFrame, AnnotationResult, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
 import { createClientId } from '../utils/id'
-import { request } from './api'
+import { request, normalizeScene, normalizeSupplier } from './api'
 
 const mockResults = new Map<string, AnnotationResult>()
 const mockRevisions = new Map<string, number>()
@@ -201,6 +201,8 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
     usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: goals.length + 1, nextActionSequenceByGoal: Object.fromEntries(goals.map((goal) => [goal.id, actions.filter((action) => action.parentId === goal.id).length + 1])), nextInvalidSequence: 1,
   }
   return {
+    scene1: normalizeScene(selectedVideo.scene1), scene2: normalizeScene(selectedVideo.scene2), supplier: normalizeSupplier(selectedVideo.supplier),
+    currentAssigneeId: selectedVideo.current_assignee_id == null ? undefined : String(selectedVideo.current_assignee_id),
     videoId,
     videoCode: String(selectedVideo.external_video_id || selectedVideo.id || videoId), dataId: String(selectedVideo.external_video_id || selectedVideo.id || videoId), dataName: String(selectedVideo.filename || 'VLA 视频数据'),
     projectId: String(selectedVideo.project_id || project.id || projectId), projectName: String(project.name || ''), node,
@@ -213,6 +215,16 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
 }
 
 export const annotationApi = {
+  async sceneOptions(projectId: string, scene1Id: string) {
+    const response = await request<{ items: Array<{ id: number; scenes2: Array<{ id: number; name: string; level: string; parent_id: number }> }> }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/scenes`)
+    return (response.items.find((item) => String(item.id) === scene1Id)?.scenes2 || [])
+      .filter((item) => item.level === '2' && String(item.parent_id) === scene1Id)
+  },
+  async updateScene2(projectId: string, videoId: string, scene2Id: number) {
+    const response = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/scene2`, { method: 'PATCH', body: JSON.stringify({ scene2_id: scene2Id }) })
+    if (String(response.video_id) !== videoId) throw new Error('返回的视频信息不匹配，请重试')
+    return { scene1: normalizeScene(response.scene1), scene2: normalizeScene(response.scene2), supplier: normalizeSupplier(response.supplier) }
+  },
   async listVideoComments(projectId: string, videoId: string): Promise<VideoComment[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(mockVideoComments.get(videoContextKey(projectId, videoId)) || []) }
     const response = await request<{ items: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/comments`)
