@@ -142,7 +142,7 @@ export const projectApi = {
       : payload.annotationGuideline?.type === 'file'
         ? { type: 'file', display_name: payload.annotationGuideline.displayName, url: payload.annotationGuideline.url }
         : null
-    const body = { name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : null, delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), operation_library_id: Number(payload.operationLibraryId), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
+    const body = { name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : '', delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), operation_library_id: Number(payload.operationLibraryId), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
     await request(payload.projectId ? `/api/projects/${encodeURIComponent(payload.projectId)}` : '/api/projects/', { method: payload.projectId ? 'PATCH' : 'POST', body: JSON.stringify(body) })
     return this.list()
   },

@@ -127,6 +127,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   const [toast, setToast] = useState('')
   const [teams, setTeams] = useState<Team[]>([])
   const [members, setMembers] = useState<Member[]>([])
+  const projectOwners = members.filter((item) => item.enabled && item.roles.includes('项目经理'))
   const [labelLibraries, setLabelLibraries] = useState<LabelLibrary[]>([])
   const [loadingLabelLibraries, setLoadingLabelLibraries] = useState(false)
   const [operationLibraries, setOperationLibraries] = useState<OperationObjectLibrary[]>([])
@@ -182,7 +183,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('')
     if (editingReadOnly) return
-    if (step === 1) { if (!form.name.trim() || !form.teams.length || !form.owner || !form.deliveryAt) return setError('请完整填写项目名称、团队、负责人和交付时间'); if (form.deliveryAt < localToday()) return setError('交付时间不能早于当前日期'); setStep(2); return }
+    if (step === 1) { if (!form.name.trim() || !form.teams.length) return setError('请完整填写项目名称和团队'); if (editingId && (!form.owner || !form.deliveryAt)) return setError('请完整填写负责人和交付时间'); if (form.deliveryAt && form.deliveryAt < localToday()) return setError('交付时间不能早于当前日期'); setStep(2); return }
     if (!form.completionNode) return setError('请选择任务结束节点')
     if (!form.operationLibraryId) return setError('必须选择操作对象库')
     if (nodeOrder.indexOf(form.modelGenerationNode) > nodeOrder.indexOf(form.completionNode)) return setError('模型生成环节不能晚于任务结束节点')
@@ -194,7 +195,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
     if (form.annotationGuideline?.type === 'file') {
       if (!form.annotationGuideline.displayName.trim() || !form.annotationGuideline.url.trim()) return setError('请先上传标注规则文件')
     }
-    try { setItems(await projectApi.save({ ...form, projectId: editingId })); setModalOpen(false); setToast(editingId ? '项目已更新' : '项目创建成功') } catch (reason) { setError(reason instanceof Error ? reason.message : '项目保存失败') }
+    try { setItems(await projectApi.save({ ...form, projectId: editingId, deliveryAt: form.deliveryAt || '2099-01-01' })); setModalOpen(false); setToast(editingId ? '项目已更新' : '项目创建成功') } catch (reason) { setError(reason instanceof Error ? reason.message : '项目保存失败') }
   }
   async function changeStatus(item: ManagedProject, next: ProjectStatus) {
     if (next === 'archived' && !window.confirm(`确认归档项目“${item.name}”？归档后将不能再编辑。`)) return
@@ -226,7 +227,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
         {editingReadOnly && <p className="project-readonly-notice">当前项目状态仅支持查看；项目处于未启动或已暂停状态时可修改配置。</p>}
         <fieldset className="project-form-fields" disabled={editingReadOnly}>
         <div className="form-steps"><span className="active">1 基本信息</span><i /><span className={step === 2 ? 'active' : ''}>2 项目配置</span></div>
-        {step === 1 ? <div className="modal-form-grid"><label><span>项目名称 <i className="required-mark">*</i></span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="请输入项目名称" /></label><label><span>交付时间 <i className="required-mark">*</i></span><input type="date" min={localToday()} value={form.deliveryAt} onChange={(e) => setForm({ ...form, deliveryAt: e.target.value })} /></label><label><span>所属团队 <i className="required-mark">*</i></span><select value={form.teams[0] || ''} onChange={(e) => setForm({ ...form, teams: e.target.value ? [e.target.value] : [] })}><option value="">请选择团队</option>{teams.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span>项目负责人 <i className="required-mark">*</i></span><select value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })}><option value="">请选择负责人</option>{members.filter((item) => item.enabled && item.roles.includes('项目经理')).map((item) => <option key={item.accountId} value={item.accountId}>{item.name}</option>)}</select></label><label className="wide"><span>项目描述</span><textarea value={form.desc} maxLength={500} onChange={(e) => setForm({ ...form, desc: e.target.value })} placeholder="请输入项目背景和范围" /></label></div> : <div className="modal-form-grid">
+        {step === 1 ? <div className="modal-form-grid"><label><span>项目名称 <i className="required-mark">*</i></span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="请输入项目名称" /></label><label><span>交付时间 {editingId && <i className="required-mark">*</i>}</span><input type="date" min={localToday()} value={form.deliveryAt} onChange={(e) => setForm({ ...form, deliveryAt: e.target.value })} /></label><label><span>所属团队 <i className="required-mark">*</i></span><select value={form.teams[0] || ''} onChange={(e) => setForm({ ...form, teams: e.target.value ? [e.target.value] : [] })}><option value="">请选择团队</option>{teams.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span>项目负责人 {editingId && <i className="required-mark">*</i>}</span><select value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })}><option value="">请选择负责人</option>{projectOwners.map((item) => <option key={item.accountId} value={item.accountId}>{item.name}</option>)}</select></label><label className="wide"><span>项目描述</span><textarea value={form.desc} maxLength={500} onChange={(e) => setForm({ ...form, desc: e.target.value })} placeholder="请输入项目背景和范围" /></label></div> : <div className="modal-form-grid">
           <label><span>任务结束节点 <i className="required-mark">*</i></span><select value={form.completionNode} onChange={(e) => { const completionNode = e.target.value as ProjectPayload['completionNode']; setForm({ ...form, completionNode, modelGenerationNode: nodeOrder.indexOf(form.modelGenerationNode) > nodeOrder.indexOf(completionNode) ? completionNode : form.modelGenerationNode }) }}><option>质检</option><option>审核</option><option>验收</option></select></label>
           <label><span>模型生成环节 <i className="required-mark">*</i></span><select value={form.modelGenerationNode} onChange={(e) => setForm({ ...form, modelGenerationNode: e.target.value as ProjectPayload['modelGenerationNode'] })}>{nodeOrder.filter((node) => nodeOrder.indexOf(node) <= nodeOrder.indexOf(form.completionNode)).map((node) => <option key={node}>{node}</option>)}</select></label>
           <label><span>分配策略</span><select value={form.assignmentStrategy} onChange={(e) => setForm({ ...form, assignmentStrategy: e.target.value as ProjectPayload['assignmentStrategy'] })}><option value="manual_claim">人工领取</option><option value="load_balance">负载均衡</option><option value="average">平均分配</option></select></label>
