@@ -561,7 +561,10 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [scrubbing, setScrubbing] = useState(false)
   const cancelPermissionIdentities = [...session.account.roles, ...session.account.roleLabels]
     .map((value) => value.toLowerCase().replace(/[\s_-]/g, ''))
-  const canCancelVideo = Boolean(session.account.isStaff || session.account.isSuperuser || cancelPermissionIdentities.some((value) => ['admin', 'projectmanager', 'systemadmin', '管理员', '项目经理', '超级管理员'].includes(value)))
+  const hasCancelRolePermission = Boolean(session.account.isStaff || session.account.isSuperuser || cancelPermissionIdentities.some((value) => ['admin', 'projectmanager', 'systemadmin', '管理员', '项目经理', '超级管理员'].includes(value)))
+  const canCancelAtAnnotationStage = Boolean(workspace?.node === 'annotation' && !workspace.readonly)
+  const canCancelVideo = Boolean(hasCancelRolePermission || canCancelAtAnnotationStage)
+  const canEditScenes = Boolean(hasCancelRolePermission || workspace?.currentAssigneeId === String(session.account.id))
   const isVideoLockError = ['video_locked', 'video_heartbeat_failed'].includes(errorCode)
 
   useEffect(() => {
@@ -1402,7 +1405,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><span className="workflow-stage-chip">{nodeLabels[workspace.node]}</span></div><small>{workspace.videoCode} · {workspace.projectName}</small></div>
       <div className="annotation-save-state"><i className={dirty ? 'dirty' : ''} />{saving ? '正在保存' : dirty ? '有未保存修改' : `草稿已保存 · V${revision}`}</div>
       <div className="annotation-header-actions">
-        <VideoSceneEditor key={`${projectId}:${videoId}`} workspace={workspace} canEdit={canCancelVideo || workspace.currentAssigneeId === String(session.account.id)} onUpdated={(scenes) => setWorkspace((current) => current && current.videoId === workspace.videoId ? { ...current, ...scenes } : current)} />
+        <VideoSceneEditor key={`${projectId}:${videoId}`} workspace={workspace} canEdit={canEditScenes} onUpdated={(scenes) => setWorkspace((current) => current && current.videoId === workspace.videoId ? { ...current, ...scenes } : current)} />
         {approvalStage && <button className={`comment-add-button${commentPlacementMode ? ' active' : ''}`} type="button" disabled={!canComment} onClick={() => { setCommentsOpen(false); setCommentPlacementMode((value) => !value) }}><Plus size={17} />添加批注</button>}
         {commentsAvailable &&
           <button className="comment-all-button" type="button" onClick={() => commentsOpen ? setCommentsOpen(false) : openComments()}>全部批注 <b>{videoComments.length}</b></button>
