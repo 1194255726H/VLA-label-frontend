@@ -688,6 +688,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const submitButtonLabel = workspace?.node === 'quality' ? '提交审核' : workspace?.node === 'acceptance' ? '提交验收' : '提交'
   const hardReadonly = Boolean(workspace?.readonly || searchParams.get('readonly') === '1' || submitted || videoLockState !== 'held')
   const readonly = Boolean(hardReadonly || approvalStage)
+  const descriptionEditable = Boolean(!hardReadonly && (workspace?.node === 'annotation' || workspace?.node === 'review'))
   const canComment = Boolean(approvalStage && !hardReadonly)
   const keyFrameNeedsObject = keyFrameForm.type !== 'abnormal'
   const keyFrameNeedsDetail = keyFrameForm.type !== 'contact'
@@ -1393,7 +1394,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     return <div className="segment-inline-editor" onClick={(event) => event.stopPropagation()}>
       {noAction ? <div className="segment-inline-row"><span className="segment-inline-system no-action-label">无标签</span><label className="segment-content"><input disabled value="未执行有效动作" aria-label="无动作片段描述" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span><button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button></div> : <div className="segment-inline-row">
         {workspace!.labelLibraryBound && <label className="label-select"><select disabled={readonly} title={item.labelName || '请选择标签'} className={selectedLabel ? 'has-label-color' : ''} style={selectedLabel ? { '--selected-label-color': selectedLabel.color, '--selected-label-text': contrastTextColor(selectedLabel.color) } as React.CSSProperties : undefined} value={item.labelId || ''} onChange={(event) => { const label = labels.find((candidate) => candidate.id === event.target.value); if (label?.appliesTo === 'both') return; updateSegment(item, { labelId: label?.id, labelCode: label?.code || '', labelName: label?.name, color: label?.color || item.color }) }}><option value="">请选择标签</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label>}
-        <label className="segment-content"><input disabled={readonly} value={item.descriptionZh} maxLength={300} onChange={(event) => updateSegment(item, { descriptionZh: event.target.value })} placeholder="输入片段描述（选填）" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span>
+        <label className="segment-content"><input disabled={!descriptionEditable} value={item.descriptionZh} maxLength={300} onChange={(event) => updateSegment(item, { descriptionZh: event.target.value })} placeholder="输入片段描述（选填）" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span>
         <button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button>
       </div>}
     </div>
