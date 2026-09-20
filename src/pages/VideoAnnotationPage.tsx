@@ -33,6 +33,7 @@ const keyboardShortcuts = [
   { keys: ['Q'], title: '创建普通动作', description: '暂停时悬停轨道按住 Q 取鼠标起点；播放时从播放头取点，移动后松开生成片段' },
   { keys: ['W'], title: '创建无动作', description: '在小目标轨道按住 W 并移动，松开后创建系统灰色无动作片段；无需选择标签或填写描述' },
   { keys: ['E'], title: '标记关键帧', description: '选中普通小目标并定位视频帧后，标记接触、物体变化或异常事件' },
+  { keys: ['S'], title: '分割小目标', description: '选中小目标片段后按 S，以当前播放头位置把该片段分割为前后两段；播放头落在片段首尾帧或片段外时不会分割' },
   { keys: ['X'], title: '标记无效区间', description: '在单次任务轨道未标记的空白位置按住 X，移动后松开并选择无效原因' },
   { keys: ['Backspace', 'Delete'], title: '删除 / 恢复', description: '删除选中的关键帧或标注片段；在单次任务轨道选中无效区间后可删除恢复' },
   { keys: ['Ctrl + Z'], title: '撤销', description: '撤销最近一次时间轴标注操作' },
@@ -949,6 +950,38 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     mutate({ ...result, nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [selectedGoal.id]: sequence + 1 }, actions: [...result.actions, item].sort((a, b) => a.startFrame - b.startFrame) }); setSelectedId(item.id); setSelectedLevel('action')
   }
 
+  function splitSelectedAction() {
+    if (!result) return
+    if (readonly) return setToast(hardReadonly ? '当前为只读状态或未持有视频锁，无法分割片段' : '质检、审核和验收阶段不能修改标注')
+    if (editing) return setToast('请先完成或取消当前拖动后再分割')
+    if (mark) return setToast('正在创建区间，请先松开按键或按 Esc 取消后再分割')
+    if (!selected) return setToast('请先选中一个小目标片段，再按 S 分割')
+    if (selected.type === 'no_action') return setToast('无动作片段不支持分割')
+    if (selected.type !== 'action' || !selected.parentId) return setToast('S 只能分割小目标片段，请先选中小目标')
+    const parentId = selected.parentId
+    const splitFrame = Math.round(currentFrame)
+    if (selected.endFrame - selected.startFrame < 2) return setToast('选中的小目标长度不足 2 帧，无法分割')
+    if (splitFrame < selected.startFrame || splitFrame > selected.endFrame) return setToast(`当前播放头 F${splitFrame} 不在选中的小目标 F${selected.startFrame}-F${selected.endFrame} 范围内`)
+    if (splitFrame <= selected.startFrame || splitFrame >= selected.endFrame) return setToast(`不能在片段首尾分割：请把播放头移动到 F${selected.startFrame + 1} - F${selected.endFrame - 1} 之间`)
+    const siblings = result.actions.filter((item) => item.parentId === parentId)
+    let sequence = result.nextActionSequenceByGoal[parentId] || Math.max(0, ...siblings.map((item) => item.sequence)) + 1
+    let nextId = `${parentId}-A${String(sequence).padStart(3, '0')}`
+    while (result.actions.some((item) => item.id === nextId)) { sequence += 1; nextId = `${parentId}-A${String(sequence).padStart(3, '0')}` }
+    const keyFrames = selected.keyFrames || []
+    const left: AnnotationSegment = { ...selected, endFrame: splitFrame, keyFrames: keyFrames.filter((keyFrame) => keyFrame.frame < splitFrame) }
+    const right: AnnotationSegment = { ...selected, id: nextId, code: nextId, sequence, startFrame: splitFrame, keyFrames: keyFrames.filter((keyFrame) => keyFrame.frame >= splitFrame) }
+    mutate({
+      ...result,
+      nextActionSequenceByGoal: { ...result.nextActionSequenceByGoal, [parentId]: sequence + 1 },
+      actions: result.actions.flatMap((item) => item.id === selected.id ? [left, right] : [item]),
+    })
+    videoRef.current?.pause()
+    setActiveGoalId(parentId)
+    setSelectedId(left.id)
+    setSelectedLevel('action')
+    setToast(`已在 F${splitFrame} 分割为两段：F${left.startFrame}-F${left.endFrame}、F${right.startFrame}-F${right.endFrame}`)
+  }
+
   function confirmInvalidRange() {
     if (!result || !pendingInvalidRange || !invalidReason) return
     const reason = invalidReason === '其他' ? `其他: ${invalidReasonOther.trim()}` : invalidReason
@@ -1321,6 +1354,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'e') {
         event.preventDefault()
         if (!readonly) void openKeyFrame()
+        return
+      }
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        if (document.querySelector('.modal-backdrop')) return
+        splitSelectedAction()
         return
       }
       const pointerFrame = !playing && hoverPoint ? hoverPoint.frame : currentFrame

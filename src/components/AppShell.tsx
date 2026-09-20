@@ -63,7 +63,7 @@ export function AppShell({ user, children }: Props) {
       <header className="topbar">
         <div className="topbar-left">
           <button className="icon-button" type="button" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? '展开菜单' : '收起菜单'}><Menu size={20} /></button>
-          <span className="breadcrumb">{currentMenu?.label || 'iLabel++'}</span>
+          <span className="breadcrumb">{currentMenu?.label || 'VLA Forge'}</span>
         </div>
         <div className="topbar-actions">
           {/* <button className="icon-button" type="button" aria-label="帮助"><CircleHelp size={19} /></button>
