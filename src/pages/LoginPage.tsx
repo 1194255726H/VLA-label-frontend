@@ -2,7 +2,6 @@ import { Eye, EyeOff, KeyRound, LockKeyhole, MessageSquareText, Phone, UserRound
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import loginHero from '../assets/login-hero.jpg'
-import { BrandLogo } from '../components/BrandLogo'
 import { Modal } from '../components/Modal'
 import { runtimeConfig } from '../config/runtime'
 import { authApi } from '../services/api'
@@ -91,9 +90,9 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
       <img className="login-visual" src={loginHero} alt="智能机器人参与多模态数据生产" />
       <div className="login-overlay" />
       <section className="login-brand-content">
-        <BrandLogo inverse />
-        <h1>具身智能数据生产平台</h1>
-        <p>培训、标注、质检、审核、验收全流程协同</p>
+        <div className="login-org"><span>西部创源</span><i aria-hidden="true" /></div>
+        <h1>VLA Forge</h1>
+        <p>培训与数据标注全流程协同</p>
         <div className="login-capabilities"><span>数据闭环</span><span>多角色协同</span><span>全流程质控</span></div>
       </section>
       <section className="login-card" aria-label="登录">
