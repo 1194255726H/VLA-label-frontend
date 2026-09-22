@@ -196,7 +196,7 @@ function optionalString(value: unknown) {
 export function normalizeScene(value: unknown) {
   if (!value || typeof value !== 'object') return undefined
   const item = value as Record<string, unknown>
-  return { id: String(item.id || ''), fleetSceneId: String(item.fleet_scene_id || ''), name: String(item.name || ''), level: String(item.level || '') }
+  return { id: String(item.id ?? item.fleet_scene_id ?? ''), fleetSceneId: String(item.fleet_scene_id ?? item.id ?? ''), name: String(item.name || ''), level: String(item.level ?? '') }
 }
 
 export function normalizeSupplier(value: unknown) {

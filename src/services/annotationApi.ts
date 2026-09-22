@@ -216,9 +216,14 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
 
 export const annotationApi = {
   async sceneOptions(projectId: string, scene1Id: string) {
-    const response = await request<{ items: Array<{ id: number; scenes2: Array<{ id: number; name: string; level: string; parent_id: number }> }> }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/scenes`)
-    return (response.items.find((item) => String(item.id) === scene1Id)?.scenes2 || [])
-      .filter((item) => item.level === '2' && String(item.parent_id) === scene1Id)
+    const response = await request<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(`/api/projects/${encodeURIComponent(projectId)}/fleet/scenes`)
+    const scene1List = Array.isArray(response) ? response : response.items || []
+    const scene1 = scene1List.find((item) => String(item.id) === scene1Id)
+    const scenes2 = Array.isArray(scene1?.scenes2) ? scene1.scenes2 as Array<Record<string, unknown>> : []
+    return scenes2
+      .filter((item) => (item.level == null || Number(item.level) === 2) && (item.parent_id == null || String(item.parent_id) === scene1Id))
+      .map((item) => ({ id: Number(item.id), name: String(item.name || ''), supplierId: item.supplier_id == null ? null : Number(item.supplier_id), supplierName: String(item.supplier_name || '') }))
+      .filter((item) => Number.isFinite(item.id) && item.id > 0 && Boolean(item.name))
   },
   async updateScene2(projectId: string, videoId: string, scene2Id: number) {
     const response = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/scene2`, { method: 'PATCH', body: JSON.stringify({ scene2_id: scene2Id }) })
