@@ -328,6 +328,10 @@
 .annotation-task-title strong { max-width: min(460px, 35vw); overflow: hidden; color: #20262d; font-size: 18px; line-height: 28px; text-overflow: ellipsis; white-space: nowrap; }
 .annotation-task-title small { overflow: hidden; color: #7b8792; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .annotation-task-title .workflow-stage-chip { display: inline-flex; height: 26px; padding: 0 9px; flex: none; align-items: center; border: 1px solid rgba(46,140,240,.25); border-radius: 4px; color: #216fc4; background: #eaf4ff; font-size: 12px; font-weight: 600; }
+.annotation-task-title .workflow-stage-chip.cyan { color: #0b7f9e; border-color: #a9e6f3; background: #e6f7fb; }
+.annotation-task-title .workflow-stage-chip.blue { color: #216fc4; border-color: #a9c9f5; background: #eaf4ff; }
+.annotation-task-title .workflow-stage-chip.amber { color: #a96808; border-color: #f0d9a8; background: #fff5dc; }
+.annotation-task-title .workflow-stage-chip.green { color: #12815f; border-color: #aee3cf; background: #e8f8f1; }
 .annotation-save-state { display: flex; margin: 0; align-items: center; gap: 7px; color: var(--annotation-muted); font-size: 12px; white-space: nowrap; }
 .annotation-save-state i { width: 7px; height: 7px; border-radius: 50%; background: var(--annotation-accent); box-shadow: 0 0 0 4px rgba(46,140,240,.1); }
 .annotation-save-state i.dirty { background: #e99a32; box-shadow: none; }

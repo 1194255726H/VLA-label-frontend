@@ -9,9 +9,7 @@ import { PaginationJump } from '../components/PaginationJump'
 import { workbenchApi } from '../services/api'
 import type { Project, SessionResponse, TaskNode, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
 import { formatDateTime } from '../utils/date'
-
-const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
-const nodeTones: Record<TaskNode, string> = { annotation: 'cyan', review: 'blue', quality: 'amber', acceptance: 'green' }
+import { nodeLabels, nodeTones } from '../utils/node'
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
 const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
 const submittedNodeMap: Record<string, TaskNode> = { annotation: 'annotation', quality_check: 'review', review: 'quality', acceptance: 'acceptance' }

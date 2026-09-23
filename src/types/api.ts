@@ -206,7 +206,7 @@ export interface ManagedProject {
   goalCount: number
   actionCount: number
   currentNode?: '标注' | '质检' | '审核' | '验收'
-  completionNode: '质检' | '审核' | '验收'
+  completionNode: '标注' | '质检' | '审核' | '验收'
   modelGenerationNode?: '标注' | '质检' | '审核' | '验收'
   progress: number
   owner: string

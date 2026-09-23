@@ -5,11 +5,11 @@ import { AppShell } from '../components/AppShell'
 import { PaginationJump } from '../components/PaginationJump'
 import { annotationDataApi } from '../services/annotationDataApi'
 import { projectApi } from '../services/managementApi'
-import type { SessionResponse, TaskNode, VideoListItem } from '../types/api'
+import type { SessionResponse, VideoListItem } from '../types/api'
 import { FleetSyncModal } from './ProjectManagementPage'
 import { formatDateTime } from '../utils/date'
+import { nodeLabels, nodeToneByLabel } from '../utils/node'
 
-const nodeLabels: Record<TaskNode, string> = { annotation: '标注', review: '质检', quality: '审核', acceptance: '验收' }
 const videoStatusTabs = [{ value: '', label: '全部' }, { value: 'pending', label: '待处理' }, { value: 'in_progress', label: '处理中' }, { value: 'describing', label: '模型描述中' }, { value: 'cutting', label: '切割中' }, { value: 'completed', label: '已完成' }, { value: 'cancelled', label: '已作废' }, { value: 'abnormal', label: '异常' }]
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
 const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
@@ -104,7 +104,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
         <td><div className="entity-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `视频记录 #${video.id}`}</small></div></td>
         <td title={video.scene1?.name}>{video.scene1?.name || '-'}</td><td title={video.scene2?.name}>{video.scene2?.name || '-'}</td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
         <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
-        <td><span className="node-tag blue">{nodeLabels[video.currentNode]}</span></td><td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
+        <td><span className={`node-tag ${nodeToneByLabel(nodeLabels[video.currentNode])}`}>{nodeLabels[video.currentNode]}</span></td><td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
         <td>{clockDuration(video.duration)}</td><td>{milliseconds(video.effectiveDurationMs)}</td><td>{milliseconds(video.invalidDurationMs)}</td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td><td>{formatDateTime(video.updatedAt)}</td>
         <td><div className="row-actions"><button type="button" disabled={!video.id} onClick={() => preview(video)}><Eye size={15} />预览</button></div></td>
       </tr>)}
