@@ -10,7 +10,7 @@ function delay() { return new Promise((resolve) => window.setTimeout(resolve, ru
 function numberValue(value: unknown) { return value === null || value === undefined || value === '' ? 0 : Number(value) }
 function nullableNumberValue(value: unknown) { return value === null || value === undefined || value === '' ? null : Number(value) }
 function optionalString(value: unknown) { return value === null || value === undefined || value === '' ? undefined : String(value) }
-function normalizeScene(value: unknown) { if (!value || typeof value !== 'object') return undefined; const item = value as Record<string, unknown>; return { id: String(item.id ?? item.fleet_scene_id ?? ''), fleetSceneId: String(item.fleet_scene_id ?? item.id ?? ''), name: String(item.name || ''), level: String(item.level ?? '') } }
+function normalizeScene(value: unknown) { if (!value || typeof value !== 'object') return undefined; const item = value as Record<string, unknown>; return { id: String(item.fleet_scene_id ?? item.id ?? ''), fleetSceneId: String(item.fleet_scene_id ?? item.id ?? ''), name: String(item.name || ''), level: String(item.level ?? '') } }
 function normalizeSupplier(value: unknown) { if (!value || typeof value !== 'object') return undefined; const item = value as Record<string, unknown>; return { id: String(item.id || ''), fleetSupplierId: String(item.fleet_supplier_id || ''), name: String(item.name || ''), code: String(item.code || ''), type: String(item.type || '') } }
 
 function normalizeNode(value: unknown): TaskNode {
