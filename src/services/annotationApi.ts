@@ -149,7 +149,7 @@ function annotationPayload(rawResult: AnnotationResult) {
         keyframes: (action.keyFrames || []).slice().sort((left, right) => left.frame - right.frame).map(keyFramePayload),
       })),
     })),
-    invalid_intervals: result.invalidRanges.map((range) => ({ id: range.id, sequence: range.sequence, start_frame: range.startFrame, end_frame: range.endFrame, start_ms: frameToMs(range.startFrame, result.frameRate), end_ms: frameToMs(range.endFrame, result.frameRate), reason: range.reason, description: range.description })),
+    invalid_intervals: result.invalidRanges.map((range) => ({ id: range.id, sequence: range.sequence, start_frame: range.startFrame, end_frame: range.endFrame, start_ms: frameToMs(range.startFrame, result.frameRate), end_ms: frameToMs(range.endFrame, result.frameRate), reason: range.reason, description: range.description, is_sample: range.isSample ?? false })),
     meta: { frame_rate: result.frameRate, media_start_time: result.mediaStartTime, coordinate_system: result.coordinateSystem, interval_convention: result.intervalConvention, frontend_result: result },
   }
 }
@@ -178,6 +178,15 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
   const durationMilliseconds = Number(videoMeta.duration_ms || selectedVideo.duration_ms || task.duration_ms || 0)
   const durationSeconds = durationMilliseconds > 0 ? durationMilliseconds / 1000 : Number(selectedVideo.duration || task.duration || 0)
   const rawGoals = Array.isArray(revisionPayload.atomic_tasks) ? revisionPayload.atomic_tasks as Array<Record<string, unknown>> : []
+  // An explicit backend list, including an empty list, supersedes the older frontend snapshot.
+  const rawInvalidRanges = [revisionPayload.invalid_intervals, revision.invalid_intervals, raw.invalid_intervals, task.invalid_intervals, selectedVideo.invalid_intervals]
+    .find((value) => Array.isArray(value)) as Array<Record<string, unknown>> | undefined
+  const backendInvalidRanges = rawInvalidRanges?.map((range, index) => ({
+    id: String(range.id ?? `invalid-${index + 1}`), sequence: Number(range.sequence || index + 1),
+    startFrame: range.start_frame == null ? msToFrame(range.start_ms, frameRate) : Number(range.start_frame),
+    endFrame: range.end_frame == null ? msToFrame(range.end_ms, frameRate) : Number(range.end_frame),
+    ...normalizeInvalidReason(range), isSample: range.is_sample === true,
+  }))
   const goals = rawGoals.map((goal, index) => ({ id: String(goal.id || `goal-${goal.sequence ?? index + 1}`), sequence: Number(goal.sequence ?? index + 1), type: 'goal' as const, startFrame: goal.start_frame == null ? msToFrame(goal.start_ms, frameRate) : Number(goal.start_frame), endFrame: goal.end_frame == null ? msToFrame(goal.end_ms, frameRate) : Number(goal.end_frame), labelId: goal.label_id == null ? undefined : String(goal.label_id), labelCode: String(goal.label_code || ''), labelName: labels.find((label) => label.id === String(goal.label_id))?.name, color: labels.find((label) => label.id === String(goal.label_id))?.color || '#2563EB', descriptionZh: String(goal.description || '') }))
   const backendKeyFrameFields = new Set<string>()
   const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => { const noAction = action.segment_type === 'no_action' || action.system_code === 'NO_ACTION'; const sequence = Number(action.sequence ?? index + 1); const actionKey = `${parent.id}:${sequence}`; const hasKeyFrames = Array.isArray(action.keyframes) || Array.isArray(action.key_frames) || Array.isArray(action.keyFrames); if (hasKeyFrames) backendKeyFrameFields.add(actionKey); const rawKeyFrames = Array.isArray(action.keyframes) ? action.keyframes : Array.isArray(action.key_frames) ? action.key_frames : Array.isArray(action.keyFrames) ? action.keyFrames : []; return ({ id: String(action.id || `${parent.id}-A${String(sequence).padStart(3, '0')}`), sequence, parentId: parent.id, type: noAction ? 'no_action' as const : 'action' as const, startFrame: action.start_frame == null ? msToFrame(action.start_ms, frameRate) : Number(action.start_frame), endFrame: action.end_frame == null ? msToFrame(action.end_ms, frameRate) : Number(action.end_frame), labelId: action.label_id == null ? undefined : String(action.label_id), labelCode: String(action.label_code || ''), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: noAction ? '#64748B' : labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: String(action.description_zh || action.description || (noAction ? '未执行有效动作' : '')), descriptionEn: String(action.description_en || (noAction ? 'No valid action is performed.' : '')), systemCode: noAction ? 'NO_ACTION' as const : undefined, descriptionSource: noAction ? 'system' as const : 'user' as const, modelDescriptionRequired: noAction ? false : undefined, ...normalizeOperationObjectRefs(action), keyFrames: (rawKeyFrames as Array<Record<string, unknown>>).map(normalizeKeyFrame) }) }) })
@@ -193,14 +202,19 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
       const hasBackendKeyFrames = backend && backendKeyFrameFields.has(`${backend.parentId}:${backend.sequence}`)
       return backend ? { ...action, id: backend.id, parentId, operationObjectIds: backend.operationObjectIds, operationObjectNames: backend.operationObjectNames, keyFrames: hasBackendKeyFrames ? backend.keyFrames : action.keyFrames } : { ...action, parentId }
     })
-    return { ...preserved, goals: mergedGoals, actions: mergedActions }
+    return { ...preserved, goals: mergedGoals, actions: mergedActions, invalidRanges: backendInvalidRanges ?? preserved.invalidRanges }
   })() : undefined
   const baseResult = preservedWithBackendIdentity || {
     schemaVersion: 'vla-video-hierarchy@11.0.0' as const, coordinateSystem: 'zero-based-frame' as const, intervalConvention: 'half-open' as const, frameRate,
     totalFrames: Math.round(durationSeconds * frameRate), mediaStartTime, goals, actions,
-    invalidRanges: (Array.isArray(revisionPayload.invalid_intervals) ? revisionPayload.invalid_intervals as Array<Record<string, unknown>> : []).map((range, index) => ({ id: String(range.id || `invalid-${index + 1}`), sequence: Number(range.sequence || index + 1), startFrame: range.start_frame == null ? msToFrame(range.start_ms, frameRate) : Number(range.start_frame), endFrame: range.end_frame == null ? msToFrame(range.end_ms, frameRate) : Number(range.end_frame), ...normalizeInvalidReason(range) })),
+    invalidRanges: backendInvalidRanges ?? [],
     usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: goals.length + 1, nextActionSequenceByGoal: Object.fromEntries(goals.map((goal) => [goal.id, actions.filter((action) => action.parentId === goal.id).length + 1])), nextInvalidSequence: 1,
   }
+  // Server-generated intervals may extend past the total frame count in an older snapshot.
+  const totalFrames = [...goals, ...actions, ...(backendInvalidRanges || [])].reduce(
+    (total, range) => Number.isFinite(range.endFrame) ? Math.max(total, range.endFrame) : total,
+    Math.max(baseResult.totalFrames || 0, Math.round(durationSeconds * frameRate)),
+  )
   return {
     scene1: normalizeScene(selectedVideo.scene1), scene2: normalizeScene(selectedVideo.scene2), supplier: normalizeSupplier(selectedVideo.supplier),
     currentAssigneeId: selectedVideo.current_assignee_id == null ? undefined : String(selectedVideo.current_assignee_id),
@@ -210,8 +224,8 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
     readonly: viewOnly || ['submitted', 'completed'].includes(status),
     videoUrl: /^https?:\/\//i.test(videoUri) ? videoUri : '',
     frameRate,
-    durationSeconds, mediaStartTime,
-    currentRevision: Number(revision.version || revision.revision || revision.revision_no || revision.id || 0), labels, labelLibraryBound, operationLibraryId, operationLibraryName, result: normalizeAnnotationResult(baseResult),
+    durationSeconds: durationSeconds || totalFrames / frameRate, mediaStartTime,
+    currentRevision: Number(revision.version || revision.revision || revision.revision_no || revision.id || 0), labels, labelLibraryBound, operationLibraryId, operationLibraryName, result: normalizeAnnotationResult({ ...baseResult, totalFrames }),
   }
 }
 

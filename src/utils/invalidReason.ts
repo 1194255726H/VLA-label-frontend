@@ -24,7 +24,7 @@ export function normalizeInvalidRanges(ranges: InvalidRange[]) {
     .sort((a, b) => a.startFrame - b.startFrame || a.sequence - b.sequence)
   return ordered.reduce<InvalidRange[]>((merged, range) => {
     const last = merged.at(-1)
-    if (last && last.reason === range.reason && last.description === range.description && range.startFrame <= last.endFrame) {
+    if (last && last.reason === range.reason && last.description === range.description && Boolean(last.isSample) === Boolean(range.isSample) && range.startFrame <= last.endFrame) {
       last.endFrame = Math.max(last.endFrame, range.endFrame)
       if (range.sequence < last.sequence) { last.id = range.id; last.sequence = range.sequence }
     } else merged.push({ ...range })

@@ -456,6 +456,7 @@ export interface InvalidRange {
   endFrame: number
   reason: string
   description: string
+  isSample?: boolean
 }
 
 export interface AnnotationResult {
