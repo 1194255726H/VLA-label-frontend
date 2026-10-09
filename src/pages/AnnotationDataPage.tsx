@@ -13,8 +13,6 @@ import { nodeLabels, nodeToneByLabel } from '../utils/node'
 const videoStatusTabs = [{ value: '', label: '全部' }, { value: 'pending', label: '待处理' }, { value: 'in_progress', label: '处理中' }, { value: 'describing', label: '模型描述中' }, { value: 'cutting', label: '切割中' }, { value: 'completed', label: '已完成' }, { value: 'cancelled', label: '已作废' }, { value: 'abnormal', label: '异常' }]
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
 const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
-const initialVideoStatusTotals = Object.fromEntries(videoStatusTabs.map((item) => [item.value, 0])) as Record<string, number>
-
 function clockDuration(value: number | null) {
   if (value === null || !Number.isFinite(value)) return '—'
   const totalSeconds = Math.max(0, Math.round(value))
@@ -43,7 +41,10 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState(0)
   const [pages, setPages] = useState(1)
-  const [videoStatusTotals, setVideoStatusTotals] = useState(initialVideoStatusTotals)
+  // 各状态数量随列表请求一起返回（total），不再为每个 tab 单独发一次查询；带上筛选条件指纹，条件变化时旧数字自动失效
+  const totalsKey = `${projectId}|${filename}|${currentAssigneeId}|${createdAtStart}|${createdAtEnd}`
+  const [statusTotals, setStatusTotals] = useState<{ key: string; values: Record<string, number> }>({ key: '', values: {} })
+  const videoStatusTotals = statusTotals.key === totalsKey ? statusTotals.values : {}
   const [fleetOpen, setFleetOpen] = useState(false)
   const [toast, setToast] = useState('')
 
@@ -51,36 +52,23 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
     setLoading(true); setError('')
     try {
       const result = await annotationDataApi.list(projectId, { filename, status: videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize })
-      setItems(result.items); setTotal(result.total); setPages(Math.max(1, result.pages))
+      setItems(result.items); setTotal(result.total); setPages(Math.max(1, result.pages)); setStatusTotals((current) => ({ key: totalsKey, values: current.key === totalsKey ? { ...current.values, [videoStatus]: result.total } : { [videoStatus]: result.total } }))
     } catch (reason) { setError(reason instanceof Error ? reason.message : '项目视频加载失败') }
     finally { setLoading(false) }
-  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, projectId, videoStatus])
-
-  const loadVideoStatusTotals = useCallback(async () => {
-    try {
-      const results = await Promise.all(videoStatusTabs.map((item) => annotationDataApi.list(projectId, { status: item.value, page: 1, pageSize: 1 })))
-      setVideoStatusTotals(Object.fromEntries(videoStatusTabs.map((item, index) => [item.value, results[index].total])))
-    } catch { /* 列表主体仍可独立展示，统计失败时保留上次结果 */ }
-  }, [projectId])
+  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, projectId, totalsKey, videoStatus])
 
   useEffect(() => {
     let active = true
     annotationDataApi.list(projectId, { filename, status: videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize }).then((result) => {
       if (!active) return
-      setItems(result.items); setTotal(result.total); setPages(Math.max(1, result.pages)); setError('')
+      setItems(result.items); setTotal(result.total); setPages(Math.max(1, result.pages)); setStatusTotals((current) => ({ key: totalsKey, values: current.key === totalsKey ? { ...current.values, [videoStatus]: result.total } : { [videoStatus]: result.total } })); setError('')
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '项目视频加载失败') }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, projectId, videoStatus])
-  useEffect(() => {
-    let active = true
-    async function loadTotals() { await Promise.resolve(); if (active) await loadVideoStatusTotals() }
-    void loadTotals()
-    return () => { active = false }
-  }, [loadVideoStatusTotals])
+  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, projectId, totalsKey, videoStatus])
   useEffect(() => { projectApi.list().then((projects) => setProjectName(projects.find((item) => item.id === projectId)?.name || '项目视频')).catch(() => undefined) }, [projectId])
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2500); return () => window.clearTimeout(timer) }, [toast])
 
-  async function fleetSynced(message: string) { setFleetOpen(false); await Promise.all([loadVideos(), loadVideoStatusTotals()]); setToast(message) }
+  async function fleetSynced(message: string) { setFleetOpen(false); setStatusTotals({ key: totalsKey, values: {} }); await loadVideos(); setToast(message) }
   function applySearch() { setPage(1); setFilename(filenameInput.trim()); setCurrentAssigneeId(assigneeInput.trim()) }
   function resetFilters() { setFilenameInput(''); setFilename(''); setVideoStatus(''); setAssigneeInput(''); setCurrentAssigneeId(''); setCreatedAtStart(''); setCreatedAtEnd(''); setPage(1) }
   function preview(video: VideoListItem) {
@@ -90,7 +78,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
 
   return <AppShell user={session.account}><section className="management-page"><section className="management-panel panel">
     <header className="management-toolbar annotation-data-heading"><div className="detail-title"><button className="icon-button bordered" type="button" onClick={() => navigate('/projects')} aria-label="返回项目管理"><ArrowLeft size={17} /></button><div><h2>{projectName}</h2><p>项目视频管理 · {projectId}</p></div></div><span>共 {total} 条视频，可按视频状态、处理人和创建时间排查</span></header>
-    <div className="annotation-data-tabs"><div className="status-segments">{videoStatusTabs.map((item) => <button key={item.value || 'all'} type="button" className={videoStatus === item.value ? 'active' : ''} onClick={() => { setVideoStatus(item.value); setPage(1) }}>{item.label}<span>{videoStatusTotals[item.value] || 0}</span></button>)}</div><button className="primary-button" type="button" onClick={() => setFleetOpen(true)}><Database size={16} />从 Fleet 同步</button></div>
+    <div className="annotation-data-tabs"><div className="status-segments">{videoStatusTabs.map((item) => <button key={item.value || 'all'} type="button" className={videoStatus === item.value ? 'active' : ''} onClick={() => { setVideoStatus(item.value); setPage(1) }}>{item.label}{videoStatusTotals[item.value] == null ? null : <span>{videoStatusTotals[item.value]}</span>}</button>)}</div><button className="primary-button" type="button" onClick={() => setFleetOpen(true)}><Database size={16} />从 Fleet 同步</button></div>
     <div className="management-filters project-video-filters">
       <label><span>视频名称</span><div className="filter-control"><Search size={16} /><input value={filenameInput} onChange={(event) => setFilenameInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="请输入视频文件名" /></div></label>
       <label><span>当前处理人 ID</span><div className="filter-control"><input type="number" min="1" step="1" value={assigneeInput} onChange={(event) => setAssigneeInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="请输入处理人 ID" /></div></label>

@@ -212,15 +212,13 @@ export const fleetApi = {
   },
 }
 
-function normalizeLibrary(item: Record<string, unknown>): LabelLibrary {
-  const rawTags = itemsOf(item.tags || item.labels)
-  return { id: String(item.id || item.labelLibraryId || ''), code: String(item.code || ''), name: String(item.name || ''), desc: String(item.description || item.desc || ''), enabled: item.enabled !== false && item.status !== 'disabled', createdAt: String(item.created_at || item.createdAt || ''), count: num(item.label_count ?? item.count ?? rawTags.length), tags: rawTags.map((tag) => ({ id: String(tag.id || ''), name: String(tag.name || ''), code: String(tag.code || ''), color: String(tag.color || '#2563EB'), appliesTo: (tag.applies_to || tag.appliesTo || 'goal') as LabelItem['appliesTo'], enabled: tag.enabled !== false, createdAt: String(tag.created_at || tag.createdAt || '') })) }
+function normalizeLabel(tag: Record<string, unknown>): LabelItem {
+  return { id: String(tag.id || ''), name: String(tag.name || ''), code: String(tag.code || ''), color: String(tag.color || '#2563EB'), appliesTo: (tag.applies_to || tag.appliesTo || 'goal') as LabelItem['appliesTo'], enabled: tag.enabled !== false, createdAt: String(tag.created_at || tag.createdAt || '') }
 }
 
-async function loadLibrary(item: Record<string, unknown>) {
-  const id = String(item.id || '')
-  const labels = await request<{ items: Array<Record<string, unknown>> }>(`/api/data/label-libraries/${encodeURIComponent(id)}/labels?page_size=100`)
-  return normalizeLibrary({ ...item, labels })
+function normalizeLibrary(item: Record<string, unknown>): LabelLibrary {
+  const rawTags = itemsOf(item.tags || item.labels)
+  return { id: String(item.id || item.labelLibraryId || ''), code: String(item.code || ''), name: String(item.name || ''), desc: String(item.description || item.desc || ''), enabled: item.enabled !== false && item.status !== 'disabled', createdAt: String(item.created_at || item.createdAt || ''), count: num(item.label_count ?? item.count ?? rawTags.length), tags: rawTags.map(normalizeLabel) }
 }
 
 export const labelApi = {
@@ -263,17 +261,18 @@ export const labelApi = {
       return { deletedCount, libraries: clone(libraries) }
     }
     const result = await request<{ deleted_count?: number }>(`/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels/batch-delete`, { method: 'POST', body: JSON.stringify({ label_ids: labelIds.map(Number).filter(Number.isFinite) }) })
-    return { deletedCount: num(result.deleted_count), libraries: await this.list() }
+    return { deletedCount: num(result.deleted_count), libraries: await this.listSummaries() }
   },
   async listSummaries(): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(libraries.map((library) => ({ ...library, tags: [] }))) }
-    const result = await request<{ items: Array<Record<string, unknown>> }>('/api/data/label-libraries')
+    const result = await request<{ items: Array<Record<string, unknown>> }>('/api/data/label-libraries?page_size=100')
     return result.items.map(normalizeLibrary)
   },
-  async list(): Promise<LabelLibrary[]> {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(libraries) }
-    const result = await request<{ items: Array<Record<string, unknown>> }>('/api/data/label-libraries')
-    return Promise.all(result.items.map(loadLibrary))
+  /** 查某个标签库下的标签：只在打开标签库详情时调用 */
+  async labels(libraryId: string): Promise<LabelItem[]> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(libraries.find((library) => library.id === libraryId)?.tags || []) }
+    const result = await request<{ items?: Array<Record<string, unknown>> }>(`/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels?page_size=100`)
+    return itemsOf(result).map(normalizeLabel)
   },
   async saveLibrary(payload: { id?: string; name: string; desc: string }): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') {
@@ -283,12 +282,12 @@ export const labelApi = {
       return clone(libraries)
     }
     await request(payload.id ? `/api/data/label-libraries/${encodeURIComponent(payload.id)}` : '/api/data/label-libraries', { method: payload.id ? 'PATCH' : 'POST', body: JSON.stringify({ name: payload.name, description: payload.desc, enabled: true }) })
-    return this.list()
+    return this.listSummaries()
   },
   async deleteLibrary(id: string): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); if (projects.some((item) => item.labelLibraryIds.includes(id))) throw new Error('该标签库已被项目作业配置引用，无法删除'); libraries = libraries.filter((item) => item.id !== id); return clone(libraries) }
     await request(`/api/data/label-libraries/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    return this.list()
+    return this.listSummaries()
   },
   async saveLabel(libraryId: string, payload: Partial<LabelItem> & Pick<LabelItem, 'name' | 'color' | 'appliesTo'>): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') {
@@ -302,12 +301,12 @@ export const labelApi = {
     }
     const path = payload.id ? `/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels/${encodeURIComponent(payload.id)}` : `/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels`
     await request(path, { method: payload.id ? 'PATCH' : 'POST', body: JSON.stringify({ name: payload.name, color: payload.color, applies_to: payload.appliesTo, sort_order: 0 }) })
-    return this.list()
+    return this.listSummaries()
   },
   async deleteLabel(libraryId: string, labelId: string): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); libraries = libraries.map((library) => library.id === libraryId ? { ...library, tags: library.tags.filter((tag) => tag.id !== labelId), count: Math.max(0, library.count - 1) } : library); return clone(libraries) }
     await request(`/api/data/label-libraries/${encodeURIComponent(libraryId)}/labels/${encodeURIComponent(labelId)}`, { method: 'DELETE' })
-    return this.list()
+    return this.listSummaries()
   },
 }
 

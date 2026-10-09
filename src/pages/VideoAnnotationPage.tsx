@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { VideoSceneEditor } from '../components/VideoSceneEditor'
 import { BrandLogo } from '../components/BrandLogo'
+import { ResizableAnnotationLayout } from '../components/ResizableAnnotationLayout'
 import { Modal } from '../components/Modal'
 import { annotationApi, normalizeAnnotationResult } from '../services/annotationApi'
 import { operationObjectApi } from '../services/managementApi'
@@ -13,9 +14,9 @@ import type { AnnotationKeyFrame, AnnotationResult, AnnotationSegment, Annotatio
 import { formatDateTime } from '../utils/date'
 import { createClientId } from '../utils/id'
 import { nodeLabels, nodeTones } from '../utils/node'
+import { formatInvalidReason, invalidReasons, normalizeInvalidRanges, normalizeInvalidReason } from '../utils/invalidReason'
 const TIMELINE_FRAME_WIDTH = 6
 const keyFrameTypeLabels: Record<AnnotationKeyFrame['type'], string> = { contact: '接触', object_change: '物体变化', abnormal: '异常' }
-const invalidReasons = ['手部出框', '严重遮挡', '关键步骤缺失', '其他']
 
 function sortOperationObjects<T extends OperationObject>(items: T[]) {
   return [...items].sort((left, right) => {
@@ -82,19 +83,6 @@ function coverageGaps(startFrame: number, endFrame: number, ranges: Array<{ star
   for (const interval of intervals) { if (interval.start > cursor) gaps.push({ startFrame: cursor, endFrame: interval.start }); cursor = Math.max(cursor, interval.end) }
   if (cursor < endFrame) gaps.push({ startFrame: cursor, endFrame })
   return gaps
-}
-
-function normalizeInvalidRanges(ranges: AnnotationResult['invalidRanges']) {
-  const ordered = [...ranges].sort((a, b) => a.startFrame - b.startFrame || a.sequence - b.sequence)
-  return ordered.reduce<AnnotationResult['invalidRanges']>((merged, range) => {
-    const last = merged.at(-1)
-    if (last && last.reason === range.reason && range.startFrame <= last.endFrame) {
-      last.endFrame = Math.max(last.endFrame, range.endFrame)
-      if (range.sequence < last.sequence) { last.id = range.id; last.sequence = range.sequence }
-    }
-    else merged.push({ ...range })
-    return merged
-  }, [])
 }
 
 function firstOverlap(items: Array<{ id: string; startFrame: number; endFrame: number }>) {
@@ -400,7 +388,7 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
     {level === 'goal' && invalidRanges?.flatMap((range) => {
       const visibleStart = Math.max(safeStart, range.startFrame)
       const visibleEnd = Math.min(safeEnd, range.endFrame)
-      return visibleEnd > visibleStart ? [<button type="button" className={`invalid-block${selectedId === `invalid:${range.id}` ? ' selected' : ''}${range.startFrame < safeStart ? ' clipped-start' : ''}${range.endFrame > safeEnd ? ' clipped-end' : ''}`} key={range.id} title={`无效：${range.reason} · 选中后可拖动或调整两侧边缘`} aria-label={`视频无效区间 ${range.reason}，F${range.startFrame} 至 F${range.endFrame}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%` }} onPointerDown={(event) => { if (event.button !== 0) return; if (selectedId !== `invalid:${range.id}`) { suppressClickRef.current = false; event.stopPropagation(); onSelectInvalid?.(range); return } startInvalidDrag(event, range) }} onClick={(event) => { event.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return } onSelectInvalid?.(range) }}><span className="invalid-block-label">{range.reason}</span>{selectedId === `invalid:${range.id}` && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>] : []
+      return visibleEnd > visibleStart ? [<button type="button" className={`invalid-block${selectedId === `invalid:${range.id}` ? ' selected' : ''}${range.startFrame < safeStart ? ' clipped-start' : ''}${range.endFrame > safeEnd ? ' clipped-end' : ''}`} key={range.id} title={`无效：${formatInvalidReason(range)} · 选中后可拖动或调整两侧边缘`} aria-label={`视频无效区间 ${formatInvalidReason(range)}，F${range.startFrame} 至 F${range.endFrame}`} style={{ left: `${(visibleStart - safeStart) / safeSpan * 100}%`, right: `${(safeEnd - visibleEnd) / safeSpan * 100}%` }} onPointerDown={(event) => { if (event.button !== 0) return; if (selectedId !== `invalid:${range.id}`) { suppressClickRef.current = false; event.stopPropagation(); onSelectInvalid?.(range); return } startInvalidDrag(event, range) }} onClick={(event) => { event.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return } onSelectInvalid?.(range) }}><span className="invalid-block-label">{formatInvalidReason(range)}</span>{selectedId === `invalid:${range.id}` && !readonly && <><i className="range-handle start" data-handle="start" /><i className="range-handle end" data-handle="end" /></>}</button>] : []
     })}
     {items.flatMap((item, index) => {
       const visibleStart = Math.max(safeStart, item.startFrame)
@@ -982,32 +970,32 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   function confirmInvalidRange() {
     if (!result || !pendingInvalidRange || !invalidReason) return
-    const reason = invalidReason === '其他' ? `其他: ${invalidReasonOther.trim()}` : invalidReason
+    const { reason, description } = normalizeInvalidReason({ reason: invalidReason, description: invalidReasonOther })
     if (invalidReason === '其他' && !invalidReasonOther.trim()) return
     if (editingInvalidRangeId) {
-      mutate({ ...result, invalidRanges: result.invalidRanges.map((range) => range.id === editingInvalidRangeId ? { ...range, reason } : range) })
+      mutate({ ...result, invalidRanges: result.invalidRanges.map((range) => range.id === editingInvalidRangeId ? { ...range, reason, description } : range) })
       setPendingInvalidRange(undefined)
       setEditingInvalidRangeId(undefined)
-      setToast(`无效原因已修改为：${reason}`)
+      setToast(`无效原因已修改为：${formatInvalidReason({ reason, description })}`)
       return
     }
     const sequence = result.nextInvalidSequence
-    const range = { id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence).padStart(3, '0')}`, sequence, ...pendingInvalidRange, reason }
+    const range = { id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence).padStart(3, '0')}`, sequence, ...pendingInvalidRange, reason, description }
     mutate({ ...result, nextInvalidSequence: sequence + 1, invalidRanges: normalizeInvalidRanges([...result.invalidRanges, range]) })
     setPendingInvalidRange(undefined)
     setSelectedId(`invalid:${range.id}`)
     setSelectedLevel('invalid')
     setInspectorTab('invalid')
-    setToast(`已标记无效区间：${reason}`)
+    setToast(`已标记无效区间：${formatInvalidReason(range)}`)
   }
 
   async function confirmSubmitInvalidFix() {
     if (!result || !submitInvalidFix || !invalidReason) return
-    const reason = invalidReason === '其他' ? `其他: ${invalidReasonOther.trim()}` : invalidReason
+    const { reason, description } = normalizeInvalidReason({ reason: invalidReason, description: invalidReasonOther })
     if (invalidReason === '其他' && !invalidReasonOther.trim()) return
     const { ranges, voidVideo } = submitInvalidFix
     let sequence = result.nextInvalidSequence
-    const created = ranges.map((range) => ({ id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence++).padStart(3, '0')}`, sequence: sequence - 1, ...range, reason }))
+    const created = ranges.map((range) => ({ id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence++).padStart(3, '0')}`, sequence: sequence - 1, ...range, reason, description }))
     const nextResult: AnnotationResult = { ...result, nextInvalidSequence: sequence, invalidRanges: normalizeInvalidRanges([...result.invalidRanges, ...created]) }
     setSubmitInvalidFix(undefined)
     setInvalidReasonOther('')
@@ -1030,15 +1018,14 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     setSelectedId(`invalid:${created[0].id}`)
     setSelectedLevel('invalid')
     setInspectorTab('invalid')
-    setToast(`已自动标记 ${created.length} 个无效区间：${reason}`)
+    setToast(`已自动标记 ${created.length} 个无效区间：${formatInvalidReason({ reason, description })}`)
     await submit({}, nextResult)
   }
 
   function editInvalidReason(range: AnnotationResult['invalidRanges'][number]) {
-    const otherPrefix = '其他:'
-    const predefined = invalidReasons.includes(range.reason) && range.reason !== '其他'
-    setInvalidReason(predefined ? range.reason : '其他')
-    setInvalidReasonOther(predefined ? '' : range.reason.startsWith(otherPrefix) ? range.reason.slice(otherPrefix.length).trim() : range.reason)
+    const { reason, description } = normalizeInvalidReason(range)
+    setInvalidReason(reason)
+    setInvalidReasonOther(description)
     setEditingInvalidRangeId(range.id)
     setPendingInvalidRange({ startFrame: range.startFrame, endFrame: range.endFrame })
   }
@@ -1490,18 +1477,17 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       </div>
     </header>
 
-    <section className="annotation-workspace">
+    <ResizableAnnotationLayout video={(resetButton) =>
       <section className="video-stage">
         <video ref={scrubVideoRef} className={`scrub-preview${scrubbing ? ' active' : ''}`} src={workspace.videoUrl || undefined} muted playsInline />
-        <div className="video-canvas"><video ref={videoRef} src={workspace.videoUrl || undefined} onLoadedMetadata={(event) => handleVideoMetadata(event.currentTarget)} onTimeUpdate={(event) => handleVideoTimeUpdate(event.currentTarget)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />{!workspace.videoUrl && <div className="video-unavailable"><CircleAlert size={28} /><strong>视频暂不可播放</strong><span>后端返回的是对象存储地址，当前 API 尚未提供预签名播放链接</span></div>}<div className="video-controls"><div className="video-control-side"><span>{timeText(currentSeconds)} / {timeText(result.totalFrames / result.frameRate)}</span><b>F{currentFrame}</b></div><div className="video-control-center"><button type="button" onClick={() => previewStep(-1)} aria-label="上一帧" title="上一帧"><SkipBack size={18} /></button><button className="video-play" type="button" disabled={!workspace.videoUrl} onClick={togglePlayback} aria-label={playing ? '暂停' : '播放'} title={playing ? '暂停' : '播放'}>{playing ? <Pause size={23} /> : <Play size={23} />}</button><button type="button" onClick={() => previewStep(1)} aria-label="下一帧" title="下一帧"><SkipForward size={18} /></button></div><div className="video-control-side end"><label><select value={rate} disabled={!workspace.videoUrl} onChange={(event) => { const next = Number(event.target.value); setRate(next); if (videoRef.current) videoRef.current.playbackRate = next }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select><ChevronDown size={13} /></label><button type="button" disabled={!workspace.videoUrl} onClick={() => videoRef.current?.requestFullscreen()} aria-label="全屏" title="全屏查看"><Expand size={18} /></button></div></div></div>
+        <div className="video-canvas"><video ref={videoRef} src={workspace.videoUrl || undefined} onLoadedMetadata={(event) => handleVideoMetadata(event.currentTarget)} onTimeUpdate={(event) => handleVideoTimeUpdate(event.currentTarget)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />{!workspace.videoUrl && <div className="video-unavailable"><CircleAlert size={28} /><strong>视频暂不可播放</strong><span>后端返回的是对象存储地址，当前 API 尚未提供预签名播放链接</span></div>}<div className="video-controls"><div className="video-control-side"><span>{timeText(currentSeconds)} / {timeText(result.totalFrames / result.frameRate)}</span><b>F{currentFrame}</b></div><div className="video-control-center"><button type="button" onClick={() => previewStep(-1)} aria-label="上一帧" title="上一帧"><SkipBack size={18} /></button><button className="video-play" type="button" disabled={!workspace.videoUrl} onClick={togglePlayback} aria-label={playing ? '暂停' : '播放'} title={playing ? '暂停' : '播放'}>{playing ? <Pause size={23} /> : <Play size={23} />}</button><button type="button" onClick={() => previewStep(1)} aria-label="下一帧" title="下一帧"><SkipForward size={18} /></button></div><div className="video-control-side end">{resetButton}<label><select value={rate} disabled={!workspace.videoUrl} onChange={(event) => { const next = Number(event.target.value); setRate(next); if (videoRef.current) videoRef.current.playbackRate = next }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select><ChevronDown size={13} /></label><button type="button" disabled={!workspace.videoUrl} onClick={() => videoRef.current?.requestFullscreen()} aria-label="全屏" title="全屏查看"><Expand size={18} /></button></div></div></div>
       </section>
-
+    } inspector={
       <aside className="annotation-inspector">
         <header className="inspector-tabs"><button type="button" className={inspectorTab === 'segments' ? 'active' : ''} onClick={() => setInspectorTab('segments')}>片段 <b>{result.goals.length + result.actions.length}</b></button><button type="button" className={inspectorTab === 'invalid' ? 'active' : ''} onClick={() => setInspectorTab('invalid')}>无效区间 <b>{result.invalidRanges.length}</b></button></header>
-        {inspectorTab === 'segments' ? <><div className="segment-list-columns"><span>片段</span><span>标签与描述</span><span>总时长</span></div><div className="segment-tree">{result.goals.map((goal, index) => { const goalSelected = selectedLevel === 'goal' && selectedId === goal.id; return <div className="segment-group" key={goal.id}><div className={`segment-list-entry${goalSelected ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{goalSelected && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => { const actionSelected = selectedLevel === 'action' && selectedId === action.id; return <div className={`segment-action-wrap${actionSelected ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${actionSelected ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{actionSelected && inlineSegmentEditor(action)}</div>{segmentKeyFrameMeta(action)}</div> })}</div> })}</div></> : <><div className="segment-list-columns invalid-list-columns"><span>区间</span><span>无效原因</span><span>总时长</span><span>操作</span></div><div className="segment-tree invalid-segment-list">{result.invalidRanges.map((range, index) => { const active = selectedLevel === 'invalid' && selectedId === `invalid:${range.id}`; return <div className={`invalid-list-row${active ? ' selected' : ''}`} key={range.id}><button className="invalid-row-main" type="button" aria-pressed={active} onClick={() => { videoRef.current?.pause(); setActiveGoalId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); seek(range.startFrame) }}><i /><span className="segment-list-title"><b>无效区间 {index + 1}</b></span><span className="segment-list-copy"><small>{range.reason}</small><em>{timeText(range.startFrame / result.frameRate)} - {timeText(range.endFrame / result.frameRate)}</em></span><span className="segment-list-duration"><b>{timeText((range.endFrame - range.startFrame) / result.frameRate)}</b><small>F{range.startFrame}-{range.endFrame}</small></span></button><button className="invalid-reason-edit" type="button" disabled={readonly} onClick={() => editInvalidReason(range)}>修改原因</button></div> })}{!result.invalidRanges.length && <div className="inspector-empty">暂无无效区间，按 X 可在单次任务轨道空白处标记</div>}</div></>}
+        {inspectorTab === 'segments' ? <><div className="segment-list-columns"><span>片段</span><span>标签与描述</span><span>总时长</span></div><div className="segment-tree">{result.goals.map((goal, index) => { const goalSelected = selectedLevel === 'goal' && selectedId === goal.id; return <div className="segment-group" key={goal.id}><div className={`segment-list-entry${goalSelected ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{goalSelected && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => { const actionSelected = selectedLevel === 'action' && selectedId === action.id; return <div className={`segment-action-wrap${actionSelected ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${actionSelected ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{actionSelected && inlineSegmentEditor(action)}</div>{segmentKeyFrameMeta(action)}</div> })}</div> })}</div></> : <><div className="segment-list-columns invalid-list-columns"><span>区间</span><span>无效原因</span><span>总时长</span><span>操作</span></div><div className="segment-tree invalid-segment-list">{result.invalidRanges.map((range, index) => { const active = selectedLevel === 'invalid' && selectedId === `invalid:${range.id}`; return <div className={`invalid-list-row${active ? ' selected' : ''}`} key={range.id}><button className="invalid-row-main" type="button" aria-pressed={active} onClick={() => { videoRef.current?.pause(); setActiveGoalId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); seek(range.startFrame) }}><i /><span className="segment-list-title"><b>无效区间 {index + 1}</b></span><span className="segment-list-copy"><small>{formatInvalidReason(range)}</small><em>{timeText(range.startFrame / result.frameRate)} - {timeText(range.endFrame / result.frameRate)}</em></span><span className="segment-list-duration"><b>{timeText((range.endFrame - range.startFrame) / result.frameRate)}</b><small>F{range.startFrame}-{range.endFrame}</small></span></button><button className="invalid-reason-edit" type="button" disabled={readonly} onClick={() => editInvalidReason(range)}>修改原因</button></div> })}{!result.invalidRanges.length && <div className="inspector-empty">暂无无效区间，按 X 可在单次任务轨道空白处标记</div>}</div></>}
       </aside>
-    </section>
-
+    } timeline={
     <section className={`annotation-timeline${workspace.labelLibraryBound || editing ? '' : ' no-label-library'}${workspace.operationLibraryId ? ' has-operation-bar' : ''}${selectedLevel ? ` selection-${selectedLevel === 'invalid' ? 'goal' : selectedLevel}` : ''}`}>
       {(workspace.labelLibraryBound || editing) && <div className="annotation-label-bar">{workspace.labelLibraryBound && <><span>片段标签</span>{selected?.type === 'no_action' ? <small>无动作片段不设置标签</small> : !visibleLabels.length ? <small>当前类型无可用标签</small> : visibleLabels.map((label) => <button type="button" disabled={!selected || readonly} className={selected?.labelId === label.id ? 'active' : ''} style={{ '--label-color': label.color } as React.CSSProperties} key={label.id} onClick={() => updateSelected(selected?.labelId === label.id ? { labelId: undefined, labelCode: '', labelName: undefined } : label.appliesTo === 'both' ? {} : { labelId: label.id, labelCode: label.code, labelName: label.name, color: label.color })}>{label.name}</button>)}</>}{editing && (selected || selectedInvalidRange) && <span className="timeline-edit-feedback"><strong>{editing}</strong><span>{timeText((selected || selectedInvalidRange)!.startFrame / result.frameRate)} - {timeText((selected || selectedInvalidRange)!.endFrame / result.frameRate)}</span><b>{(selected || selectedInvalidRange)!.endFrame - (selected || selectedInvalidRange)!.startFrame} 帧</b></span>}</div>}
       {workspace.operationLibraryId && <div className="annotation-operation-bar"><span>操作对象</span>{operationObjectsLoading ? <small>正在加载...</small> : !operationObjects.length ? <small>暂无操作对象</small> : operationObjects.map((item) => <button type="button" className={selected?.operationObjectIds?.includes(item.id) ? 'active' : ''} disabled={readonly || selected?.type !== 'action'} onClick={() => { if (selected?.type !== 'action') return; const ids = selected.operationObjectIds || []; const nextIds = ids.includes(item.id) ? ids.filter((id) => id !== item.id) : [...ids, item.id]; updateSelected({ operationObjectIds: nextIds, operationObjectNames: nextIds.map((id) => operationObjects.find((object) => object.id === id)?.name || '') }) }} key={item.id}>{item.name}{!item.approved && '（未审核）'}</button>)}<button className="candidate-button" type="button" disabled={readonly} onClick={() => { setCandidateForm({ name: '', alias: '', attribute: '' }); setCandidateModalOpen(true) }}><Plus size={13} />新增候选</button></div>}
@@ -1512,6 +1498,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'action' || selectedLevel === 'invalid' ? selectedId : undefined} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid') }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
+    } />
     {commentsAvailable && videoComments.map((comment) => <button type="button" className={`page-comment-marker${comment.resolved ? ' resolved' : ''}`} style={{ left: `${comment.positionX * 100}%`, top: `${comment.positionY * 100}%` }} key={comment.id} title={`#${comment.sequence} ${comment.content}`} onClick={openComments}>{comment.sequence}</button>)}
     {commentPlacementMode && <div className="page-comment-placement-layer" role="button" tabIndex={0} aria-label="选择批注位置" onClick={chooseCommentPosition}><span>点击页面任意位置放置批注 · 按 C 或 Esc 取消</span></div>}
     {commentsOpen && commentDialogPosition && <div ref={commentDialogRef} className="page-comment-dialog" style={{ left: commentDialogPosition.x, top: commentDialogPosition.y }} role="dialog" aria-label="全部批注">

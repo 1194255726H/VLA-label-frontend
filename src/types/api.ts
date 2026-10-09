@@ -58,6 +58,7 @@ export type StorageStatus = 'available' | 'missing' | 'unchecked'
 export interface VideoScene {
   id: string
   fleetSceneId: string
+  code?: string
   name: string
   level: string
 }
@@ -454,6 +455,7 @@ export interface InvalidRange {
   startFrame: number
   endFrame: number
   reason: string
+  description: string
 }
 
 export interface AnnotationResult {

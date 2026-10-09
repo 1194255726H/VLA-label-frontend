@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { PaginationJump } from '../components/PaginationJump'
+import { VideoSceneEditor } from '../components/VideoSceneEditor'
+import type { VideoScenes } from '../components/VideoSceneEditor'
 import { workbenchApi } from '../services/api'
 import type { Project, SessionResponse, TaskNode, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
 import { formatDateTime } from '../utils/date'
@@ -31,10 +33,10 @@ function actionFor(video: VideoListItem, tab: TaskTab) {
   return { label: '开始处理', readonly: false, disabled: false }
 }
 
-function TaskTable({ items, tab, loading, onError }: { items: VideoListItem[]; tab: TaskTab; loading: boolean; onError: (message: string) => void }) {
+function TaskTable({ items, tab, loading, onError, onScenesUpdated }: { items: VideoListItem[]; tab: TaskTab; loading: boolean; onError: (message: string) => void; onScenesUpdated: (video: VideoListItem, scenes: VideoScenes) => void }) {
   const navigate = useNavigate()
   const [openingVideoId, setOpeningVideoId] = useState('')
-  const columnCount = tab === 'submitted' ? 17 : 16
+  const columnCount = tab === 'submitted' ? 16 : 15
   async function openVideo(video: VideoListItem) {
     const action = actionFor(video, tab)
     if (action.disabled) return
@@ -55,9 +57,9 @@ function TaskTable({ items, tab, loading, onError }: { items: VideoListItem[]; t
     <div className="table-scroll">
       <table className={`task-table workbench-video-table ${tab}`}>
         <thead><tr>
-          <th>视频名称</th><th>一级场景</th><th>二级场景</th><th>供应商</th><th>状态</th><th>当前节点</th>
+          <th>视频名称</th><th className="scene-info-column">场景信息</th><th className="supplier-column">供应商</th><th>状态</th><th>当前节点</th>
           {tab === 'submitted' && <th>提交节点</th>}
-          <th>流转类型</th><th>视频时长</th><th className="segment-duration-column">有效片段时长</th><th className="segment-duration-column">无效片段时长</th><th>单次任务数</th><th className="count-column">小目标数</th><th className="assignee-column">当前处理人</th><th>创建时间</th><th>更新时间</th><th className="action-column">操作</th>
+          <th>流转类型</th><th>视频时长</th><th className="segment-duration-column">有效片段时长</th><th className="segment-duration-column">无效片段时长</th><th className="count-column">单次任务数</th><th className="count-column">小目标数</th><th className="assignee-column">当前处理人</th><th className="date-column">创建时间</th><th className="date-column">更新时间</th><th className="action-column">操作</th>
         </tr></thead>
         <tbody>
           {!loading && (items.length === 0 ? <tr><td colSpan={columnCount}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video, index) => {
@@ -65,7 +67,7 @@ function TaskTable({ items, tab, loading, onError }: { items: VideoListItem[]; t
             const submittedNode = submittedNodeMap[video.submittedNode || '']
             return <tr key={`${video.id}-${video.submittedNode || 'pending'}-${index}`}>
               <td><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `#${video.id}`}</small></div></td>
-              <td title={video.scene1?.name}>{video.scene1?.name || '-'}</td><td title={video.scene2?.name}>{video.scene2?.name || '-'}</td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
+              <td><VideoSceneEditor key={`${video.projectId}:${video.id}`} variant="table" workspace={{ ...video, videoId: video.id }} canEdit onUpdated={(scenes) => onScenesUpdated(video, scenes)} /></td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
               <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
               <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>
               {tab === 'submitted' && <td>{submittedNode ? <span className={`node-tag ${nodeTones[submittedNode]}`}>{nodeLabels[submittedNode]}</span> : '-'}</td>}
@@ -162,6 +164,19 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const currentProject = useMemo(() => projects.find((item) => item.id === projectId) || projects[0], [projectId, projects])
   const totalPages = Math.max(1, snapshot?.tasks.pages || 1)
 
+  function updateVideoScenes(video: VideoListItem, scenes: VideoScenes) {
+    setSnapshot((current) => {
+      if (!current) return current
+      const matches = (item: VideoListItem) => item.id === video.id && item.projectId === video.projectId
+      return {
+        ...current,
+        tasks: { ...current.tasks, items: current.tasks.items.map((item) => matches(item) ? { ...item, ...scenes } : item) },
+        recommendedTask: current.recommendedTask && matches(current.recommendedTask) ? { ...current.recommendedTask, ...scenes } : current.recommendedTask,
+      }
+    })
+    setToast('场景信息已更新')
+  }
+
   async function claimTask(targetNode: TaskNode) {
     setClaimingNode(targetNode)
     try {
@@ -211,7 +226,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
               <button className={tab === 'pending' ? 'active' : ''} type="button" onClick={() => { if (tab === 'pending') return; setLoading(true); setTab('pending'); setPageNo(1) }}>待处理<span>{tabTotals.pending}</span></button>
               <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { if (tab === 'submitted') return; setLoading(true); setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
             </div>
-            <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} onError={setToast} />
+            <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} onError={setToast} onScenesUpdated={updateVideoScenes} />
             <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={(next) => { setLoading(true); setPageNo(next) }} pageSize={pageSize} onPageSizeChange={(size) => { setLoading(true); setPageSize(size); setPageNo(1) }} /></footer>
           </section>
 

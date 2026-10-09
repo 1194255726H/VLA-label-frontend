@@ -3,6 +3,7 @@ import { mockLabelLibraries, mockTasks } from '../mocks/data'
 import type { AnnotationKeyFrame, AnnotationResult, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
 import { createClientId } from '../utils/id'
 import { request, normalizeScene, normalizeSupplier } from './api'
+import { normalizeInvalidReason } from '../utils/invalidReason'
 
 const mockResults = new Map<string, AnnotationResult>()
 const mockRevisions = new Map<string, number>()
@@ -116,7 +117,7 @@ export function normalizeAnnotationResult(source: AnnotationResult): AnnotationR
     nextActionSequenceByGoal[goal.id] = nextAtomicSequence
     return { ...normalized, sequence: Math.max(1, Math.round(goal.sequence || 1)), segmentType: 'goal' as const, labelCode: goal.labelCode || '', nextAtomicSequence, atomicActions }
   })
-  const invalidRanges = (source.invalidRanges || []).map((range, index) => ({ ...integerRange(range), sequence: Math.max(1, Math.round(range.sequence || index + 1)) }))
+  const invalidRanges = (source.invalidRanges || []).map((range, index) => ({ ...integerRange(range), ...normalizeInvalidReason(range), sequence: Math.max(1, Math.round(range.sequence || index + 1)) }))
   return {
     ...source,
     schemaVersion: 'vla-video-hierarchy@11.0.0', coordinateSystem: 'zero-based-frame', intervalConvention: 'half-open',
@@ -148,7 +149,7 @@ function annotationPayload(rawResult: AnnotationResult) {
         keyframes: (action.keyFrames || []).slice().sort((left, right) => left.frame - right.frame).map(keyFramePayload),
       })),
     })),
-    invalid_intervals: result.invalidRanges.map((range) => ({ id: range.id, sequence: range.sequence, start_frame: range.startFrame, end_frame: range.endFrame, start_ms: frameToMs(range.startFrame, result.frameRate), end_ms: frameToMs(range.endFrame, result.frameRate), reason: range.reason, description: range.reason })),
+    invalid_intervals: result.invalidRanges.map((range) => ({ id: range.id, sequence: range.sequence, start_frame: range.startFrame, end_frame: range.endFrame, start_ms: frameToMs(range.startFrame, result.frameRate), end_ms: frameToMs(range.endFrame, result.frameRate), reason: range.reason, description: range.description })),
     meta: { frame_rate: result.frameRate, media_start_time: result.mediaStartTime, coordinate_system: result.coordinateSystem, interval_convention: result.intervalConvention, frontend_result: result },
   }
 }
@@ -197,7 +198,7 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
   const baseResult = preservedWithBackendIdentity || {
     schemaVersion: 'vla-video-hierarchy@11.0.0' as const, coordinateSystem: 'zero-based-frame' as const, intervalConvention: 'half-open' as const, frameRate,
     totalFrames: Math.round(durationSeconds * frameRate), mediaStartTime, goals, actions,
-    invalidRanges: (Array.isArray(revisionPayload.invalid_intervals) ? revisionPayload.invalid_intervals as Array<Record<string, unknown>> : []).map((range, index) => ({ id: String(range.id || `invalid-${index + 1}`), sequence: Number(range.sequence || index + 1), startFrame: range.start_frame == null ? msToFrame(range.start_ms, frameRate) : Number(range.start_frame), endFrame: range.end_frame == null ? msToFrame(range.end_ms, frameRate) : Number(range.end_frame), reason: String(range.reason || range.description || '视频内容无效') })),
+    invalidRanges: (Array.isArray(revisionPayload.invalid_intervals) ? revisionPayload.invalid_intervals as Array<Record<string, unknown>> : []).map((range, index) => ({ id: String(range.id || `invalid-${index + 1}`), sequence: Number(range.sequence || index + 1), startFrame: range.start_frame == null ? msToFrame(range.start_ms, frameRate) : Number(range.start_frame), endFrame: range.end_frame == null ? msToFrame(range.end_ms, frameRate) : Number(range.end_frame), ...normalizeInvalidReason(range) })),
     usedAnnotationConfigCodes: [], comments: [], nextGoalSequence: goals.length + 1, nextActionSequenceByGoal: Object.fromEntries(goals.map((goal) => [goal.id, actions.filter((action) => action.parentId === goal.id).length + 1])), nextInvalidSequence: 1,
   }
   return {
@@ -215,6 +216,24 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
 }
 
 export const annotationApi = {
+  async sceneSuppliers(projectId: string) {
+    const response = await request<{ items: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/suppliers`)
+    return (response.items || []).map((item) => ({
+      id: Number(item.fleet_supplier_id ?? item.id), name: String(item.name || ''),
+    })).filter((item) => Number.isSafeInteger(item.id) && item.id > 0 && Boolean(item.name))
+  },
+  async createScene2(payload: { scene1Id: string; name: string; supplierId: string; description: string }) {
+    const scene1Id = Number(payload.scene1Id)
+    const supplierId = Number(payload.supplierId)
+    const name = payload.name.trim()
+    if (!Number.isSafeInteger(scene1Id) || scene1Id <= 0 || !Number.isSafeInteger(supplierId) || supplierId <= 0 || !name) {
+      throw new Error('请填写有效的一级场景、二级场景名称和供应商')
+    }
+    await request<unknown>('/api/fleet/scenes', { method: 'POST', body: JSON.stringify({
+      fleet_scene1_id: scene1Id, name, fleet_supplier_id: supplierId,
+      ...(payload.description.trim() ? { description: payload.description.trim() } : {}),
+    }) })
+  },
   async sceneOptions(projectId: string, scene1Id: string) {
     const response = await request<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(`/api/projects/${encodeURIComponent(projectId)}/fleet/scenes`)
     const scene1List = Array.isArray(response) ? response : response.items || []

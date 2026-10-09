@@ -197,7 +197,7 @@ export function normalizeScene(value: unknown) {
   if (!value || typeof value !== 'object') return undefined
   const item = value as Record<string, unknown>
   // 场景对比一律用 fleet 场景 id：视频侧可能同时返回关联记录 id 和 fleet_scene_id，取错会对不上 fleet 场景列表
-  return { id: String(item.fleet_scene_id ?? item.id ?? ''), fleetSceneId: String(item.fleet_scene_id ?? item.id ?? ''), name: String(item.name || ''), level: String(item.level ?? '') }
+  return { id: String(item.fleet_scene_id ?? item.id ?? ''), fleetSceneId: String(item.fleet_scene_id ?? item.id ?? ''), code: optionalString(item.code ?? item.fleet_scene_code), name: String(item.name || ''), level: String(item.level ?? '') }
 }
 
 export function normalizeSupplier(value: unknown) {
