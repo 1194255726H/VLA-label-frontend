@@ -78,6 +78,25 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (payload?.success === true || payload?.code === 'ok' ? payload.data : payload) as T
 }
 
+export async function requestDownload(path: string, fallbackFilename: string): Promise<{ blob: Blob; filename: string }> {
+  const headers = new Headers({ Accept: 'text/csv, application/octet-stream' })
+  const csrfToken = getCsrfToken()
+  if (csrfToken) headers.set('X-CSRF-Token', csrfToken)
+  const response = await fetch(`${runtimeConfig.apiBaseUrl}${path}`, { method: 'GET', credentials: 'include', headers })
+  if (!response.ok || response.headers.get('Content-Type')?.includes('application/json')) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(String(payload?.message || `导出失败（${response.status}）`))
+  }
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  const plainFilename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+  let filename = plainFilename || fallbackFilename
+  if (encodedFilename) {
+    try { filename = decodeURIComponent(encodedFilename) } catch { /* Keep the fallback for malformed filenames. */ }
+  }
+  return { blob: await response.blob(), filename }
+}
+
 function normalizeUser(payload: Record<string, unknown>): SessionResponse {
   const raw = (payload.account || payload.user || payload) as Record<string, unknown>
   const booleanValue = (...values: unknown[]) => values.some((value) => value === true || value === 1 || value === '1' || value === 'true')
@@ -209,6 +228,7 @@ export function normalizeSupplier(value: unknown) {
 
 function normalizeVideo(item: Record<string, unknown>): VideoListItem {
   return {
+    deviceId: optionalString(item.device_id), personName: optionalString(item.person_name),
     invalidIntervalList: normalizeInvalidIntervalList(Array.isArray(item.invalid_interval_list) ? item.invalid_interval_list : item.invalid_intervals),
     id: String(item.id || ''),
     projectId: String(item.project_id || ''),

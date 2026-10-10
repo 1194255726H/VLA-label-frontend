@@ -1,7 +1,7 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockProjects, mockTasks } from '../mocks/data'
 import type { ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem } from '../types/api'
-import { request } from './api'
+import { request, requestDownload } from './api'
 import { getMockFleetSyncedTasks } from './managementApi'
 import { normalizeInvalidIntervalList } from '../utils/invalidReason'
 
@@ -22,6 +22,7 @@ function normalizeNode(value: unknown): TaskNode {
 
 function normalize(item: Record<string, unknown>): VideoListItem {
   return {
+    deviceId: optionalString(item.device_id), personName: optionalString(item.person_name),
     invalidIntervalList: normalizeInvalidIntervalList(Array.isArray(item.invalid_interval_list) ? item.invalid_interval_list : item.invalid_intervals),
     id: String(item.id || ''), projectId: String(item.project_id || ''), projectName: String(item.project_name || ''),
     fleetVideoId: optionalString(item.fleet_video_id), currentNode: normalizeNode(item.current_node), currentAssigneeId: optionalString(item.current_assignee_id), currentAssigneeName: optionalString(item.current_assignee_name),
@@ -35,8 +36,8 @@ function normalize(item: Record<string, unknown>): VideoListItem {
 
 function mockItems(projectId: string): VideoListItem[] {
   const project = mockProjects.find((item) => item.id === projectId) || mockProjects[0]
-  const localVideos = mockTasks.map((item, index) => normalize({ id: `video-${index + 1}`, project_id: projectId, project_name: project.name, current_node: item.node, current_assignee_id: item.assignee, status: item.status === 'processing' ? 'in_progress' : item.status === 'pending' ? 'assigned' : item.status, sort_order: index, external_video_id: item.dataId, filename: `${item.dataName}.mp4`, uri: '/temp.mp4', duration: item.totalDuration, file_size: 96978164, storage_status: index === 2 ? 'missing' : index === 4 ? 'unchecked' : 'available', storage_error: index === 2 ? '对象存储中未找到该视频' : '', updated_at: item.updatedAt }))
-  const syncedVideos = getMockFleetSyncedTasks(projectId).map((item, index) => normalize({ id: `fleet-video-${item.id}`, project_id: projectId, project_name: project.name, fleet_video_id: item.id, current_node: 'annotation', status: 'pending', sort_order: index, external_video_id: item.externalTaskId, filename: `${item.externalTaskId}.mp4`, duration: item.totalDuration, storage_status: 'unchecked', updated_at: new Date().toISOString() }))
+  const localVideos = mockTasks.map((item, index) => normalize({ id: `video-${index + 1}`, device_id: `02:00:00:00:00:${String(index + 1).padStart(2, '0')}`, person_name: ['王龙', '李明'][index % 2], project_id: projectId, project_name: project.name, current_node: item.node, current_assignee_id: item.assignee, status: item.status === 'processing' ? 'in_progress' : item.status === 'pending' ? 'assigned' : item.status, sort_order: index, external_video_id: item.dataId, filename: `${item.dataName}.mp4`, uri: '/temp.mp4', duration: item.totalDuration, file_size: 96978164, storage_status: index === 2 ? 'missing' : index === 4 ? 'unchecked' : 'available', storage_error: index === 2 ? '对象存储中未找到该视频' : '', updated_at: item.updatedAt }))
+  const syncedVideos = getMockFleetSyncedTasks(projectId).map((item, index) => normalize({ id: `fleet-video-${item.id}`, device_id: item.device, person_name: item.operator, project_id: projectId, project_name: project.name, fleet_video_id: item.id, current_node: 'annotation', status: 'pending', sort_order: index, external_video_id: item.externalTaskId, filename: `${item.externalTaskId}.mp4`, duration: item.totalDuration, storage_status: 'unchecked', updated_at: new Date().toISOString() }))
   return [...syncedVideos, ...localVideos]
 }
 
@@ -47,11 +48,12 @@ export const annotationDataApi = {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const filename = query.filename?.toLowerCase()
-      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.status || item.videoStatus === query.status) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
+      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.personName || (item.personName || '').includes(query.personName)) && (!query.status || item.videoStatus === query.status) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
       return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize, pages: Math.max(1, Math.ceil(items.length / pageSize)) }
     }
     const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
     if (query.filename) params.set('filename', query.filename)
+    if (query.personName) params.set('person_name', query.personName)
     if (query.status) params.set('status', query.status)
     if (query.currentAssigneeId) params.set('current_assignee_id', query.currentAssigneeId)
     if (query.createdAtStart) params.set('created_at_start', query.createdAtStart)
@@ -62,5 +64,18 @@ export const annotationDataApi = {
     const pending = request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(path).then((result) => ({ items: result.items.map(normalize), total: result.total || 0, page: result.page || page, pageSize: result.page_size || pageSize, pages: result.pages || 1 }))
     pendingVideoListRequests.set(path, pending)
     try { return await pending } finally { if (pendingVideoListRequests.get(path) === pending) pendingVideoListRequests.delete(path) }
+  },
+  async exportVideos(projectId: string, videoIds: string[]): Promise<{ blob: Blob; filename: string }> {
+    const ids = [...new Set(videoIds)].filter(Boolean)
+    if (!projectId || !ids.length) throw new Error('请先选择要导出的视频')
+    const filename = `project-${projectId}-videos.csv`
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const rows = mockItems(projectId).filter((item) => ids.includes(item.id))
+      const quote = (value: string) => `"${value.replace(/"/g, '""')}"`
+      const csv = [['id', 'filename', 'device_id', 'person_name'], ...rows.map((item) => [item.id, item.filename, item.deviceId || '', item.personName || ''])].map((row) => row.map(quote).join(',')).join('\r\n')
+      return { blob: new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }), filename }
+    }
+    return requestDownload(`/api/projects/${encodeURIComponent(projectId)}/videos/export?video_ids=${ids.map(encodeURIComponent).join(',')}`, filename)
   },
 }

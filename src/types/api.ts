@@ -74,6 +74,8 @@ export interface VideoSupplier {
 
 export interface VideoListItem {
   id: string
+  deviceId?: string
+  personName?: string
   projectId: string
   projectName: string
   fleetVideoId?: string
@@ -163,6 +165,7 @@ export interface TaskQuery {
 
 export interface ProjectVideoQuery {
   filename?: string
+  personName?: string
   status?: string
   currentAssigneeId?: string
   createdAtStart?: string
