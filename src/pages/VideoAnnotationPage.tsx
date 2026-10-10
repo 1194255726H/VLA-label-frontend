@@ -8,6 +8,9 @@ import { VideoSceneEditor } from '../components/VideoSceneEditor'
 import { BrandLogo } from '../components/BrandLogo'
 import { ResizableAnnotationLayout } from '../components/ResizableAnnotationLayout'
 import { Modal } from '../components/Modal'
+import { SegmentDescriptionModal } from '../components/SegmentDescriptionModal'
+import { SegmentDescriptionFields } from '../components/SegmentDescriptionFields'
+import { hasDescriptionCandidates } from '../utils/segmentDescription'
 import { annotationApi, normalizeAnnotationResult } from '../services/annotationApi'
 import { operationObjectApi } from '../services/managementApi'
 import type { AnnotationKeyFrame, AnnotationResult, AnnotationSegment, AnnotationWorkspace, OperationObject, SessionResponse, VideoComment } from '../types/api'
@@ -524,6 +527,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [commentPoint, setCommentPoint] = useState<{ x: number; y: number }>()
   const [commentSubmitting, setCommentSubmitting] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [descriptionEditingId, setDescriptionEditingId] = useState<string>()
+  const [descriptionModalId, setDescriptionModalId] = useState<string>()
   const [commentDraft, setCommentDraft] = useState('')
   const [keyFrameModalOpen, setKeyFrameModalOpen] = useState(false)
   const [editingKeyFrame, setEditingKeyFrame] = useState<AnnotationKeyFrame>()
@@ -542,6 +547,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [editingInvalidRangeId, setEditingInvalidRangeId] = useState<string>()
   const [invalidReason, setInvalidReason] = useState(invalidReasons[0])
   const [invalidReasonOther, setInvalidReasonOther] = useState('')
+  const [invalidIsSample, setInvalidIsSample] = useState(false)
+  const [sampleUpdatingId, setSampleUpdatingId] = useState('')
   const [inspectorTab, setInspectorTab] = useState<'segments' | 'invalid'>('segments')
   const [hoverPoint, setHoverPoint] = useState<{ level: 'goal' | 'action'; frame: number }>()
   const [goalViewport, setGoalViewport] = useState<TimelineViewport>({ startFrame: 0, endFrame: 0 })
@@ -674,8 +681,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const canReturn = Boolean(workspace && ['review', 'quality', 'acceptance'].includes(workspace.node))
   const submitButtonLabel = workspace?.node === 'quality' ? '提交审核' : workspace?.node === 'acceptance' ? '提交验收' : '提交'
   const hardReadonly = Boolean(workspace?.readonly || searchParams.get('readonly') === '1' || submitted || videoLockState !== 'held')
-  const readonly = Boolean(hardReadonly || approvalStage)
-  const descriptionEditable = Boolean(!hardReadonly && (workspace?.node === 'annotation' || workspace?.node === 'review'))
+  const readonly = Boolean(hardReadonly || approvalStage || sampleUpdatingId)
+  const descriptionEditable = Boolean(!hardReadonly && !submitting && !sampleUpdatingId && (workspace?.node === 'annotation' || workspace?.node === 'review'))
   const canComment = Boolean(approvalStage && !hardReadonly)
   const keyFrameNeedsObject = keyFrameForm.type !== 'abnormal'
   const keyFrameNeedsDetail = keyFrameForm.type !== 'contact'
@@ -759,6 +766,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   function selectSegment(item: AnnotationSegment, clickedFrame?: number) {
+    if (item.id !== descriptionEditingId) setDescriptionEditingId(undefined)
     videoRef.current?.pause()
     setInspectorTab('segments')
     const nextGoal = item.type === 'goal' ? item : result?.goals.find((goal) => goal.id === item.parentId)
@@ -847,6 +855,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   function clearSelection(level?: 'goal' | 'action') {
+    setDescriptionEditingId(undefined)
     setSelectedId(undefined)
     setSelectedLevel(undefined)
     if (!level || level === 'goal') setActiveGoalId(undefined)
@@ -909,6 +918,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       if (!resolved) return setToast('X 只能在单次任务轨道未标记的空白区间创建')
       setInvalidReason(invalidReasons[0])
       setInvalidReasonOther('')
+      setInvalidIsSample(false)
       setEditingInvalidRangeId(undefined)
       setPendingInvalidRange(resolved)
       return
@@ -968,25 +978,81 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     setToast(`已在 F${splitFrame} 分割为两段：F${left.startFrame}-F${left.endFrame}、F${right.startFrame}-F${right.endFrame}`)
   }
 
-  function confirmInvalidRange() {
-    if (!result || !pendingInvalidRange || !invalidReason) return
+  async function updateInvalidSamples(targets: AnnotationResult['invalidRanges'], isSample: boolean, data = result, forceSave = false): Promise<AnnotationResult | undefined> {
+    if (!data || !targets.length || hardReadonly || saving || submitting || editing || sampleUpdatingId) return
+    setSampleUpdatingId(targets[0].id)
+    let currentData = data
+    const identityMap = new Map<string, string>()
+    try {
+      let latestRevision = revision
+      const needsSave = forceSave || dirty || targets.some((range) => !/^\d+$/.test(range.id))
+      if (needsSave) {
+        latestRevision = await annotationApi.save(projectId, videoId, data, revision)
+        setRevision(latestRevision)
+      }
+      if (needsSave || latestRevision !== workspace?.currentRevision) {
+        const refreshed = await annotationApi.getWorkspace(projectId, videoId, false)
+        currentData = { ...data, invalidRanges: refreshed.result.invalidRanges }
+        for (const oldRange of data.invalidRanges) {
+          const persisted = currentData.invalidRanges.find((range) => range.startFrame === oldRange.startFrame && range.endFrame === oldRange.endFrame && range.reason === oldRange.reason && range.description === oldRange.description)
+          if (persisted) identityMap.set(oldRange.id, persisted.id)
+        }
+        setResult(currentData)
+        setWorkspace((current) => current && current.videoId === videoId ? { ...current, currentRevision: latestRevision } : current)
+        if (needsSave) setDirty(false)
+        setSelectedId((current) => current?.startsWith('invalid:') && identityMap.has(current.slice(8)) ? `invalid:${identityMap.get(current.slice(8))}` : current)
+      }
+      for (const target of targets) {
+        const intervalId = identityMap.get(target.id) || target.id
+        const persisted = currentData.invalidRanges.find((range) => range.id === intervalId)
+        if (!persisted) throw new Error('草稿已保存，但未找到对应的无效片段，请刷新后重试')
+        setSampleUpdatingId(intervalId)
+        await annotationApi.updateInvalidIntervalSample(projectId, videoId, intervalId, isSample)
+        currentData = { ...currentData, invalidRanges: currentData.invalidRanges.map((range) => range.id === intervalId ? { ...range, isSample } : range) }
+        // Undoing an annotation edit must not undo a sample flag already saved through PATCH.
+        const alignSnapshot = (snapshot: AnnotationResult) => ({ ...snapshot, invalidRanges: snapshot.invalidRanges.map((range) => {
+          const id = identityMap.get(range.id) || range.id
+          return { ...range, id, ...(id === intervalId ? { isSample } : {}) }
+        }) })
+        undoStack.current = undoStack.current.map(alignSnapshot)
+        redoStack.current = redoStack.current.map(alignSnapshot)
+        setResult(currentData)
+      }
+      setToast(isSample ? '已设为样例' : '已取消样例')
+      return currentData
+    } catch (failure) {
+      setToast(failure instanceof Error ? failure.message : '样例状态更新失败，请重试')
+      return undefined
+    } finally { setSampleUpdatingId('') }
+  }
+
+  async function confirmInvalidRange() {
+    if (!result || !pendingInvalidRange || !invalidReason || sampleUpdatingId) return
     const { reason, description } = normalizeInvalidReason({ reason: invalidReason, description: invalidReasonOther })
     if (invalidReason === '其他' && !invalidReasonOther.trim()) return
     if (editingInvalidRangeId) {
-      mutate({ ...result, invalidRanges: result.invalidRanges.map((range) => range.id === editingInvalidRangeId ? { ...range, reason, description } : range) })
+      const original = result.invalidRanges.find((range) => range.id === editingInvalidRangeId)
+      if (!original) return
+      const updated = { ...original, reason, description }
+      const nextResult = { ...result, invalidRanges: result.invalidRanges.map((range) => range.id === editingInvalidRangeId ? updated : range) }
+      mutate(nextResult)
       setPendingInvalidRange(undefined)
       setEditingInvalidRangeId(undefined)
       setToast(`无效原因已修改为：${formatInvalidReason({ reason, description })}`)
+      if (invalidIsSample || Boolean(original.isSample) !== invalidIsSample) await updateInvalidSamples([updated], invalidIsSample, nextResult, true)
       return
     }
     const sequence = result.nextInvalidSequence
-    const range = { id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence).padStart(3, '0')}`, sequence, ...pendingInvalidRange, reason, description }
-    mutate({ ...result, nextInvalidSequence: sequence + 1, invalidRanges: normalizeInvalidRanges([...result.invalidRanges, range]) })
+    const range = { id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence).padStart(3, '0')}`, sequence, ...pendingInvalidRange, reason, description, isSample: false }
+    // Keep the new interval separate until its own sample state has been persisted.
+    const nextResult = { ...result, nextInvalidSequence: sequence + 1, invalidRanges: invalidIsSample ? [...result.invalidRanges, range] : normalizeInvalidRanges([...result.invalidRanges, range]) }
+    mutate(nextResult)
     setPendingInvalidRange(undefined)
-    setSelectedId(`invalid:${range.id}`)
+    setDescriptionEditingId(undefined); setSelectedId(`invalid:${range.id}`)
     setSelectedLevel('invalid')
     setInspectorTab('invalid')
     setToast(`已标记无效区间：${formatInvalidReason(range)}`)
+    if (invalidIsSample) await updateInvalidSamples([range], true, nextResult, true)
   }
 
   async function confirmSubmitInvalidFix() {
@@ -995,11 +1061,16 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (invalidReason === '其他' && !invalidReasonOther.trim()) return
     const { ranges, voidVideo } = submitInvalidFix
     let sequence = result.nextInvalidSequence
-    const created = ranges.map((range) => ({ id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence++).padStart(3, '0')}`, sequence: sequence - 1, ...range, reason, description }))
-    const nextResult: AnnotationResult = { ...result, nextInvalidSequence: sequence, invalidRanges: normalizeInvalidRanges([...result.invalidRanges, ...created]) }
+    const created = ranges.map((range) => ({ id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence++).padStart(3, '0')}`, sequence: sequence - 1, ...range, reason, description, isSample: false }))
+    let nextResult: AnnotationResult = { ...result, nextInvalidSequence: sequence, invalidRanges: invalidIsSample ? [...result.invalidRanges, ...created] : normalizeInvalidRanges([...result.invalidRanges, ...created]) }
     setSubmitInvalidFix(undefined)
     setInvalidReasonOther('')
     mutate(nextResult)
+    if (invalidIsSample) {
+      const sampledResult = await updateInvalidSamples(created, true, nextResult, true)
+      if (!sampledResult) return
+      nextResult = sampledResult
+    }
     if (voidVideo) {
       setVoidingVideo(true)
       try {
@@ -1015,7 +1086,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       } finally { setVoidingVideo(false) }
       return
     }
-    setSelectedId(`invalid:${created[0].id}`)
+    const firstCreated = nextResult.invalidRanges.find((range) => range.startFrame === created[0].startFrame && range.endFrame === created[0].endFrame && range.reason === reason && range.description === description)
+    setSelectedId(`invalid:${firstCreated?.id || created[0].id}`)
     setSelectedLevel('invalid')
     setInspectorTab('invalid')
     setToast(`已自动标记 ${created.length} 个无效区间：${formatInvalidReason({ reason, description })}`)
@@ -1026,6 +1098,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const { reason, description } = normalizeInvalidReason(range)
     setInvalidReason(reason)
     setInvalidReasonOther(description)
+    setInvalidIsSample(Boolean(range.isSample))
     setEditingInvalidRangeId(range.id)
     setPendingInvalidRange({ startFrame: range.startFrame, endFrame: range.endFrame })
   }
@@ -1120,7 +1193,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   async function save(showToast = true, overrideResult?: AnnotationResult) {
     const data = overrideResult || result
-    if (!data || hardReadonly || saving || editing) { if (editing && showToast) setToast('请先完成或取消当前拖动'); return revision }
+    if (!data || hardReadonly || saving || editing || sampleUpdatingId) { if (editing && showToast) setToast('请先完成或取消当前拖动'); return revision }
     setSaving(true)
     try { const nextRevision = await annotationApi.save(projectId, videoId, data, revision); setRevision(nextRevision); setDirty(false); if (showToast) setToast('草稿已保存'); return nextRevision }
     catch (reason) { setToast(reason instanceof Error ? reason.message : '保存失败'); throw reason }
@@ -1129,7 +1202,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   async function submit(options: { ignoreActionGaps?: boolean } = {}, overrideResult?: AnnotationResult) {
     const data = overrideResult || result
-    if (!data || submitting) return
+    if (!data || submitting || sampleUpdatingId) return
     if (editing) return setToast('请先完成或取消当前拖动')
     if (workspace?.node === 'annotation' && commentsLoading) return setToast('批注仍在加载，请稍后再提交')
     if (workspace?.node === 'annotation' && unresolvedCommentCount > 0) {
@@ -1146,6 +1219,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       if (goalGaps.length) {
         setInvalidReason(invalidReasons[0])
         setInvalidReasonOther('')
+        setInvalidIsSample(false)
         setSubmitInvalidFix({ ranges: data.goals.length ? goalGaps : [{ startFrame: 0, endFrame: data.totalFrames }], voidVideo: !data.goals.length })
         return
       }
@@ -1322,7 +1396,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   useEffect(() => {
-    if (!dirty || hardReadonly || saving || !result || editing) return
+    if (!dirty || hardReadonly || saving || !result || editing || sampleUpdatingId) return
     const snapshot = result
     const timer = window.setTimeout(() => {
       setSaving(true)
@@ -1338,11 +1412,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         .finally(() => setSaving(false))
     }, 700)
     return () => window.clearTimeout(timer)
-  }, [dirty, editing, hardReadonly, projectId, result, revision, saving, videoId])
+  }, [dirty, editing, hardReadonly, projectId, result, revision, saving, sampleUpdatingId, videoId])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null
+      if (document.querySelector('.modal-backdrop') || target?.closest('.segment-description-fields')) return
       if (commentPlacementMode && (event.key === 'Escape' || event.key.toLowerCase() === 'c')) {
         event.preventDefault()
         setCommentPlacementMode(false)
@@ -1420,7 +1495,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         if (selectedId) { videoRef.current?.pause(); clearSelection(); document.querySelector<HTMLElement>('.global-progress')?.focus() }
       }
     }
-    function onKeyUp(event: KeyboardEvent) { if (shortcutsOpen) return; const endFrame = !playing && hoverPoint ? hoverPoint.frame : currentFrame; if (event.key.toLowerCase() === 'q' && (mark?.kind === 'goal' || mark?.kind === 'action')) finishMark(mark.kind, endFrame); if (event.key.toLowerCase() === 'w' && mark?.kind === 'no_action') finishMark('no_action', endFrame); if (event.key.toLowerCase() === 'x' && mark?.kind === 'invalid') finishMark('invalid', endFrame) }
+    function onKeyUp(event: KeyboardEvent) { if (shortcutsOpen || document.querySelector('.modal-backdrop') || (event.target as HTMLElement | null)?.closest('.segment-description-fields')) return; const endFrame = !playing && hoverPoint ? hoverPoint.frame : currentFrame; if (event.key.toLowerCase() === 'q' && (mark?.kind === 'goal' || mark?.kind === 'action')) finishMark(mark.kind, endFrame); if (event.key.toLowerCase() === 'w' && mark?.kind === 'no_action') finishMark('no_action', endFrame); if (event.key.toLowerCase() === 'x' && mark?.kind === 'invalid') finishMark('invalid', endFrame) }
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp)
     function cancelTemporary() { setMark(undefined); if (editSnapshotRef.current) finishEdit(false) }
     window.addEventListener('blur', cancelTemporary)
@@ -1433,7 +1508,15 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   function segmentListButton(item: AnnotationSegment, title: string) {
     const label = item.type === 'no_action' ? '无标签' : item.labelName || '未选择标签'
     const active = selectedId === item.id && selectedLevel === (item.type === 'goal' ? 'goal' : 'action')
-    return <button className={active ? 'active' : ''} type="button" aria-pressed={active} onClick={() => selectSegment(item)}><i style={{ background: item.color }} /><span className="segment-list-title"><b>{title}</b></span><span className="segment-list-copy"><small style={{ color: item.type === 'no_action' ? '#697782' : item.color }}>{label}</small><em>{item.descriptionZh || '暂无描述'}</em></span><span className="segment-list-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span></button>
+    return <button className={active ? 'active' : ''} type="button" aria-pressed={active} onClick={() => selectSegment(item)}><i style={{ background: item.color }} /><span className="segment-list-title"><b>{title}</b></span><span className="segment-list-copy"><small style={{ color: item.type === 'no_action' ? '#697782' : item.color }}>{label}</small><span className="segment-bilingual-copy"><em>{item.descriptionZh || '暂无中文描述'}</em><em>{item.descriptionEn || '暂无英文描述'}</em></span></span><span className="segment-list-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span></button>
+  }
+
+  function segmentDescriptionActions(item: AnnotationSegment) {
+    if (item.type === 'no_action') return null
+    return <div className="segment-description-actions">
+      <button type="button" disabled={!descriptionEditable || Boolean(editing) || Boolean(descriptionEditingId) || Boolean(descriptionModalId)} onClick={() => { selectSegment(item); setDescriptionEditingId(item.id) }}>编辑</button>
+      {hasDescriptionCandidates(item) && <button type="button" disabled={!descriptionEditable || Boolean(editing) || Boolean(descriptionEditingId) || Boolean(descriptionModalId)} onClick={() => { selectSegment(item); setDescriptionModalId(item.id) }}>选用</button>}
+    </div>
   }
 
   function segmentKeyFrameMeta(item: AnnotationSegment) {
@@ -1450,13 +1533,15 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const labels = workspace!.labels.filter((label) => label.appliesTo === scope || (label.appliesTo === 'both' && label.id === item.labelId))
     const selectedLabel = labels.find((label) => label.id === item.labelId)
     return <div className="segment-inline-editor" onClick={(event) => event.stopPropagation()}>
-      {noAction ? <div className="segment-inline-row"><span className="segment-inline-system no-action-label">无标签</span><label className="segment-content"><input disabled value="未执行有效动作" aria-label="无动作片段描述" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span><button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button></div> : <div className="segment-inline-row">
+      {noAction ? <div className="segment-inline-row"><span className="segment-inline-system no-action-label">无标签</span><SegmentDescriptionFields segment={item} editing={false} onCancel={() => undefined} onSave={() => undefined} /><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span><button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button></div> : <div className="segment-inline-row">
         {workspace!.labelLibraryBound && <label className="label-select"><select disabled={readonly} title={item.labelName || '请选择标签'} className={selectedLabel ? 'has-label-color' : ''} style={selectedLabel ? { '--selected-label-color': selectedLabel.color, '--selected-label-text': contrastTextColor(selectedLabel.color) } as React.CSSProperties : undefined} value={item.labelId || ''} onChange={(event) => { const label = labels.find((candidate) => candidate.id === event.target.value); if (label?.appliesTo === 'both') return; updateSegment(item, { labelId: label?.id, labelCode: label?.code || '', labelName: label?.name, color: label?.color || item.color }) }}><option value="">请选择标签</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label>}
-        <label className="segment-content"><input disabled={!descriptionEditable} value={item.descriptionZh} maxLength={300} onChange={(event) => updateSegment(item, { descriptionZh: event.target.value })} placeholder="输入片段描述（选填）" /></label><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span>
+        <SegmentDescriptionFields key={`${item.id}:${descriptionEditingId === item.id}`} segment={item} editing={descriptionEditingId === item.id && descriptionEditable} onCancel={() => setDescriptionEditingId(undefined)} onSave={(changes) => { if (!descriptionEditable) return; updateSegment(item, changes); setDescriptionEditingId(undefined) }} /><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span>
         <button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button>
       </div>}
     </div>
   }
+
+  const descriptionSegment = [...result.goals, ...result.actions].find((item) => item.id === descriptionModalId)
 
   return <main className="annotation-page">
     <header className="annotation-header">
@@ -1473,7 +1558,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
         {/* <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button> */}
         {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning || submitting || commentsLoading || unresolvedCommentCount === 0} title={unresolvedCommentCount === 0 ? '至少需要一条未解决批注才能退回' : undefined} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}
-        <button className="primary-button" type="button" disabled={hardReadonly || saving || submitting || Boolean(editing)} onClick={() => void submit()}>{submitting ? <><RotateCcw className="spinning" size={16} />正在{submitButtonLabel}...</> : <><Check size={16} />{submitButtonLabel}</>}</button>
+        <button className="primary-button" type="button" disabled={hardReadonly || saving || submitting || Boolean(editing) || Boolean(sampleUpdatingId) || Boolean(descriptionEditingId) || Boolean(descriptionModalId)} onClick={() => void submit()}>{submitting ? <><RotateCcw className="spinning" size={16} />正在{submitButtonLabel}...</> : <><Check size={16} />{submitButtonLabel}</>}</button>
       </div>
     </header>
 
@@ -1484,8 +1569,26 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       </section>
     } inspector={
       <aside className="annotation-inspector">
-        <header className="inspector-tabs"><button type="button" className={inspectorTab === 'segments' ? 'active' : ''} onClick={() => setInspectorTab('segments')}>片段 <b>{result.goals.length + result.actions.length}</b></button><button type="button" className={inspectorTab === 'invalid' ? 'active' : ''} onClick={() => setInspectorTab('invalid')}>无效区间 <b>{result.invalidRanges.length}</b></button></header>
-        {inspectorTab === 'segments' ? <><div className="segment-list-columns"><span>片段</span><span>标签与描述</span><span>总时长</span></div><div className="segment-tree">{result.goals.map((goal, index) => { const goalSelected = selectedLevel === 'goal' && selectedId === goal.id; return <div className="segment-group" key={goal.id}><div className={`segment-list-entry${goalSelected ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{goalSelected && inlineSegmentEditor(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => { const actionSelected = selectedLevel === 'action' && selectedId === action.id; return <div className={`segment-action-wrap${actionSelected ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${actionSelected ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{actionSelected && inlineSegmentEditor(action)}</div>{segmentKeyFrameMeta(action)}</div> })}</div> })}</div></> : <><div className="segment-list-columns invalid-list-columns"><span>区间</span><span>无效原因</span><span>总时长</span><span>操作</span></div><div className="segment-tree invalid-segment-list">{result.invalidRanges.map((range, index) => { const active = selectedLevel === 'invalid' && selectedId === `invalid:${range.id}`; return <div className={`invalid-list-row${active ? ' selected' : ''}`} key={range.id}><button className="invalid-row-main" type="button" aria-pressed={active} onClick={() => { videoRef.current?.pause(); setActiveGoalId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); seek(range.startFrame) }}><i /><span className="segment-list-title"><b>无效区间 {index + 1}</b></span><span className="segment-list-copy"><small>{formatInvalidReason(range)}</small><em>{timeText(range.startFrame / result.frameRate)} - {timeText(range.endFrame / result.frameRate)}</em></span><span className="segment-list-duration"><b>{timeText((range.endFrame - range.startFrame) / result.frameRate)}</b><small>F{range.startFrame}-{range.endFrame}</small></span></button><button className="invalid-reason-edit" type="button" disabled={readonly} onClick={() => editInvalidReason(range)}>修改原因</button></div> })}{!result.invalidRanges.length && <div className="inspector-empty">暂无无效区间，按 X 可在单次任务轨道空白处标记</div>}</div></>}
+        <header className="inspector-tabs"><button type="button" className={inspectorTab === 'segments' ? 'active' : ''} onClick={() => setInspectorTab('segments')}>片段 <b>{result.goals.length + result.actions.length}</b></button><button type="button" className={inspectorTab === 'invalid' ? 'active' : ''} onClick={() => { setDescriptionEditingId(undefined); setInspectorTab('invalid') }}>无效区间 <b>{result.invalidRanges.length}</b></button></header>
+        {inspectorTab === 'segments' ? <><div className="segment-list-columns segment-description-columns"><span>片段</span><span>标签与中英文描述</span><span>总时长</span><span>操作</span></div><div className="segment-tree">{result.goals.map((goal, index) => { const goalSelected = selectedLevel === 'goal' && selectedId === goal.id; return <div className="segment-group" key={goal.id}><div className={`segment-list-entry${goalSelected ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{goalSelected && inlineSegmentEditor(goal)}{segmentDescriptionActions(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => { const actionSelected = selectedLevel === 'action' && selectedId === action.id; return <div className={`segment-action-wrap${actionSelected ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${actionSelected ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{actionSelected && inlineSegmentEditor(action)}{segmentDescriptionActions(action)}</div>{segmentKeyFrameMeta(action)}</div> })}</div> })}</div></> : <div className="invalid-list-table">
+          <div className="segment-list-columns invalid-list-columns"><span>区间</span><span>无效原因</span><span>是否样例</span><span>总时长</span><span>操作</span></div>
+          <div className="segment-tree invalid-segment-list">{result.invalidRanges.map((range, index) => {
+            const active = selectedLevel === 'invalid' && selectedId === `invalid:${range.id}`
+            const sampleBusy = Boolean(sampleUpdatingId) || saving || submitting || Boolean(editing)
+            return <div className={`invalid-list-row${active ? ' selected' : ''}`} key={range.id}>
+              <button className="invalid-row-main" type="button" aria-pressed={active} onClick={() => { videoRef.current?.pause(); setActiveGoalId(undefined); setDescriptionEditingId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); seek(range.startFrame) }}>
+                <i /><span className="segment-list-title"><b>无效区间 {index + 1}</b></span>
+                <span className="segment-list-copy"><small title={formatInvalidReason(range)}>{formatInvalidReason(range)}</small><em>{timeText(range.startFrame / result.frameRate)} - {timeText(range.endFrame / result.frameRate)}</em></span>
+                <span className={`invalid-sample-status${range.isSample ? ' active' : ''}`}>{range.isSample ? '样例' : '—'}</span>
+                <span className="segment-list-duration"><b>{timeText((range.endFrame - range.startFrame) / result.frameRate)}</b><small>F{range.startFrame}-{range.endFrame}</small></span>
+              </button>
+              <div className="invalid-row-actions">
+                <button className="invalid-reason-edit" type="button" disabled={readonly || sampleBusy} onClick={() => editInvalidReason(range)}>修改原因</button>
+                <button className="invalid-reason-edit invalid-sample-button" type="button" disabled={hardReadonly || sampleBusy} onClick={() => void updateInvalidSamples([range], !range.isSample)}>{sampleUpdatingId === range.id ? '更新中...' : range.isSample ? '取消样例' : '设为样例'}</button>
+              </div>
+            </div>
+          })}{!result.invalidRanges.length && <div className="inspector-empty">暂无无效区间，按 X 可在单次任务轨道空白处标记</div>}</div>
+        </div>}
       </aside>
     } timeline={
     <section className={`annotation-timeline${workspace.labelLibraryBound || editing ? '' : ' no-label-library'}${workspace.operationLibraryId ? ' has-operation-bar' : ''}${selectedLevel ? ` selection-${selectedLevel === 'invalid' ? 'goal' : selectedLevel}` : ''}`}>
@@ -1494,8 +1597,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <header><div><strong>{draftRange ? `正在创建：${draftRange.level === 'goal' ? '单次任务' : draftRange.level === 'invalid' ? '视频无效区间' : '小目标'}` : selectedGoal ? `当前单次任务：${selectedGoal.labelName || selectedGoal.code || '未选择标签'}` : '当前创建：单次任务'}</strong><span>{draftRange ? `${timeText(draftRange.startFrame / result.frameRate)} - ${timeText(draftRange.endFrame / result.frameRate)} · 松开 ${mark?.kind === 'no_action' ? 'W' : mark?.kind === 'invalid' ? 'X' : 'Q'} 完成，Esc 取消` : 'Q 普通片段 · W 无动作 · X 视频无效区间'}</span></div><div>{selected && <button type="button" onClick={() => clearSelection()}>退出预览</button>}<button type="button" disabled={readonly || !history.undo} onClick={undo} title="撤销"><Undo2 size={14} />撤销</button><button type="button" disabled={readonly || !history.redo} onClick={redo} title="重做"><Redo2 size={14} />重做</button></div></header>
       <div className="timeline-body">
         <GlobalTimeline goals={result.goals} invalidRanges={result.invalidRanges} draft={draftRange} selectedRange={selected || selectedInvalidRange} totalFrames={result.totalFrames} frameRate={result.frameRate} currentFrame={currentFrame} viewport={goalTimelineViewport} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onClearSelection={() => clearSelection()} />
-        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'goal' || selectedLevel === 'invalid' ? selectedId : undefined} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); setInspectorTab('invalid'); seek(range.startFrame) }} />
-        {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'action' || selectedLevel === 'invalid' ? selectedId : undefined} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid') }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
+        <TimelineLane level="goal" label="单次任务" items={result.goals} childItems={result.actions} invalidRanges={result.invalidRanges} draft={draftRange} totalFrames={result.totalFrames} viewport={goalTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'goal' || selectedLevel === 'invalid' ? selectedId : undefined} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('goal', frame)} onViewportChange={setGoalViewport} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(undefined); setDescriptionEditingId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); setInspectorTab('invalid'); seek(range.startFrame) }} />
+        {selectedGoal && atomicTimelineViewport ? <TimelineLane level="action" label="小目标" items={visibleActions} draft={draftRange} totalFrames={result.totalFrames} rangeStartFrame={selectedGoal.startFrame} rangeEndFrame={selectedGoal.endFrame} viewport={atomicTimelineViewport} frameRate={result.frameRate} currentFrame={currentFrame} selectedId={selectedLevel === 'action' || selectedLevel === 'invalid' ? selectedId : undefined} invalidRanges={result.invalidRanges.filter((range) => range.startFrame < selectedGoal.endFrame && range.endFrame > selectedGoal.startFrame)} readonly={readonly} showPlayhead onHover={(frame) => hoverTimeline('action', frame)} onViewportChange={(viewport) => setAtomicViewports((current) => ({ ...current, [selectedGoal.id]: viewport }))} onSeek={seek} onScrubStart={startScrub} onScrubPreview={previewScrub} onScrubEnd={finishScrub} onPreciseSeek={preciseSeek} onEditStart={beginEdit} onSegmentPreview={previewSegmentRange} onInvalidPreview={previewInvalidRange} onEditFinish={finishEdit} onSelect={selectSegment} onSelectInvalid={(range) => { videoRef.current?.pause(); setActiveGoalId(selectedGoal.id); setDescriptionEditingId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid') }} /> : <div className="annotation-lane action-lane"><span className="annotation-lane-label">小目标</span><div className="annotation-track empty"><span className="timeline-empty-hint">先选择一个单次任务片段</span></div></div>}
       </div>
     </section>
     } />
@@ -1507,10 +1610,11 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <div className="page-comment-dialog-list">{commentsLoading ? <div className="comment-empty">批注加载中...</div> : visibleVideoComments.length === 0 ? <div className="comment-empty">暂无批注</div> : visibleVideoComments.map((comment) => <article className={comment.resolved ? 'resolved' : ''} key={comment.id}><header><span className="page-comment-sequence">{comment.sequence}</span><strong>{nodeLabels[comment.node]}批注</strong><span className={comment.resolved ? 'resolved' : 'pending'}>{comment.resolved ? '已解决' : '待处理'}</span></header><p>{comment.content}</p><footer><small>{comment.createdByName || '未知用户'} · {formatDateTime(comment.createdAt)} · 页面位置 {Math.round(comment.positionX * 100)}%, {Math.round(comment.positionY * 100)}%</small>{!comment.resolved && <button type="button" disabled={!canResolveComment} onClick={() => resolveComment(comment.id)}>标记已解决</button>}</footer></article>)}</div>
       <footer><button className="secondary-button" type="button" onClick={() => setCommentsOpen(false)}>关闭</button></footer>
     </div>}
-    {(pendingInvalidRange || submitInvalidFix) && <Modal title="选择无效原因" onClose={() => { if (voidingVideo) return; setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined); setSubmitInvalidFix(undefined) }} footer={<><button className="secondary-button" type="button" disabled={voidingVideo} onClick={() => { setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined); setSubmitInvalidFix(undefined) }}>取消</button><button className="primary-button" type="button" disabled={voidingVideo || !invalidReason || invalidReason === '其他' && !invalidReasonOther.trim()} onClick={() => { if (submitInvalidFix) void confirmSubmitInvalidFix(); else confirmInvalidRange() }}>{voidingVideo ? '正在作废...' : submitInvalidFix ? (submitInvalidFix.voidVideo ? '确认作废视频' : `确认标记 ${submitInvalidFix.ranges.length} 处并提交`) : editingInvalidRangeId ? '确认修改' : '确认标记'}</button></>}><div className="invalid-reason-dialog">{submitInvalidFix ? (submitInvalidFix.voidVideo ? <p>整个视频未标注，将生成覆盖全片（{timeText(0)} - {timeText(result.totalFrames / result.frameRate)}）的无效片段；确认原因后将执行作废流程，不会进入下一环节。</p> : <p>检测到 {submitInvalidFix.ranges.length} 个未标注区间，共 {submitInvalidFix.ranges.reduce((sum, range) => sum + range.endFrame - range.startFrame, 0)} 帧，将自动生成无效片段；确认原因后正常提交并进入下一环节。<small>{submitInvalidFix.ranges.map((range) => `${timeText(range.startFrame / result.frameRate)}-${timeText(range.endFrame / result.frameRate)}`).join('、')}</small></p>) : <p>无效区间：{timeText(pendingInvalidRange!.startFrame / result.frameRate)} - {timeText(pendingInvalidRange!.endFrame / result.frameRate)}</p>}<fieldset><legend>无效原因 <i className="required-mark">*</i></legend><div>{invalidReasons.map((reason) => <label key={reason}><input type="radio" name="invalid-reason" checked={invalidReason === reason} onChange={() => setInvalidReason(reason)} />{reason}</label>)}</div></fieldset>{invalidReason === '其他' && <label className="invalid-reason-other"><span>其他原因 <i className="required-mark">*</i></span><input autoFocus value={invalidReasonOther} maxLength={200} onChange={(event) => setInvalidReasonOther(event.target.value)} placeholder="请输入其他无效原因" /><small>{invalidReasonOther.length}/200</small></label>}</div></Modal>}
+    {(pendingInvalidRange || submitInvalidFix) && <Modal title="选择无效原因" onClose={() => { if (voidingVideo) return; setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined); setSubmitInvalidFix(undefined) }} footer={<><button className="secondary-button" type="button" disabled={voidingVideo} onClick={() => { setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined); setSubmitInvalidFix(undefined) }}>取消</button><button className="primary-button" type="button" disabled={voidingVideo || Boolean(sampleUpdatingId) || !invalidReason || invalidReason === '其他' && !invalidReasonOther.trim()} onClick={() => { if (submitInvalidFix) void confirmSubmitInvalidFix(); else void confirmInvalidRange() }}>{voidingVideo ? '正在作废...' : submitInvalidFix ? (submitInvalidFix.voidVideo ? '确认作废视频' : `确认标记 ${submitInvalidFix.ranges.length} 处并提交`) : editingInvalidRangeId ? '确认修改' : '确认标记'}</button></>}><div className="invalid-reason-dialog">{submitInvalidFix ? (submitInvalidFix.voidVideo ? <p>整个视频未标注，将生成覆盖全片（{timeText(0)} - {timeText(result.totalFrames / result.frameRate)}）的无效片段；确认原因后将执行作废流程，不会进入下一环节。</p> : <p>检测到 {submitInvalidFix.ranges.length} 个未标注区间，共 {submitInvalidFix.ranges.reduce((sum, range) => sum + range.endFrame - range.startFrame, 0)} 帧，将自动生成无效片段；确认原因后正常提交并进入下一环节。<small>{submitInvalidFix.ranges.map((range) => `${timeText(range.startFrame / result.frameRate)}-${timeText(range.endFrame / result.frameRate)}`).join('、')}</small></p>) : <p>无效区间：{timeText(pendingInvalidRange!.startFrame / result.frameRate)} - {timeText(pendingInvalidRange!.endFrame / result.frameRate)}</p>}<fieldset><legend>无效原因 <i className="required-mark">*</i></legend><div>{invalidReasons.map((reason) => <label key={reason}><input type="radio" name="invalid-reason" checked={invalidReason === reason} onChange={() => setInvalidReason(reason)} />{reason}</label>)}</div></fieldset><label className="invalid-sample-checkbox"><input type="checkbox" checked={invalidIsSample} disabled={voidingVideo || Boolean(sampleUpdatingId)} onChange={(event) => setInvalidIsSample(event.target.checked)} />设为样例</label>{invalidReason === '其他' && <label className="invalid-reason-other"><span>其他原因 <i className="required-mark">*</i></span><input autoFocus value={invalidReasonOther} maxLength={200} onChange={(event) => setInvalidReasonOther(event.target.value)} placeholder="请输入其他无效原因" /><small>{invalidReasonOther.length}/200</small></label>}</div></Modal>}
     {submitIssue && <Modal title="当前标注未完成" onClose={() => setSubmitIssue(undefined)} footer={submitIssue.type === 'action-gap' ? <><button className="secondary-button" type="button" onClick={() => { setSubmitIssue(undefined); void submit({ ignoreActionGaps: true }) }}>确认不标注，继续提交</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.goal.id); setSelectedId(submitIssue.goal.id); setSelectedLevel('goal'); seek(submitIssue.gaps[0].startFrame); setSubmitIssue(undefined) }}>返回检查第一个</button></> : <><button className="secondary-button" type="button" onClick={() => setSubmitIssue(undefined)}>返回补充</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.action.parentId); setSelectedId(submitIssue.action.id); setSelectedLevel('action'); seek(submitIssue.action.startFrame); setSubmitIssue(undefined) }}>定位首个问题</button></>}><div className="submit-validation-dialog">{submitIssue.type === 'action-gap' ? <><strong>当前单次任务还有 {submitIssue.gaps.length} 个小目标未覆盖区间，共 {submitIssue.gaps.reduce((sum, gap) => sum + gap.endFrame - gap.startFrame, 0)} 帧</strong><p>可确认这些区间不标注并继续，也可返回检查第一个并补充小目标或标记无效。</p></> : <><strong>{submitIssue.title} 尚未选择操作对象，请选择对象</strong><p>请定位并完成当前问题后再次提交。小目标标签可不选择。</p></>}</div></Modal>}
     {shortcutsOpen && <Modal title="快捷键与操作" onClose={() => setShortcutsOpen(false)}><div className="shortcut-guide"><ShortcutColumn title="键盘快捷键" items={keyboardShortcuts} /><ShortcutColumn title="时间轴操作" items={timelineShortcuts} /></div></Modal>}
     {candidateModalOpen && <Modal title="新增操作对象候选" onClose={() => { if (!candidateSaving) setCandidateModalOpen(false) }} footer={<><button className="secondary-button" type="button" disabled={candidateSaving} onClick={() => setCandidateModalOpen(false)}>取消</button><button className="primary-button" type="button" disabled={candidateSaving || !candidateForm.name.trim()} onClick={() => void createOperationCandidate()}>{candidateSaving ? '正在提交...' : '提交候选'}</button></>}><div className="candidate-object-form"><p>候选对象将提交到“{workspace.operationLibraryName || '项目操作对象库'}”，审核通过后才可用于关键帧。</p><label><span>对象名称 <i className="required-mark">*</i></span><input autoFocus value={candidateForm.name} maxLength={100} onChange={(event) => setCandidateForm({ ...candidateForm, name: event.target.value })} placeholder="请输入对象名称" /></label><label><span>别名</span><input value={candidateForm.alias} maxLength={100} onChange={(event) => setCandidateForm({ ...candidateForm, alias: event.target.value })} placeholder="请输入对象别名（选填）" /></label><label><span>属性</span><input value={candidateForm.attribute} maxLength={500} onChange={(event) => setCandidateForm({ ...candidateForm, attribute: event.target.value })} placeholder="请输入对象属性（选填）" /></label></div></Modal>}
+    {descriptionSegment && <SegmentDescriptionModal key={descriptionSegment.id} segment={descriptionSegment} onClose={() => setDescriptionModalId(undefined)} onSave={(changes) => { if (!descriptionEditable) return; updateSegment(descriptionSegment, changes); setDescriptionModalId(undefined) }} />}
     {keyFrameModalOpen && selected?.type === 'action' && <Modal title={editingKeyFrame ? '编辑关键帧' : '标记关键帧'} onClose={() => setKeyFrameModalOpen(false)} footer={<>{editingKeyFrame && <button className="secondary-button danger-button" type="button" onClick={deleteEditingKeyFrame}>删除关键帧</button>}<button className="secondary-button" type="button" onClick={() => setKeyFrameModalOpen(false)}>取消</button><button className="primary-button" type="button" disabled={operationObjectsLoading || !keyFrameFormValid} onClick={saveKeyFrame}>保存关键帧</button></>}><div className="keyframe-modal-form"><div className="keyframe-summary"><strong>小目标 {selected.code || selected.sequence}</strong><span>当前帧 F{editingKeyFrame?.frame ?? currentFrame}</span></div><fieldset><legend>事件类型 <i className="required-mark">*</i></legend><div>{(Object.entries(keyFrameTypeLabels) as Array<[AnnotationKeyFrame['type'], string]>).map(([value, label]) => <label key={value}><input type="radio" name="keyframe-type" checked={keyFrameForm.type === value} onChange={() => setKeyFrameForm({ ...keyFrameForm, type: value, operationObjectIds: value === 'abnormal' ? [] : keyFrameForm.operationObjectIds, detail: value === 'contact' ? '' : keyFrameForm.detail })} />{label}</label>)}</div></fieldset>{keyFrameNeedsObject && <div className="keyframe-object-field"><span>关联对象 <i className="required-mark">*</i></span>{operationObjectsLoading ? <div className="keyframe-object-empty">正在加载操作对象...</div> : operationObjects.length ? <div className="keyframe-object-options">{operationObjects.map((item) => <label className={keyFrameForm.operationObjectIds.includes(item.id) ? 'selected' : ''} key={item.id}><input type="checkbox" value={item.id} checked={keyFrameForm.operationObjectIds.includes(item.id)} onChange={() => setKeyFrameForm((form) => ({ ...form, operationObjectIds: form.operationObjectIds.includes(item.id) ? form.operationObjectIds.filter((id) => id !== item.id) : [...form.operationObjectIds, item.id] }))} /><strong>{item.libraryName}：</strong><b>{item.name}{!item.approved && '（未审核）'}</b>{item.alias && <small>{item.alias}</small>}</label>)}</div> : <small>暂无操作对象，请先在标注配置中维护</small>}</div>}{keyFrameNeedsDetail && <label><span>{keyFrameForm.type === 'object_change' ? '变化说明' : '异常类型或说明'} <i className="required-mark">*</i></span><input value={keyFrameForm.detail} maxLength={2000} onChange={(event) => setKeyFrameForm({ ...keyFrameForm, detail: event.target.value })} placeholder={keyFrameForm.type === 'object_change' ? '请输入变化说明' : '请输入异常类型或说明'} /></label>}</div></Modal>}
     {commentPoint && <Modal title="添加批注" onClose={() => { if (!commentSubmitting) setCommentPoint(undefined) }} footer={<><button className="secondary-button" type="button" disabled={commentSubmitting} onClick={() => setCommentPoint(undefined)}>取消</button><button className="primary-button" type="button" disabled={commentSubmitting || !commentDraft.trim()} onClick={createComment}>{commentSubmitting ? '正在添加...' : '添加批注'}</button></>}><div className="page-comment-form"><p>批注位置：横向 {Math.round(commentPoint.x * 100)}%，纵向 {Math.round(commentPoint.y * 100)}%</p><textarea autoFocus value={commentDraft} maxLength={100} onChange={(event) => setCommentDraft(event.target.value)} placeholder="请输入批注内容（最多 100 字）" /><small>{commentDraft.length}/100</small></div></Modal>}
     {toast && <div className="toast">{toast}</div>}

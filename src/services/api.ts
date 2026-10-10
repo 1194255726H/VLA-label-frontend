@@ -1,5 +1,6 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockClaimPool, mockProjects, mockTasks, mockUser } from '../mocks/data'
+import { normalizeInvalidIntervalList } from '../utils/invalidReason'
 import type {
   ImportValidationError,
   PasswordResetChallenge,
@@ -208,6 +209,7 @@ export function normalizeSupplier(value: unknown) {
 
 function normalizeVideo(item: Record<string, unknown>): VideoListItem {
   return {
+    invalidIntervalList: normalizeInvalidIntervalList(Array.isArray(item.invalid_interval_list) ? item.invalid_interval_list : item.invalid_intervals),
     id: String(item.id || ''),
     projectId: String(item.project_id || ''),
     projectName: String(item.project_name || ''),
@@ -275,7 +277,7 @@ export const workbenchApi = {
   async listProjects(): Promise<Project[]> {
     if (runtimeConfig.apiMode === 'mock') { await sleep(); return mockProjects.map((item) => ({ ...item })) }
     const result = await loadWorkbenchProjects()
-    return result.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: 0, claimLimit: numberValue(config.active_task_limit) || 10 } })
+    return result.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: 0, claimLimit: numberValue(config.active_task_limit) || 10, invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list) } })
   },
   async getSnapshot(query: TaskQuery): Promise<WorkbenchSnapshot> {
     if (runtimeConfig.apiMode === 'mock') {
@@ -311,7 +313,7 @@ export const workbenchApi = {
     })
     const tasks: WorkbenchSnapshot['tasks'] = { items: videoItems, page: { pageNo: rawVideos.page || pageNo, pageSize: rawVideos.page_size || pageSize, total: rawVideos.total || 0 }, pages: rawVideos.pages || 1, viewMode: 'personal', selfClaimEnabled: true }
     return {
-      projects: projects.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: String(item.id) === effectiveProjectId && query.tab === 'pending' ? rawVideos.total : 0, claimLimit: numberValue(config.active_task_limit) || 10 } }),
+      projects: projects.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: String(item.id) === effectiveProjectId && query.tab === 'pending' ? rawVideos.total : 0, claimLimit: numberValue(config.active_task_limit) || 10, invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list) } }),
       currentProjectId: effectiveProjectId,
       recommendedTask: query.tab === 'pending' ? videoItems[0] || null : null,
       tasks,

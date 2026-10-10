@@ -9,6 +9,7 @@ import type { SessionResponse, VideoListItem } from '../types/api'
 import { FleetSyncModal } from './ProjectManagementPage'
 import { formatDateTime } from '../utils/date'
 import { nodeLabels, nodeToneByLabel } from '../utils/node'
+import { summarizeInvalidIntervals } from '../utils/invalidReason'
 
 const videoStatusTabs = [{ value: '', label: '全部' }, { value: 'pending', label: '待处理' }, { value: 'in_progress', label: '处理中' }, { value: 'describing', label: '模型描述中' }, { value: 'cutting', label: '切割中' }, { value: 'completed', label: '已完成' }, { value: 'cancelled', label: '已作废' }, { value: 'abnormal', label: '异常' }]
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
@@ -22,6 +23,14 @@ function clockDuration(value: number | null) {
   return hours ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 function milliseconds(value: number | null) { return value === null ? '—' : clockDuration(value / 1000) }
+
+function VideoInvalidReasons({ video }: { video: VideoListItem }) {
+  const { reasons, sampleCount } = summarizeInvalidIntervals(video.invalidIntervalList)
+  return <div className="video-invalid-reasons">
+    {sampleCount > 0 && <span>样例片段 {sampleCount} 个</span>}
+    <span className={sampleCount > 0 ? 'secondary' : undefined} title={reasons || undefined}>{reasons || '-'}</span>
+  </div>
+}
 
 export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const { projectId = '' } = useParams()
@@ -87,16 +96,16 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       <button className="primary-button compact" type="button" onClick={applySearch}>查询</button><button className="secondary-button compact" type="button" onClick={resetFilters}>重置</button>
     </div>
     {error && <div className="error-banner"><CircleAlert size={18} /><span>{error}</span><button type="button" onClick={loadVideos}>重新加载</button></div>}
-    <div className="management-table-wrap"><table className="management-table annotation-data-table project-video-table"><thead><tr><th>视频名称</th><th>一级场景</th><th>二级场景</th><th>供应商</th><th>状态</th><th>作业节点</th><th>流转类型</th><th>视频时长</th><th>有效片段时长</th><th>无效片段时长</th><th>单次任务数</th><th>小目标数</th><th>处理人</th><th>创建时间</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
-      {loading ? <tr><td colSpan={16}><div className="management-empty">正在加载项目视频...</div></td></tr> : items.map((video) => <tr key={video.id}>
+    <div className="management-table-wrap"><table className="management-table annotation-data-table project-video-table"><thead><tr><th>视频名称</th><th>一级场景</th><th>二级场景</th><th>供应商</th><th>状态</th><th>作业节点</th><th>流转类型</th><th>视频时长</th><th>有效片段时长</th><th>无效片段时长</th><th className="video-invalid-reasons-column">无效原因</th><th>单次任务数</th><th>小目标数</th><th>处理人</th><th>创建时间</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
+      {loading ? <tr><td colSpan={17}><div className="management-empty">正在加载项目视频...</div></td></tr> : items.map((video) => <tr key={video.id}>
         <td><div className="entity-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `视频记录 #${video.id}`}</small></div></td>
         <td title={video.scene1?.name}>{video.scene1?.name || '-'}</td><td title={video.scene2?.name}>{video.scene2?.name || '-'}</td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
         <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
         <td><span className={`node-tag ${nodeToneByLabel(nodeLabels[video.currentNode])}`}>{nodeLabels[video.currentNode]}</span></td><td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
-        <td>{clockDuration(video.duration)}</td><td>{milliseconds(video.effectiveDurationMs)}</td><td>{milliseconds(video.invalidDurationMs)}</td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td><td>{formatDateTime(video.updatedAt)}</td>
+        <td>{clockDuration(video.duration)}</td><td>{milliseconds(video.effectiveDurationMs)}</td><td>{milliseconds(video.invalidDurationMs)}</td><td className="video-invalid-reasons-column"><VideoInvalidReasons video={video} /></td><td>{video.atomicTaskCount}</td><td>{video.atomicActionCount}</td><td>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td><td>{formatDateTime(video.updatedAt)}</td>
         <td><div className="row-actions"><button type="button" disabled={!video.id} onClick={() => preview(video)}><Eye size={15} />预览</button></div></td>
       </tr>)}
-      {!loading && !items.length && <tr><td colSpan={16}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
+      {!loading && !items.length && <tr><td colSpan={17}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
     </tbody></table></div>
     <footer className="management-footer"><span>共 {total} 条</span><PaginationJump page={page} pages={pages} disabled={loading} onChange={(next) => { setLoading(true); setPage(next) }} pageSize={pageSize} onPageSizeChange={(size) => { setLoading(true); setPageSize(size); setPage(1) }} /></footer>
   </section></section>{fleetOpen && <FleetSyncModal projectId={projectId} projectName={projectName} onClose={() => setFleetOpen(false)} onSynced={fleetSynced} />}{toast && <div className="toast">{toast}</div>}</AppShell>

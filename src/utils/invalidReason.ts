@@ -1,4 +1,21 @@
-import type { InvalidRange } from '../types/api'
+import type { InvalidIntervalSummary, InvalidRange } from '../types/api'
+
+export function normalizeInvalidIntervalList(value: unknown): InvalidIntervalSummary[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item) => item && typeof item === 'object' && item.id != null)
+    .map((item) => ({ id: String(item.id), reason: String(item.reason || ''), isSample: item.is_sample === true }))
+}
+
+export function summarizeInvalidIntervals(intervals: InvalidIntervalSummary[] = []) {
+  const reasons = intervals.map((interval) => {
+    const reason = interval.reason.trim()
+    return /^其他(?:\s*[:：]|$)/.test(reason) ? '其他' : reason
+  }).filter(Boolean)
+  return {
+    reasons: [...new Set(reasons)].join('、'),
+    sampleCount: intervals.filter((interval) => interval.isSample).length,
+  }
+}
 
 export const invalidReasons = ['手部出框', '严重遮挡', '关键步骤缺失', '其他']
 

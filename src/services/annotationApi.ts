@@ -1,9 +1,10 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockTasks } from '../mocks/data'
-import type { AnnotationKeyFrame, AnnotationResult, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
+import type { AnnotationKeyFrame, AnnotationResult, AnnotationSegment, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
 import { createClientId } from '../utils/id'
 import { request, normalizeScene, normalizeSupplier } from './api'
 import { normalizeInvalidReason } from '../utils/invalidReason'
+import { readSegmentDescriptions, segmentDescriptionPayload } from '../utils/segmentDescription'
 
 const mockResults = new Map<string, AnnotationResult>()
 const mockRevisions = new Map<string, number>()
@@ -134,13 +135,13 @@ function annotationPayload(rawResult: AnnotationResult) {
     atomic_tasks: result.goals.map((goal) => ({
       id: goal.id, start_frame: goal.startFrame, end_frame: goal.endFrame,
       start_ms: frameToMs(goal.startFrame, result.frameRate), end_ms: frameToMs(goal.endFrame, result.frameRate), sequence: goal.sequence,
-      label_id: goal.labelId ? Number(goal.labelId) : null, label_code: goal.labelCode || '', description: goal.descriptionZh,
+      label_id: goal.labelId ? Number(goal.labelId) : null, label_code: goal.labelCode || '', ...segmentDescriptionPayload(goal),
       next_atomic_sequence: goal.nextAtomicSequence,
       actions: result.actions.filter((action) => action.parentId === goal.id).map((action) => ({
         id: action.id, start_frame: action.startFrame, end_frame: action.endFrame,
         start_ms: frameToMs(action.startFrame, result.frameRate), end_ms: frameToMs(action.endFrame, result.frameRate), sequence: action.sequence,
         segment_type: action.segmentType || (action.type === 'no_action' ? 'no_action' : 'atomic'), system_code: action.systemCode,
-        label_id: action.labelId ? Number(action.labelId) : null, label_code: action.labelCode || '', description: action.descriptionZh,
+        label_id: action.labelId ? Number(action.labelId) : null, label_code: action.labelCode || '', ...segmentDescriptionPayload(action),
         operation_object_ids: (action.operationObjectIds || []).map(Number),
         description_zh: action.descriptionZh, description_en: action.descriptionEn || '', description_source: action.descriptionSource || 'user',
         model_description_required: action.modelDescriptionRequired,
@@ -187,20 +188,28 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
     endFrame: range.end_frame == null ? msToFrame(range.end_ms, frameRate) : Number(range.end_frame),
     ...normalizeInvalidReason(range), isSample: range.is_sample === true,
   }))
-  const goals = rawGoals.map((goal, index) => ({ id: String(goal.id || `goal-${goal.sequence ?? index + 1}`), sequence: Number(goal.sequence ?? index + 1), type: 'goal' as const, startFrame: goal.start_frame == null ? msToFrame(goal.start_ms, frameRate) : Number(goal.start_frame), endFrame: goal.end_frame == null ? msToFrame(goal.end_ms, frameRate) : Number(goal.end_frame), labelId: goal.label_id == null ? undefined : String(goal.label_id), labelCode: String(goal.label_code || ''), labelName: labels.find((label) => label.id === String(goal.label_id))?.name, color: labels.find((label) => label.id === String(goal.label_id))?.color || '#2563EB', descriptionZh: String(goal.description || '') }))
+  const goals = rawGoals.map((goal, index) => ({ id: String(goal.id || `goal-${goal.sequence ?? index + 1}`), sequence: Number(goal.sequence ?? index + 1), type: 'goal' as const, startFrame: goal.start_frame == null ? msToFrame(goal.start_ms, frameRate) : Number(goal.start_frame), endFrame: goal.end_frame == null ? msToFrame(goal.end_ms, frameRate) : Number(goal.end_frame), labelId: goal.label_id == null ? undefined : String(goal.label_id), labelCode: String(goal.label_code || ''), labelName: labels.find((label) => label.id === String(goal.label_id))?.name, color: labels.find((label) => label.id === String(goal.label_id))?.color || '#2563EB', descriptionZh: '', ...readSegmentDescriptions(goal) }))
+  const descriptionFieldsById = new Map<string, Partial<AnnotationSegment>>()
+  rawGoals.forEach((goal, index) => {
+    descriptionFieldsById.set(goals[index].id, readSegmentDescriptions(goal))
+    if (Array.isArray(goal.actions)) goal.actions.forEach((action, actionIndex) => {
+      const sequence = Number(action.sequence ?? actionIndex + 1)
+      descriptionFieldsById.set(String(action.id || `${goals[index].id}-A${String(sequence).padStart(3, '0')}`), readSegmentDescriptions(action))
+    })
+  })
   const backendKeyFrameFields = new Set<string>()
-  const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => { const noAction = action.segment_type === 'no_action' || action.system_code === 'NO_ACTION'; const sequence = Number(action.sequence ?? index + 1); const actionKey = `${parent.id}:${sequence}`; const hasKeyFrames = Array.isArray(action.keyframes) || Array.isArray(action.key_frames) || Array.isArray(action.keyFrames); if (hasKeyFrames) backendKeyFrameFields.add(actionKey); const rawKeyFrames = Array.isArray(action.keyframes) ? action.keyframes : Array.isArray(action.key_frames) ? action.key_frames : Array.isArray(action.keyFrames) ? action.keyFrames : []; return ({ id: String(action.id || `${parent.id}-A${String(sequence).padStart(3, '0')}`), sequence, parentId: parent.id, type: noAction ? 'no_action' as const : 'action' as const, startFrame: action.start_frame == null ? msToFrame(action.start_ms, frameRate) : Number(action.start_frame), endFrame: action.end_frame == null ? msToFrame(action.end_ms, frameRate) : Number(action.end_frame), labelId: action.label_id == null ? undefined : String(action.label_id), labelCode: String(action.label_code || ''), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: noAction ? '#64748B' : labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: String(action.description_zh || action.description || (noAction ? '未执行有效动作' : '')), descriptionEn: String(action.description_en || (noAction ? 'No valid action is performed.' : '')), systemCode: noAction ? 'NO_ACTION' as const : undefined, descriptionSource: noAction ? 'system' as const : 'user' as const, modelDescriptionRequired: noAction ? false : undefined, ...normalizeOperationObjectRefs(action), keyFrames: (rawKeyFrames as Array<Record<string, unknown>>).map(normalizeKeyFrame) }) }) })
+  const actions = rawGoals.flatMap((goal, goalIndex) => { const parent = goals[goalIndex]; return (Array.isArray(goal.actions) ? goal.actions as Array<Record<string, unknown>> : []).map((action, index) => { const noAction = action.segment_type === 'no_action' || action.system_code === 'NO_ACTION'; const sequence = Number(action.sequence ?? index + 1); const actionKey = `${parent.id}:${sequence}`; const hasKeyFrames = Array.isArray(action.keyframes) || Array.isArray(action.key_frames) || Array.isArray(action.keyFrames); if (hasKeyFrames) backendKeyFrameFields.add(actionKey); const rawKeyFrames = Array.isArray(action.keyframes) ? action.keyframes : Array.isArray(action.key_frames) ? action.key_frames : Array.isArray(action.keyFrames) ? action.keyFrames : []; return ({ id: String(action.id || `${parent.id}-A${String(sequence).padStart(3, '0')}`), sequence, parentId: parent.id, type: noAction ? 'no_action' as const : 'action' as const, startFrame: action.start_frame == null ? msToFrame(action.start_ms, frameRate) : Number(action.start_frame), endFrame: action.end_frame == null ? msToFrame(action.end_ms, frameRate) : Number(action.end_frame), labelId: action.label_id == null ? undefined : String(action.label_id), labelCode: String(action.label_code || ''), labelName: labels.find((label) => label.id === String(action.label_id))?.name, color: noAction ? '#64748B' : labels.find((label) => label.id === String(action.label_id))?.color || '#16A34A', descriptionZh: noAction ? '未执行有效动作' : '', descriptionEn: noAction ? 'No valid action is performed.' : '', ...readSegmentDescriptions(action), systemCode: noAction ? 'NO_ACTION' as const : undefined, descriptionSource: noAction ? 'system' as const : 'user' as const, modelDescriptionRequired: noAction ? false : undefined, ...normalizeOperationObjectRefs(action), keyFrames: (rawKeyFrames as Array<Record<string, unknown>>).map(normalizeKeyFrame) }) }) })
   const node = wireNode(selectedVideo.current_node || task.current_node)
   const videoUri = String(selectedVideo.url || task.video_url || task.video_uri || '')
   const status = String(selectedVideo.status || task.status || '')
   const preservedWithBackendIdentity = preserved ? (() => {
     const goalIdByOldId = new Map<string, string>()
-    const mergedGoals = preserved.goals.map((goal) => { const backend = goals.find((item) => item.sequence === goal.sequence); if (backend) goalIdByOldId.set(goal.id, backend.id); return backend ? { ...goal, id: backend.id } : goal })
+    const mergedGoals = preserved.goals.map((goal) => { const backend = goals.find((item) => item.sequence === goal.sequence); if (backend) goalIdByOldId.set(goal.id, backend.id); return backend ? { ...goal, ...descriptionFieldsById.get(backend.id), id: backend.id } : goal })
     const mergedActions = preserved.actions.map((action) => {
       const parentId = goalIdByOldId.get(action.parentId || '') || action.parentId
       const backend = actions.find((item) => item.parentId === parentId && item.sequence === action.sequence)
       const hasBackendKeyFrames = backend && backendKeyFrameFields.has(`${backend.parentId}:${backend.sequence}`)
-      return backend ? { ...action, id: backend.id, parentId, operationObjectIds: backend.operationObjectIds, operationObjectNames: backend.operationObjectNames, keyFrames: hasBackendKeyFrames ? backend.keyFrames : action.keyFrames } : { ...action, parentId }
+      return backend ? { ...action, ...descriptionFieldsById.get(backend.id), id: backend.id, parentId, operationObjectIds: backend.operationObjectIds, operationObjectNames: backend.operationObjectNames, keyFrames: hasBackendKeyFrames ? backend.keyFrames : action.keyFrames } : { ...action, parentId }
     })
     return { ...preserved, goals: mergedGoals, actions: mergedActions, invalidRanges: backendInvalidRanges ?? preserved.invalidRanges }
   })() : undefined
@@ -230,6 +239,18 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
 }
 
 export const annotationApi = {
+  async updateInvalidIntervalSample(projectId: string, videoId: string, intervalId: string, isSample: boolean): Promise<void> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const result = mockResults.get(videoContextKey(projectId, videoId))
+      if (result) result.invalidRanges = result.invalidRanges.map((range) => range.id === intervalId ? { ...range, isSample } : range)
+      return
+    }
+    if (!/^\d+$/.test(intervalId) || Number(intervalId) <= 0) throw new Error('无效片段尚未取得后端 ID，请先保存草稿')
+    await request<unknown>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/invalid-intervals/${encodeURIComponent(intervalId)}`, {
+      method: 'PATCH', body: JSON.stringify({ is_sample: isSample }),
+    })
+  },
   async sceneSuppliers(projectId: string) {
     const response = await request<{ items: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/suppliers`)
     return (response.items || []).map((item) => ({

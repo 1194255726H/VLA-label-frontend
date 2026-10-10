@@ -1,4 +1,5 @@
 import { runtimeConfig } from '../config/runtime'
+import { normalizeInvalidIntervalList } from '../utils/invalidReason'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
 import type { FleetSyncResult, FleetVideoGroup, FleetVideoPreviewPage, ImportResult, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
 import { request } from './api'
@@ -85,6 +86,7 @@ function normalizeProject(item: Record<string, unknown>): ManagedProject {
       ? { type: 'file' as const, displayName: String(rawGuideline.display_name || rawGuideline.displayName || ''), url: String(rawGuideline.url || '') }
       : null
   return {
+    invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list),
     id: String(item.id || item.projectId || ''), code: String(item.code || item.projectCode || ''), name: String(item.name || item.projectName || ''), desc: String(item.desc || item.description || ''), duration: num(item.duration ?? item.duration_seconds ?? item.video_duration),
     status: statusMap[String(item.status)] || 'not-started', teams: rawTeams.map((team) => String(team.name || '')), teamIds: rawTeams.map((team) => String(team.id || '')), memberCount: num(item.annotator_count ?? item.memberCount), dataCount: num(item.video_count ?? item.dataCount),
     selectedDuration: num(item.selected_duration_ms ?? item.selectedDuration) / (item.selected_duration_ms == null ? 1 : 1000), validDuration: num(item.effective_duration_ms ?? item.validDuration) / (item.effective_duration_ms == null ? 1 : 1000), invalidDuration: num(item.invalid_duration_ms ?? item.invalidDuration) / (item.invalid_duration_ms == null ? 1 : 1000), unselectedDuration: num(item.uncovered_duration_ms ?? item.unselectedDuration) / (item.uncovered_duration_ms == null ? 1 : 1000), goalCount: num(item.atomic_task_count ?? item.goalCount), actionCount: num(item.atomic_action_count ?? item.actionCount),

@@ -26,6 +26,7 @@ export interface Project {
   status: 'running' | 'paused' | 'finished'
   pendingCount: number
   claimLimit: number
+  invalidIntervalList?: InvalidIntervalSummary[]
 }
 
 export type TaskNode = 'annotation' | 'review' | 'quality' | 'acceptance'
@@ -110,6 +111,7 @@ export interface VideoListItem {
   selectedDurationMs: number
   effectiveDurationMs: number
   invalidDurationMs: number
+  invalidIntervalList?: InvalidIntervalSummary[]
   unselectedDurationMs: number | null
   atomicTaskCount: number
   atomicActionCount: number
@@ -191,6 +193,7 @@ export type ProjectStatus = 'not-started' | 'running' | 'paused' | 'finished' | 
 
 export interface ManagedProject {
   id: string
+  invalidIntervalList?: InvalidIntervalSummary[]
   code: string
   name: string
   desc: string
@@ -401,6 +404,10 @@ export interface AnnotationSegment {
   color: string
   descriptionZh: string
   descriptionEn?: string
+  descriptionCandidatesZh?: string[]
+  descriptionCandidatesEn?: string[]
+  descriptionChoiceZh?: number
+  descriptionChoiceEn?: number
   systemCode?: 'NO_ACTION'
   descriptionSource?: 'user' | 'system'
   modelDescriptionRequired?: boolean
@@ -457,6 +464,12 @@ export interface InvalidRange {
   reason: string
   description: string
   isSample?: boolean
+}
+
+export interface InvalidIntervalSummary {
+  id: string
+  reason: string
+  isSample: boolean
 }
 
 export interface AnnotationResult {

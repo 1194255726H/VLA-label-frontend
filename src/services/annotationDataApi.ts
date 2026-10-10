@@ -3,6 +3,7 @@ import { mockProjects, mockTasks } from '../mocks/data'
 import type { ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem } from '../types/api'
 import { request } from './api'
 import { getMockFleetSyncedTasks } from './managementApi'
+import { normalizeInvalidIntervalList } from '../utils/invalidReason'
 
 const pendingVideoListRequests = new Map<string, Promise<ProjectVideoPage>>()
 
@@ -21,6 +22,7 @@ function normalizeNode(value: unknown): TaskNode {
 
 function normalize(item: Record<string, unknown>): VideoListItem {
   return {
+    invalidIntervalList: normalizeInvalidIntervalList(Array.isArray(item.invalid_interval_list) ? item.invalid_interval_list : item.invalid_intervals),
     id: String(item.id || ''), projectId: String(item.project_id || ''), projectName: String(item.project_name || ''),
     fleetVideoId: optionalString(item.fleet_video_id), currentNode: normalizeNode(item.current_node), currentAssigneeId: optionalString(item.current_assignee_id), currentAssigneeName: optionalString(item.current_assignee_name),
     videoStatus: String(item.status || item.video_status || 'pending'), assignmentSource: String(item.assignment_source || ''), sortOrder: numberValue(item.sort_order ?? item.video_index), videoIndex: numberValue(item.video_index ?? item.sort_order), externalVideoId: optionalString(item.external_video_id || item.video_id), videoId: optionalString(item.video_id || item.external_video_id),
