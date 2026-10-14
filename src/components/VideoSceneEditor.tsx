@@ -84,12 +84,15 @@ export function VideoSceneEditor({ workspace, canEdit, onUpdated, variant = 'vid
     } finally { if (requestId === suppliersRequestRef.current) setSuppliersLoading(false) }
   }
 
+  /* 新增入口暂时关闭，保留逻辑便于后续恢复。
   function openCreate() {
     setMode('create')
     setForm({ name: '', supplierId: '', description: '' })
     setSuppliers([])
     void loadSuppliers()
   }
+
+  */
 
   async function create() {
     if (saving || suppliersLoading || !canEdit || !workspace.scene1 || !form.name.trim() || !suppliers.some((item) => String(item.id) === form.supplierId)) return
@@ -141,7 +144,9 @@ export function VideoSceneEditor({ workspace, canEdit, onUpdated, variant = 'vid
         {mode === 'edit' && <p className="scene-original">原场景：<strong>{sceneText}</strong></p>}
         <div className="scene-parent"><span>一级场景</span><strong>{workspace.scene1?.name || '未指定'}</strong></div>
         {mode === 'edit' ? <>
-          <label><span className="scene-field-heading"><span>二级场景 <i className="required-mark">*</i></span><button type="button" hidden disabled={loading || saving || !workspace.scene1} onClick={openCreate}>新增</button></span>
+          <label><span className="scene-field-heading"><span>二级场景 <i className="required-mark">*</i></span>{/* 工作台、项目视频列表、视频标注页共用此入口，暂不渲染新增按钮。
+            <button type="button" disabled={loading || saving || !workspace.scene1} onClick={openCreate}>新增</button>
+          */}</span>
             <select autoFocus aria-label="二级场景" value={selected} disabled={loading || saving || !workspace.scene1} onChange={(event) => setSelected(event.target.value)}><option value="">请选择二级场景</option>{options.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
           </label>
           <small>{loading ? '正在加载场景...' : options.length ? '只能选择当前一级场景下的二级场景。' : '当前一级场景下暂无可选的二级场景。'}</small>
