@@ -1507,12 +1507,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   if (error) return <main className="annotation-load-state"><CircleAlert size={38} /><h1>无法打开视频标注工作台</h1><p>{error}</p>{isVideoLockError && <button className="primary-button" type="button" onClick={retryVideoLock}>重新获取视频锁</button>}<button className={isVideoLockError ? 'secondary-button' : 'primary-button'} type="button" onClick={() => navigate('/workbench')}>返回工作台</button></main>
   if (!workspace || !result) return <main className="annotation-load-state"><RotateCcw className="spinning" size={34} /><p>{videoLockState === 'checking' ? '正在获取视频锁...' : '正在加载任务和标注结果...'}</p></main>
 
-  function segmentListButton(item: AnnotationSegment, title: string) {
-    const label = item.type === 'no_action' ? '无标签' : item.labelName || '未选择标签'
-    const active = selectedId === item.id && selectedLevel === (item.type === 'goal' ? 'goal' : 'action')
-    return <button className={active ? 'active' : ''} type="button" aria-pressed={active} onClick={() => selectSegment(item)}><i style={{ background: item.color }} /><span className="segment-list-title"><b>{title}</b></span><span className="segment-list-copy"><small style={{ color: item.type === 'no_action' ? '#697782' : item.color }}>{label}</small><span className="segment-bilingual-copy"><em>{item.descriptionZh || '暂无中文描述'}</em><em>{item.descriptionEn || '暂无英文描述'}</em></span></span><span className="segment-list-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span></button>
-  }
-
   function segmentDescriptionActions(item: AnnotationSegment) {
     if (item.type === 'no_action') return null
     return <div className="segment-description-actions">
@@ -1529,17 +1523,25 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     return <div className="segment-keyframe-meta"><span>对象：<b>{actionObjectNames.length ? actionObjectNames.join('、') : '未关联'}</b></span><span>关键帧：{keyFrames.length ? keyFrames.map((frame) => { const names = namesByIds(frame.operationObjectIds, frame.operationObjectNames); return <button type="button" key={frame.id} title={readonly ? '定位到关键帧' : '点击编辑关键帧'} onClick={() => { selectSegment(item, frame.frame); seek(frame.frame); if (!readonly) void openKeyFrame(frame, item) }}>◆ F{frame.frame} {keyFrameTypeLabels[frame.type]}{names.length ? ` · ${names.join('、')}` : ''}</button> }) : <b>无</b>}</span></div>
   }
 
-  function inlineSegmentEditor(item: AnnotationSegment) {
+  function segmentRow(item: AnnotationSegment, title: string) {
+    const active = selectedId === item.id && selectedLevel === (item.type === 'goal' ? 'goal' : 'action')
     const noAction = item.type === 'no_action'
     const scope = item.type === 'goal' ? 'goal' : 'action'
     const labels = workspace!.labels.filter((label) => label.appliesTo === scope || (label.appliesTo === 'both' && label.id === item.labelId))
     const selectedLabel = labels.find((label) => label.id === item.labelId)
-    return <div className="segment-inline-editor" onClick={(event) => event.stopPropagation()}>
-      {noAction ? <div className="segment-inline-row"><span className="segment-inline-system no-action-label">无标签</span><SegmentDescriptionFields segment={item} editing={false} onCancel={() => undefined} onSave={() => undefined} /><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span><button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button></div> : <div className="segment-inline-row">
-        {workspace!.labelLibraryBound && <label className="label-select"><select disabled={readonly} title={item.labelName || '请选择标签'} className={selectedLabel ? 'has-label-color' : ''} style={selectedLabel ? { '--selected-label-color': selectedLabel.color, '--selected-label-text': contrastTextColor(selectedLabel.color) } as React.CSSProperties : undefined} value={item.labelId || ''} onChange={(event) => { const label = labels.find((candidate) => candidate.id === event.target.value); if (label?.appliesTo === 'both') return; updateSegment(item, { labelId: label?.id, labelCode: label?.code || '', labelName: label?.name, color: label?.color || item.color }) }}><option value="">请选择标签</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label>}
-        <SegmentDescriptionFields key={`${item.id}:${descriptionEditingId === item.id}`} segment={item} editing={descriptionEditingId === item.id && descriptionEditable} onCancel={() => setDescriptionEditingId(undefined)} onSave={(changes) => { if (!descriptionEditable) return; updateSegment(item, changes); setDescriptionEditingId(undefined) }} /><span className="segment-inline-duration"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></span>
-        <button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button>
-      </div>}
+    return <div className={`annotation-segment-row${active ? ' selected' : ''}${item.type !== 'goal' ? ' child' : ''}`} role="row" onClick={(event) => { if (!(event.target as HTMLElement).closest('button,input,textarea,select,label')) selectSegment(item) }}>
+      <button className="segment-select-button" type="button" aria-pressed={active} onClick={() => selectSegment(item)}>
+        <i style={{ background: item.color }} /><span className="segment-list-title"><b>{title}</b></span>
+      </button>
+      <div className="segment-row-content" role="cell">
+        {active && !noAction && workspace!.labelLibraryBound ? <label className="label-select" style={selectedLabel ? { '--selected-label-color': selectedLabel.color, '--selected-label-text': contrastTextColor(selectedLabel.color) } as React.CSSProperties : undefined}><span className={`segment-label-value${selectedLabel ? ' has-label-color' : ''}`} aria-hidden="true">{item.labelName || '请选择标签'}</span><select aria-label={`${title}标签`} disabled={readonly} title={item.labelName || '请选择标签'} value={item.labelId || ''} onChange={(event) => { const label = labels.find((candidate) => candidate.id === event.target.value); if (label?.appliesTo === 'both') return; updateSegment(item, { labelId: label?.id, labelCode: label?.code || '', labelName: label?.name, color: label?.color || item.color }) }}><option value="">请选择标签</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label> : <small className="segment-row-label" style={{ color: noAction ? '#697782' : item.color }}>{noAction ? '无标签' : item.labelName || '未选择标签'}</small>}
+        <SegmentDescriptionFields key={`${item.id}:${descriptionEditingId === item.id}`} segment={item} editing={!noAction && descriptionEditingId === item.id && descriptionEditable} onCancel={() => setDescriptionEditingId(undefined)} onSave={(changes) => { if (!descriptionEditable) return; updateSegment(item, changes); setDescriptionEditingId(undefined) }} />
+      </div>
+      <div className="segment-row-duration" role="cell"><b>{timeText((item.endFrame - item.startFrame) / result!.frameRate)}</b><small>F{item.startFrame}-{item.endFrame}</small></div>
+      <div className="segment-row-actions" role="cell">
+        {active && <button className="segment-inline-delete" type="button" disabled={readonly} onClick={removeSelected} aria-label="删除片段" title="删除片段"><Trash2 size={14} /></button>}
+        {segmentDescriptionActions(item)}
+      </div>
     </div>
   }
 
@@ -1572,7 +1574,16 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     } inspector={
       <aside className="annotation-inspector">
         <header className="inspector-tabs"><button type="button" className={inspectorTab === 'segments' ? 'active' : ''} onClick={() => setInspectorTab('segments')}>片段 <b>{result.goals.length + result.actions.length}</b></button><button type="button" className={inspectorTab === 'invalid' ? 'active' : ''} onClick={() => { setDescriptionEditingId(undefined); setInspectorTab('invalid') }}>无效区间 <b>{result.invalidRanges.length}</b></button></header>
-        {inspectorTab === 'segments' ? <><div className="segment-list-columns segment-description-columns"><span>片段</span><span>标签与中英文描述</span><span>总时长</span><span>操作</span></div><div className="segment-tree">{result.goals.map((goal, index) => { const goalSelected = selectedLevel === 'goal' && selectedId === goal.id; return <div className="segment-group" key={goal.id}><div className={`segment-list-entry${goalSelected ? ' selected' : ''}`}>{segmentListButton(goal, `单次任务 ${index + 1}`)}{goalSelected && inlineSegmentEditor(goal)}{segmentDescriptionActions(goal)}</div>{result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => { const actionSelected = selectedLevel === 'action' && selectedId === action.id; return <div className={`segment-action-wrap${actionSelected ? ' selected' : ''}`} key={action.id}><div className={`segment-list-entry child${actionSelected ? ' selected' : ''}`}>{segmentListButton(action, `小目标 ${index + 1}.${actionIndex + 1}`)}{actionSelected && inlineSegmentEditor(action)}{segmentDescriptionActions(action)}</div>{segmentKeyFrameMeta(action)}</div> })}</div> })}</div></> : <div className="invalid-list-table">
+        {inspectorTab === 'segments' ? <div className="segment-list-table" role="table" aria-label="视频片段">
+          <div className="segment-description-columns" role="row"><span role="columnheader">片段</span><span role="columnheader">标签与中英文描述</span><span role="columnheader">总时长</span><span role="columnheader">操作</span></div>
+          <div className="segment-description-tree" role="rowgroup">{result.goals.map((goal, index) => <div className="segment-group" key={goal.id}>
+            {segmentRow(goal, `单次任务 ${index + 1}`)}
+            {result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => <div className="segment-action-wrap" key={action.id}>
+              {segmentRow(action, `小目标 ${index + 1}.${actionIndex + 1}`)}
+              {segmentKeyFrameMeta(action)}
+            </div>)}
+          </div>)}</div>
+        </div> : <div className="invalid-list-table">
           <div className="segment-list-columns invalid-list-columns"><span>区间</span><span>无效原因</span><span>是否样例</span><span>总时长</span><span>操作</span></div>
           <div className="segment-tree invalid-segment-list">{result.invalidRanges.map((range, index) => {
             const active = selectedLevel === 'invalid' && selectedId === `invalid:${range.id}`
