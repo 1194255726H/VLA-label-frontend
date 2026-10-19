@@ -1,7 +1,7 @@
 import { runtimeConfig } from '../config/runtime'
 import { normalizeInvalidIntervalList } from '../utils/invalidReason'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
-import type { FleetSyncResult, FleetVideoGroup, FleetVideoPreviewPage, ImportResult, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
+import type { FleetSyncGroup, FleetSyncResult, FleetVideoGroup, FleetVideoPreviewPage, ImportResult, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
 import { request } from './api'
 
 let projects = mockManagedProjects.map((item) => ({ ...item, teams: [...item.teams], labelLibraryIds: [...item.labelLibraryIds] }))
@@ -197,18 +197,21 @@ export const fleetApi = {
     const result = await request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/videos?${params}`)
     return { items: (result.items || []).map((item) => ({ fleetVideoId: num(item.fleet_video_id), filename: String(item.filename || ''), duration: item.duration == null ? null : num(item.duration), fileSize: item.file_size == null ? null : num(item.file_size), ossKey: String(item.oss_key || ''), ossBucket: String(item.oss_bucket || ''), scene1Id: num(item.scene1_id), scene1Name: String(item.scene1_name || ''), scene2Id: num(item.scene2_id), scene2Name: String(item.scene2_name || ''), supplierId: num(item.supplier_id), supplierName: String(item.supplier_name || ''), synced: item.synced === true })), total: result.total || 0, page: result.page || query.page, pageSize: result.page_size || query.pageSize, pages: result.pages || 1 }
   },
-  async sync(projectId: string, target: { groups?: FleetVideoGroup[]; videoIds?: number[] }): Promise<FleetSyncResult> {
+  async sync(projectId: string, target: { groups?: FleetSyncGroup[]; videoIds?: number[] }): Promise<FleetSyncResult> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const synced = mockFleetSynced.get(projectId) || new Set<number>()
       let createdCount = 0
-      ;(target.groups || []).forEach((group) => (mockFleetTasks[group.scene1Name] || []).forEach((task) => { if (!synced.has(task.id)) { synced.add(task.id); createdCount += task.videoCount } }))
+      ;(target.groups || []).forEach((group) => Object.values(mockFleetTasks).forEach((tasks, index) => {
+        if (group.scene1Id !== index + 1 || (group.scene2Id !== undefined && group.scene2Id !== index + 101) || (group.supplierId !== undefined && group.supplierId !== index + 201)) return
+        tasks.forEach((task) => { if (!synced.has(task.id)) { synced.add(task.id); createdCount += task.videoCount } })
+      }))
       createdCount += target.videoIds?.length || 0
       mockFleetSynced.set(projectId, synced)
       projects = projects.map((project) => project.id === projectId ? { ...project, dataCount: project.dataCount + createdCount } : project)
       return clone({ createdCount, updatedCount: 0, skippedCount: 0, skipped: [] })
     }
-    const body = target.videoIds?.length ? { video_ids: target.videoIds } : { groups: (target.groups || []).map((group) => ({ scene1_id: group.scene1Id, scene2_id: group.scene2Id, supplier_id: group.supplierId })) }
+    const body = target.videoIds?.length ? { video_ids: target.videoIds } : { groups: (target.groups || []).map((group) => ({ scene1_id: group.scene1Id, ...(group.scene2Id !== undefined ? { scene2_id: group.scene2Id } : {}), ...(group.supplierId !== undefined ? { supplier_id: group.supplierId } : {}) })) }
     const result = await request<{ created_count: number; updated_count: number; skipped_count: number; skipped: Array<Record<string, unknown>> }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/videos/sync`, { method: 'POST', body: JSON.stringify(body) })
     return { createdCount: result.created_count || 0, updatedCount: result.updated_count || 0, skippedCount: result.skipped_count || 0, skipped: (result.skipped || []).map((item) => ({ fleetVideoId: num(item.fleet_video_id), filename: String(item.filename || ''), reason: String(item.reason || '') })) }
   },

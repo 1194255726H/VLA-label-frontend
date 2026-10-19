@@ -648,3 +648,6 @@
 .segment-list-table .segment-keyframe-meta { flex-wrap: wrap; overflow-wrap: anywhere; }
 .segment-list-table .segment-keyframe-meta>span { flex-wrap: wrap; }
 .segment-list-table .segment-keyframe-meta button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.project-video-filters { flex-wrap: wrap; }
+.project-video-date-filters { display: flex; min-width: 0; flex: 0 0 100%; align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.project-video-date-filters>label { display: flex; width: 170px; min-width: 150px; flex-direction: column; gap: 6px; color: #66758a; font-size: 11px; }

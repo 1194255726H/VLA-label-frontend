@@ -10,7 +10,7 @@ import type { SessionResponse, VideoListItem } from '../types/api'
 import { FleetSyncModal } from './ProjectManagementPage'
 import { formatDateTime } from '../utils/date'
 import { nodeLabels, nodeToneByLabel } from '../utils/node'
-import { summarizeInvalidIntervals } from '../utils/invalidReason'
+import { invalidReasons, summarizeInvalidIntervals } from '../utils/invalidReason'
 
 const videoStatusTabs = [{ value: '', label: '全部' }, { value: 'pending', label: '待处理' }, { value: 'in_progress', label: '处理中' }, { value: 'describing', label: '模型描述中' }, { value: 'cutting', label: '切割中' }, { value: 'completed', label: '已完成' }, { value: 'cancelled', label: '已作废' }, { value: 'abnormal', label: '异常' }]
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
@@ -44,6 +44,15 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const [filename, setFilename] = useState('')
   const [personNameInput, setPersonNameInput] = useState('')
   const [personName, setPersonName] = useState('')
+  const [sceneFilter, setSceneFilter] = useState('')
+  const [invalidReason, setInvalidReason] = useState('')
+  const [sceneReload, setSceneReload] = useState(0)
+  const sceneRequestKey = `${projectId}:${sceneReload}`
+  const [sceneFilterData, setSceneFilterData] = useState<{ key: string; items: Awaited<ReturnType<typeof annotationDataApi.sceneFilters>>; error: string }>({ key: '', items: [], error: '' })
+  const scenesLoading = sceneFilterData.key !== sceneRequestKey
+  const sceneOptions = scenesLoading ? [] : sceneFilterData.items
+  const sceneError = scenesLoading ? '' : sceneFilterData.error
+  const [scene1Id = '', scene2Id = ''] = sceneFilter.split(':')
   const [selectedVideos, setSelectedVideos] = useState<{ projectId: string; ids: Set<string> }>({ projectId, ids: new Set() })
   const [exporting, setExporting] = useState(false)
   const [loadedQueryKey, setLoadedQueryKey] = useState('')
@@ -57,12 +66,12 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const [total, setTotal] = useState(0)
   const [pages, setPages] = useState(1)
   // 各状态数量随列表请求一起返回（total），不再为每个 tab 单独发一次查询；带上筛选条件指纹，条件变化时旧数字自动失效
-  const totalsKey = `${projectId}|${filename}|${personName}|${currentAssigneeId}|${createdAtStart}|${createdAtEnd}`
+  const totalsKey = `${projectId}|${filename}|${personName}|${sceneFilter}|${invalidReason}|${currentAssigneeId}|${createdAtStart}|${createdAtEnd}`
   const [statusTotals, setStatusTotals] = useState<{ key: string; values: Record<string, number> }>({ key: '', values: {} })
   const videoStatusTotals = statusTotals.key === totalsKey ? statusTotals.values : {}
   const [fleetOpen, setFleetOpen] = useState(false)
   const [toast, setToast] = useState('')
-  const queryKey = JSON.stringify([projectId, filename, personName, videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize])
+  const queryKey = JSON.stringify([projectId, filename, personName, sceneFilter, invalidReason, videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize])
   const tableLoading = loading || loadedQueryKey !== queryKey
   const selectedVideoIds = selectedVideos.projectId === projectId ? selectedVideos.ids : new Set<string>()
   const selectableItems = items.filter((item) => item.id)
@@ -72,26 +81,32 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const loadVideos = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const result = await annotationDataApi.list(projectId, { filename, personName, status: videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize })
+      const result = await annotationDataApi.list(projectId, { filename, personName, scene1Id, scene2Id, invalidReason, status: videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize })
       setItems(result.items); setLoadedQueryKey(queryKey); setTotal(result.total); setPages(Math.max(1, result.pages)); setStatusTotals((current) => ({ key: totalsKey, values: current.key === totalsKey ? { ...current.values, [videoStatus]: result.total } : { [videoStatus]: result.total } }))
     } catch (reason) { setItems([]); setLoadedQueryKey(queryKey); setError(reason instanceof Error ? reason.message : '项目视频加载失败') }
     finally { setLoading(false) }
-  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, personName, projectId, queryKey, totalsKey, videoStatus])
+  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, personName, scene1Id, scene2Id, invalidReason, projectId, queryKey, totalsKey, videoStatus])
 
   useEffect(() => {
     let active = true
-    annotationDataApi.list(projectId, { filename, personName, status: videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize }).then((result) => {
+    annotationDataApi.list(projectId, { filename, personName, scene1Id, scene2Id, invalidReason, status: videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize }).then((result) => {
       if (!active) return
       setItems(result.items); setLoadedQueryKey(queryKey); setTotal(result.total); setPages(Math.max(1, result.pages)); setStatusTotals((current) => ({ key: totalsKey, values: current.key === totalsKey ? { ...current.values, [videoStatus]: result.total } : { [videoStatus]: result.total } })); setError('')
     }).catch((reason) => { if (active) { setItems([]); setLoadedQueryKey(queryKey); setError(reason instanceof Error ? reason.message : '项目视频加载失败') } }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, personName, projectId, queryKey, totalsKey, videoStatus])
+  }, [createdAtEnd, createdAtStart, currentAssigneeId, filename, page, pageSize, personName, scene1Id, scene2Id, invalidReason, projectId, queryKey, totalsKey, videoStatus])
+  useEffect(() => {
+    let active = true
+    annotationDataApi.sceneFilters(projectId).then((items) => { if (active) setSceneFilterData({ key: sceneRequestKey, items, error: '' }) })
+      .catch((reason) => { if (active) setSceneFilterData({ key: sceneRequestKey, items: [], error: reason instanceof Error ? reason.message : '场景加载失败' }) })
+    return () => { active = false }
+  }, [projectId, sceneRequestKey])
   useEffect(() => { projectApi.list().then((projects) => setProjectName(projects.find((item) => item.id === projectId)?.name || '项目视频')).catch(() => undefined) }, [projectId])
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2500); return () => window.clearTimeout(timer) }, [toast])
 
   async function fleetSynced(message: string) { setFleetOpen(false); setStatusTotals({ key: totalsKey, values: {} }); await loadVideos(); setToast(message) }
   function applySearch() { setPage(1); setFilename(filenameInput.trim()); setPersonName(personNameInput.trim()); setCurrentAssigneeId(assigneeInput.trim()) }
-  function resetFilters() { setFilenameInput(''); setFilename(''); setPersonNameInput(''); setPersonName(''); setVideoStatus(''); setAssigneeInput(''); setCurrentAssigneeId(''); setCreatedAtStart(''); setCreatedAtEnd(''); setPage(1) }
+  function resetFilters() { setFilenameInput(''); setFilename(''); setPersonNameInput(''); setPersonName(''); setSceneFilter(''); setInvalidReason(''); setVideoStatus(''); setAssigneeInput(''); setCurrentAssigneeId(''); setCreatedAtStart(''); setCreatedAtEnd(''); setPage(1) }
   function toggleSelection(ids: string[], checked: boolean) {
     setSelectedVideos((current) => {
       const next = new Set(current.projectId === projectId ? current.ids : [])
@@ -119,16 +134,21 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   }
 
   return <AppShell user={session.account}><section className="management-page"><section className="management-panel panel">
-    <header className="management-toolbar annotation-data-heading"><div className="detail-title"><button className="icon-button bordered" type="button" onClick={() => navigate('/projects')} aria-label="返回项目管理"><ArrowLeft size={17} /></button><div><h2>{projectName}</h2><p>项目视频管理 · {projectId}</p></div></div><span>共 {total} 条视频，可按视频状态、采集人、处理人和创建时间排查</span></header>
+    <header className="management-toolbar annotation-data-heading"><div className="detail-title"><button className="icon-button bordered" type="button" onClick={() => navigate('/projects')} aria-label="返回项目管理"><ArrowLeft size={17} /></button><div><h2>{projectName}</h2><p>项目视频管理 · {projectId}</p></div></div><span>共 {total} 条视频，可按场景、无效原因、视频状态、采集人、处理人和创建时间排查</span></header>
     <div className="annotation-data-tabs"><div className="status-segments">{videoStatusTabs.map((item) => <button key={item.value || 'all'} type="button" className={videoStatus === item.value ? 'active' : ''} onClick={() => { setVideoStatus(item.value); setPage(1) }}>{item.label}{videoStatusTotals[item.value] == null ? null : <span>{videoStatusTotals[item.value]}</span>}</button>)}</div><div className="project-video-toolbar-actions"><button className="secondary-button" type="button" disabled={!selectedVideoIds.size || exporting} onClick={() => void exportSelected()}><Download size={16} />{exporting ? '正在导出...' : '导出 CSV'}</button><button className="primary-button" type="button" onClick={() => setFleetOpen(true)}><Database size={16} />从 Fleet 同步</button></div></div>
     <div className="management-filters project-video-filters">
       <label><span>视频名称</span><div className="filter-control"><Search size={16} /><input value={filenameInput} onChange={(event) => setFilenameInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="请输入视频文件名" /></div></label>
+      <label className="project-scene-filter"><span>场景</span><div className="filter-control"><select aria-label="场景筛选" value={sceneFilter} disabled={scenesLoading} onChange={(event) => { setSceneFilter(event.target.value); setPage(1) }}><option value="">{scenesLoading ? '正在加载场景...' : '全部场景'}</option>{sceneOptions.map((scene) => <optgroup key={scene.id} label={scene.name}><option value={scene.id}>{scene.name}（全部）</option>{scene.children.map((child) => <option key={child.id} value={`${scene.id}:${child.id}`}>{scene.name} / {child.name}</option>)}</optgroup>)}</select></div></label>
+      <label><span>无效原因</span><div className="filter-control"><select aria-label="无效原因筛选" value={invalidReason} onChange={(event) => { setInvalidReason(event.target.value); setPage(1) }}><option value="">全部无效原因</option>{invalidReasons.map((reason) => <option key={reason} value={reason}>{reason}</option>)}</select></div></label>
       <label><span>采集人</span><div className="filter-control"><input value={personNameInput} onChange={(event) => setPersonNameInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="请输入采集人姓名" /></div></label>
       <label><span>当前处理人 ID</span><div className="filter-control"><input type="number" min="1" step="1" value={assigneeInput} onChange={(event) => setAssigneeInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="请输入处理人 ID" /></div></label>
+      <div className="project-video-date-filters">
       <label><span>创建时间（开始）</span><div className="filter-control"><input type="date" value={createdAtStart} onChange={(event) => { setCreatedAtStart(event.target.value); setPage(1) }} /></div></label>
       <label><span>创建时间（结束）</span><div className="filter-control"><input type="date" value={createdAtEnd} onChange={(event) => { setCreatedAtEnd(event.target.value); setPage(1) }} /></div></label>
       <button className="primary-button compact" type="button" onClick={applySearch}>查询</button><button className="secondary-button compact" type="button" onClick={resetFilters}>重置</button>
+      </div>
     </div>
+    {sceneError && <div className="error-banner"><CircleAlert size={18} /><span>场景筛选加载失败：{sceneError}</span><button type="button" onClick={() => setSceneReload((current) => current + 1)}>重新加载场景</button></div>}
     {error && <div className="error-banner"><CircleAlert size={18} /><span>{error}</span><button type="button" onClick={loadVideos}>重新加载</button></div>}
     <div className="management-table-wrap"><table className="management-table annotation-data-table project-video-table"><thead><tr><th className="video-selection-column"><input type="checkbox" aria-label="全选当前页视频" checked={allPageSelected} ref={(element) => { if (element) element.indeterminate = somePageSelected && !allPageSelected }} disabled={tableLoading || exporting || !selectableItems.length} onChange={(event) => toggleSelection(selectableItems.map((item) => item.id), event.target.checked)} /></th><th>视频名称</th><th className="scene-info-column">场景信息</th><th>供应商</th><th>状态</th><th>作业节点</th><th>流转类型</th><th>视频时长</th><th>有效片段时长</th><th>无效片段时长</th><th className="video-invalid-reasons-column">无效原因</th><th>设备 MAC</th><th>采集人</th><th>单次任务数</th><th>小目标数</th><th>处理人</th><th>创建时间</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
       {tableLoading ? <tr><td colSpan={19}><div className="management-empty">正在加载项目视频...</div></td></tr> : items.map((video) => <tr className={selectedVideoIds.has(video.id) ? 'selected-row' : undefined} key={video.id}>

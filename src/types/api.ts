@@ -166,6 +166,9 @@ export interface TaskQuery {
 export interface ProjectVideoQuery {
   filename?: string
   personName?: string
+  scene1Id?: string
+  scene2Id?: string
+  invalidReason?: string
   status?: string
   currentAssigneeId?: string
   createdAtStart?: string
@@ -263,6 +266,12 @@ export interface FleetVideoGroup {
   supplierName: string
   videoCount: number
   syncableCount: number
+}
+
+export interface FleetSyncGroup {
+  scene1Id: number
+  scene2Id?: number
+  supplierId?: number
 }
 
 export interface FleetSyncResult {

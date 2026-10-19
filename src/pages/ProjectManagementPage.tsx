@@ -95,7 +95,11 @@ export function FleetSyncModal({ projectId, projectName, onClose, onSynced }: { 
     if (!projectId || (level === 3 ? !selectedVideoIds.size : !selectedGroups.length) || syncing) return
     setSyncing(true); setError('')
     try {
-      const result = await fleetApi.sync(projectId, level === 3 ? { videoIds: [...selectedVideoIds] } : { groups: selectedGroups })
+      const groups = [...new Map(selectedGroups.map((group) => {
+        const selection = { scene1Id: group.scene1Id, ...(level === 2 ? { scene2Id: group.scene2Id } : {}), ...(supplierId ? { supplierId: Number(supplierId) } : {}) }
+        return [JSON.stringify(selection), selection]
+      })).values()]
+      const result = await fleetApi.sync(projectId, level === 3 ? { videoIds: [...selectedVideoIds] } : { groups })
       onSynced(`Fleet 视频同步完成：新增 ${result.createdCount}，更新 ${result.updatedCount}，跳过 ${result.skippedCount}`)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Fleet 同步失败') }
     finally { setSyncing(false) }

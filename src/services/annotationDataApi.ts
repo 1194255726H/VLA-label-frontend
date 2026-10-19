@@ -42,18 +42,33 @@ function mockItems(projectId: string): VideoListItem[] {
 }
 
 export const annotationDataApi = {
+  async sceneFilters(projectId: string): Promise<Array<{ id: string; name: string; children: Array<{ id: string; name: string }> }>> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      return []
+    }
+    const response = await request<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(`/api/projects/${encodeURIComponent(projectId)}/fleet/scenes`)
+    const scenes = Array.isArray(response) ? response : response.items || []
+    return scenes.filter((scene) => scene.id != null).map((scene) => ({
+      id: String(scene.id), name: String(scene.name || ''),
+      children: (Array.isArray(scene.scenes2) ? scene.scenes2 as Array<Record<string, unknown>> : []).filter((child) => child.id != null).map((child) => ({ id: String(child.id), name: String(child.name || '') })),
+    }))
+  },
   async list(projectId: string, query: ProjectVideoQuery = {}): Promise<ProjectVideoPage> {
     const page = query.page || 1
     const pageSize = query.pageSize || 20
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const filename = query.filename?.toLowerCase()
-      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.personName || (item.personName || '').includes(query.personName)) && (!query.status || item.videoStatus === query.status) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
+      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.personName || (item.personName || '').includes(query.personName)) && (!query.scene1Id || item.scene1?.id === query.scene1Id) && (!query.scene2Id || item.scene2?.id === query.scene2Id) && (!query.invalidReason || item.invalidIntervalList?.some((interval) => interval.reason === query.invalidReason)) && (!query.status || item.videoStatus === query.status) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
       return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize, pages: Math.max(1, Math.ceil(items.length / pageSize)) }
     }
     const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
     if (query.filename) params.set('filename', query.filename)
     if (query.personName) params.set('person_name', query.personName)
+    if (query.scene1Id) params.set('scene1_id', query.scene1Id)
+    if (query.scene2Id) params.set('scene2_id', query.scene2Id)
+    if (query.invalidReason) params.set('invalid_reason', query.invalidReason)
     if (query.status) params.set('status', query.status)
     if (query.currentAssigneeId) params.set('current_assignee_id', query.currentAssigneeId)
     if (query.createdAtStart) params.set('created_at_start', query.createdAtStart)
