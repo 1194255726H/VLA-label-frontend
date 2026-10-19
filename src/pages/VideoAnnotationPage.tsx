@@ -1583,19 +1583,20 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
               {segmentKeyFrameMeta(action)}
             </div>)}
           </div>)}</div>
-        </div> : <div className="invalid-list-table">
-          <div className="segment-list-columns invalid-list-columns"><span>区间</span><span>无效原因</span><span>是否样例</span><span>总时长</span><span>操作</span></div>
-          <div className="segment-tree invalid-segment-list">{result.invalidRanges.map((range, index) => {
+        </div> : <div className="invalid-list-table" role="table" aria-label="视频无效区间">
+          <div className="segment-list-columns invalid-list-columns" role="row"><span role="columnheader">区间</span><span role="columnheader">无效原因</span><span role="columnheader">是否样例</span><span role="columnheader">总时长</span><span role="columnheader">操作</span></div>
+          <div className="segment-tree invalid-segment-list" role="rowgroup">{result.invalidRanges.map((range, index) => {
             const active = selectedLevel === 'invalid' && selectedId === `invalid:${range.id}`
             const sampleBusy = Boolean(sampleUpdatingId) || saving || submitting || Boolean(editing)
-            return <div className={`invalid-list-row${active ? ' selected' : ''}`} key={range.id}>
-              <button className="invalid-row-main" type="button" aria-pressed={active} onClick={() => { videoRef.current?.pause(); setActiveGoalId(undefined); setDescriptionEditingId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); seek(range.startFrame) }}>
-                <i /><span className="segment-list-title"><b>无效区间 {index + 1}</b></span>
-                <span className="segment-list-copy"><small title={formatInvalidReason(range)}>{formatInvalidReason(range)}</small><em>{timeText(range.startFrame / result.frameRate)} - {timeText(range.endFrame / result.frameRate)}</em></span>
-                <span className={`invalid-sample-status${range.isSample ? ' active' : ''}`}>{range.isSample ? '样例' : '—'}</span>
-                <span className="segment-list-duration"><b>{timeText((range.endFrame - range.startFrame) / result.frameRate)}</b><small>F{range.startFrame}-{range.endFrame}</small></span>
+            const selectRange = () => { videoRef.current?.pause(); setActiveGoalId(undefined); setDescriptionEditingId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); seek(range.startFrame) }
+            return <div className={`invalid-list-row${active ? ' selected' : ''}`} key={range.id} role="row" onClick={(event) => { if (!(event.target as HTMLElement).closest('button')) selectRange() }}>
+              <button className="invalid-row-main" type="button" aria-pressed={active} onClick={selectRange}>
+                <i /><span className="invalid-row-title">无效区间 {index + 1}</span>
               </button>
-              <div className="invalid-row-actions">
+              <div className="invalid-row-reason" role="cell"><strong>{formatInvalidReason(range)}</strong><small>{timeText(range.startFrame / result.frameRate)} - {timeText(range.endFrame / result.frameRate)}</small></div>
+              <div className={`invalid-sample-status${range.isSample ? ' active' : ''}`} role="cell">{range.isSample ? '样例' : '—'}</div>
+              <div className="segment-row-duration" role="cell"><b>{timeText((range.endFrame - range.startFrame) / result.frameRate)}</b><small>F{range.startFrame}-{range.endFrame}</small></div>
+              <div className="invalid-row-actions" role="cell">
                 <button className="invalid-reason-edit" type="button" disabled={readonly || sampleBusy} onClick={() => editInvalidReason(range)}>修改原因</button>
                 {canManageSamples && <button className="invalid-reason-edit invalid-sample-button" type="button" disabled={hardReadonly || sampleBusy} onClick={() => void updateInvalidSamples([range], !range.isSample)}>{sampleUpdatingId === range.id ? '更新中...' : range.isSample ? '取消样例' : '设为样例'}</button>}
               </div>
