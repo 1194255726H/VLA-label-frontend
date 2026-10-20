@@ -165,7 +165,7 @@ async function loadTaskConfiguration(projectId: string) {
   return { labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0, operationLibraryId: String(config.operation_library_id || ''), operationLibraryName: String(config.operation_library_name || '') }
 }
 
-function normalizeWorkspace(projectId: string, videoId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, operationLibraryId: string, operationLibraryName: string, viewOnly: boolean): AnnotationWorkspace {
+function normalizeWorkspace(projectId: string, videoId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, operationLibraryId: string, operationLibraryName: string, viewOnly: boolean, allowCompletedInvalidEdit = false): AnnotationWorkspace {
   const task = (raw.task || raw) as Record<string, unknown>
   const selectedVideo = (raw.selected_video || task.selected_video || {}) as Record<string, unknown>
   const project = (task.project || raw.project || {}) as Record<string, unknown>
@@ -230,7 +230,7 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
     videoId,
     videoCode: String(selectedVideo.external_video_id || selectedVideo.id || videoId), dataId: String(selectedVideo.external_video_id || selectedVideo.id || videoId), dataName: String(selectedVideo.filename || 'VLA 视频数据'),
     projectId: String(selectedVideo.project_id || project.id || projectId), projectName: String(project.name || ''), node,
-    readonly: viewOnly || ['submitted', 'completed'].includes(status),
+    readonly: viewOnly || status === 'submitted' || (status === 'completed' && !allowCompletedInvalidEdit),
     videoUrl: /^https?:\/\//i.test(videoUri) ? videoUri : '',
     frameRate,
     durationSeconds: durationSeconds || totalFrames / frameRate, mediaStartTime,
@@ -347,7 +347,7 @@ export const annotationApi = {
     return { locked: Boolean(response.locked), lockedById: response.locked_by_id === null || response.locked_by_id === undefined ? null : String(response.locked_by_id) }
   },
 
-  async getWorkspace(projectId: string, videoId: string, viewOnly = false): Promise<AnnotationWorkspace> {
+  async getWorkspace(projectId: string, videoId: string, viewOnly = false, allowCompletedInvalidEdit = false): Promise<AnnotationWorkspace> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const task = mockTasks[0]
@@ -355,20 +355,20 @@ export const annotationApi = {
       const result = clone(mockResult(key))
       return {
         videoId, videoCode: videoId, dataId: videoId, dataName: task.dataName,
-        projectId, projectName: '清华路端项目', node: task.node, readonly: viewOnly || task.status === 'submitted' || task.status === 'completed',
+        projectId, projectName: '清华路端项目', node: task.node, readonly: viewOnly || task.status === 'submitted' || (task.status === 'completed' && !allowCompletedInvalidEdit),
         videoUrl: '/temp.mp4', frameRate: result.frameRate, durationSeconds: result.totalFrames / result.frameRate, mediaStartTime: result.mediaStartTime,
         currentRevision: mockRevisions.get(key) || 0,
         labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), labelLibraryBound: true, operationLibraryId: '1', operationLibraryName: '常用操作对象库', result,
       }
     }
     if (!videoId) throw new Error('缺少视频记录 ID，无法进入作业页')
-    const requestKey = `${projectId}:${videoId}:${viewOnly ? 'view' : 'edit'}`
+    const requestKey = `${projectId}:${videoId}:${viewOnly ? 'view' : 'edit'}:${allowCompletedInvalidEdit ? 'invalid-only' : 'normal'}`
     const pending = workspaceRequests.get(requestKey)
     if (pending) return pending
     const workspaceRequest = (async () => {
       const raw = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}`)
       const configuration = await loadTaskConfiguration(projectId)
-      const workspace = normalizeWorkspace(projectId, videoId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly)
+      const workspace = normalizeWorkspace(projectId, videoId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly, allowCompletedInvalidEdit)
       videoNodes.set(videoContextKey(projectId, videoId), workspace.node)
       return workspace
     })()
