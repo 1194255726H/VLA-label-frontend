@@ -91,6 +91,11 @@ export const annotationDataApi = {
       const csv = [['id', 'filename', 'device_id', 'person_name'], ...rows.map((item) => [item.id, item.filename, item.deviceId || '', item.personName || ''])].map((row) => row.map(quote).join(',')).join('\r\n')
       return { blob: new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }), filename }
     }
-    return requestDownload(`/api/projects/${encodeURIComponent(projectId)}/videos/export?video_ids=${ids.map(encodeURIComponent).join(',')}`, filename)
+    const numericIds = ids.map(Number)
+    if (numericIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) throw new Error('视频 ID 无效，请刷新列表后重新选择')
+    return requestDownload(`/api/projects/${encodeURIComponent(projectId)}/videos/export`, filename, {
+      method: 'POST',
+      body: JSON.stringify({ video_ids: numericIds }),
+    })
   },
 }

@@ -78,11 +78,13 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (payload?.success === true || payload?.code === 'ok' ? payload.data : payload) as T
 }
 
-export async function requestDownload(path: string, fallbackFilename: string): Promise<{ blob: Blob; filename: string }> {
-  const headers = new Headers({ Accept: 'text/csv, application/octet-stream' })
+export async function requestDownload(path: string, fallbackFilename: string, init?: RequestInit): Promise<{ blob: Blob; filename: string }> {
+  const headers = new Headers(init?.headers)
+  headers.set('Accept', 'text/csv, application/octet-stream')
+  if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   const csrfToken = getCsrfToken()
   if (csrfToken) headers.set('X-CSRF-Token', csrfToken)
-  const response = await fetch(`${runtimeConfig.apiBaseUrl}${path}`, { method: 'GET', credentials: 'include', headers })
+  const response = await fetch(`${runtimeConfig.apiBaseUrl}${path}`, { method: 'GET', ...init, credentials: 'include', headers })
   if (!response.ok || response.headers.get('Content-Type')?.includes('application/json')) {
     const payload = await response.json().catch(() => ({}))
     throw new Error(String(payload?.message || `导出失败（${response.status}）`))
