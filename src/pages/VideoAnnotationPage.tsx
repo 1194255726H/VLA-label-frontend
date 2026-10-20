@@ -559,7 +559,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const cancelPermissionIdentities = [...session.account.roles, ...session.account.roleLabels]
     .map((value) => value.toLowerCase().replace(/[\s_-]/g, ''))
   const hasCancelRolePermission = Boolean(session.account.isStaff || session.account.isSuperuser || cancelPermissionIdentities.some((value) => ['admin', 'projectmanager', 'systemadmin', '管理员', '项目经理', '超级管理员'].includes(value)))
-  const canManageSamples = !invalidOnly && canManageInvalidSamples(session.account)
+  const canManageSamples = canManageInvalidSamples(session.account)
   const canEditScenes = Boolean(!invalidOnly && (hasCancelRolePermission || workspace?.currentAssigneeId === String(session.account.id)))
   const isVideoLockError = ['video_locked', 'video_heartbeat_failed'].includes(errorCode)
 
@@ -996,7 +996,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         setRevision(latestRevision)
       }
       if (needsSave || latestRevision !== workspace?.currentRevision) {
-        const refreshed = await annotationApi.getWorkspace(projectId, videoId, false)
+        const refreshed = await annotationApi.getWorkspace(projectId, videoId, false, invalidOnly)
         currentData = { ...data, invalidRanges: refreshed.result.invalidRanges }
         for (const oldRange of data.invalidRanges) {
           const persisted = currentData.invalidRanges.find((range) => range.startFrame === oldRange.startFrame && range.endFrame === oldRange.endFrame && range.reason === oldRange.reason && range.description === oldRange.description)
@@ -1066,12 +1066,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (invalidReason === '其他' && !invalidReasonOther.trim()) return
     const { ranges, voidVideo } = submitInvalidFix
     let sequence = result.nextInvalidSequence
-    const created = ranges.map((range) => ({ id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence++).padStart(3, '0')}`, sequence: sequence - 1, ...range, reason, description, isSample: false }))
+    const created = ranges.map((range) => ({ id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence++).padStart(3, '0')}`, sequence: sequence - 1, ...range, reason, description, isSample: invalidOnly && canManageSamples && invalidIsSample }))
     let nextResult: AnnotationResult = { ...result, nextInvalidSequence: sequence, invalidRanges: canManageSamples && invalidIsSample ? [...result.invalidRanges, ...created] : normalizeInvalidRanges([...result.invalidRanges, ...created]) }
     setSubmitInvalidFix(undefined)
     setInvalidReasonOther('')
     mutate(nextResult)
-    if (canManageSamples && invalidIsSample) {
+    if (canManageSamples && invalidIsSample && !invalidOnly) {
       const sampledResult = await updateInvalidSamples(created, true, nextResult, true)
       if (!sampledResult) return
       nextResult = sampledResult
@@ -1245,6 +1245,11 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (fullyInvalid) { setSelectedId(fullyInvalid.id); setSelectedLevel('action'); return setToast('小目标被无效区间完全覆盖，请调整或删除') }
     setSubmitting(true)
     try {
+      if (invalidOnly) {
+        await save(false, data)
+        setToast('已完成视频的草稿已更新')
+        return
+      }
       const nextRevision = dirty || overrideResult ? await save(false, data) : revision
       await annotationApi.submit(projectId, videoId, data, nextRevision)
       setSubmitted(true)
