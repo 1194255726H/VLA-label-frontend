@@ -24,8 +24,8 @@ export function PaginationJump({ page, pages, disabled = false, onChange, pageSi
   const currentPage = Math.min(maxPage, Math.max(1, page))
 
   useEffect(() => {
-    if (page !== currentPage) onChange(currentPage)
-  }, [currentPage, onChange, page])
+    if (!disabled && page !== currentPage) onChange(currentPage)
+  }, [currentPage, disabled, onChange, page])
 
   function move(next: number) {
     if (disabled || next < 1 || next > maxPage || next === currentPage) return

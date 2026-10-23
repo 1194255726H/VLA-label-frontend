@@ -199,6 +199,9 @@ export type ProjectStatus = 'not-started' | 'running' | 'paused' | 'finished' | 
 
 export interface ManagedProject {
   id: string
+  supplier?: VideoSupplier | null
+  fleetSupplierId?: string | null
+  autoSyncTime?: string | null
   invalidIntervalList?: InvalidIntervalSummary[]
   code: string
   name: string
@@ -244,6 +247,8 @@ export interface MediaUploadResult {
 
 export interface ProjectPayload {
   projectId?: string
+  supplierId?: string | null
+  fleetSupplierId?: string | null
   name: string
   desc: string
   teams: string[]
@@ -255,6 +260,14 @@ export interface ProjectPayload {
   labelLibraryIds: string[]
   operationLibraryId: string
   annotationGuideline: AnnotationGuideline | null
+}
+
+export interface FleetSupplierOption {
+  localId: string
+  fleetSupplierId: string
+  name: string
+  code: string
+  type: string
 }
 
 export interface FleetVideoGroup {
@@ -299,6 +312,33 @@ export interface FleetVideoPreview {
 
 export interface FleetVideoPreviewPage {
   items: FleetVideoPreview[]
+  total: number
+  page: number
+  pageSize: number
+  pages: number
+}
+
+export type FleetSyncStatus = 'unsynced' | 'syncing' | 'synced' | 'failed' | 'unknown'
+
+export interface FleetManualVideo extends FleetVideoPreview {
+  personName: string
+  collectedAt: string
+  syncStatus: FleetSyncStatus
+  failureReason: string
+}
+
+export interface FleetManualQuery {
+  keyword?: string
+  personName?: string
+  scene1Id?: string
+  scene2Id?: string
+  syncStatus: Exclude<FleetSyncStatus, 'unknown'> | ''
+  page: number
+  pageSize: number
+}
+
+export interface FleetManualPage {
+  items: FleetManualVideo[]
   total: number
   page: number
   pageSize: number

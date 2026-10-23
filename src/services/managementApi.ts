@@ -1,8 +1,9 @@
 import { runtimeConfig } from '../config/runtime'
 import { normalizeInvalidIntervalList } from '../utils/invalidReason'
+import { normalizeFleetSyncStatus } from '../utils/fleetSync'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
-import type { FleetSyncGroup, FleetSyncResult, FleetVideoGroup, FleetVideoPreviewPage, ImportResult, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
-import { request } from './api'
+import type { FleetManualPage, FleetManualQuery, FleetManualVideo, FleetSupplierOption, FleetSyncGroup, FleetSyncResult, FleetVideoGroup, FleetVideoPreviewPage, ImportResult, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
+import { normalizeSupplier, request } from './api'
 
 let projects = mockManagedProjects.map((item) => ({ ...item, teams: [...item.teams], labelLibraryIds: [...item.labelLibraryIds] }))
 let libraries = mockLabelLibraries.map((item) => ({ ...item, tags: item.tags.map((tag) => ({ ...tag })) }))
@@ -11,6 +12,7 @@ let operationObjects: OperationObject[] = [{ id: '1', libraryId: '1', name: '水
 let teams = mockTeams.map((item) => ({ ...item }))
 let members = mockMembers.map((item) => ({ ...item, roles: [...item.roles], projects: [...item.projects] }))
 let pendingProjectList: Promise<ManagedProject[]> | undefined
+const pendingManualVideoRequests = new Map<string, Promise<FleetManualPage>>()
 interface MockFleetTask { id: number; externalTaskId: string; name: string; path: string; device: string; operator: string; videoCount: number; syncedCount: number; availableCount: number; totalDuration: number }
 const mockFleetTasks: Record<string, MockFleetTask[]> = {
   '合肥创运': Array.from({ length: 12 }, (_, index) => ({ id: 52 + index, externalTaskId: `TASK-20260716-G${String(index + 1).padStart(3, '0')}-01`, name: `合肥创运采集任务 ${index + 1}`, path: `合肥创运 / 路线 ${index + 1}`, device: `VLA-${String(index % 4 + 1).padStart(2, '0')}`, operator: ['王龙', '李明', '张伟'][index % 3], videoCount: 3, syncedCount: index < 2 ? 1 : 0, availableCount: index < 2 ? 2 : 3, totalDuration: 27000 })),
@@ -18,6 +20,7 @@ const mockFleetTasks: Record<string, MockFleetTask[]> = {
   '商超拣选': Array.from({ length: 3 }, (_, index) => ({ id: 201 + index, externalTaskId: `TASK-20260718-S${String(index + 1).padStart(3, '0')}`, name: `货架拣选任务 ${index + 1}`, path: `商超拣选 / 货架 ${index + 1}`, device: `CAM-${index + 1}`, operator: '陈静', videoCount: 4, syncedCount: 0, availableCount: 4, totalDuration: 16000 })),
 }
 const mockFleetSynced = new Map<string, Set<number>>()
+const mockFleetManualSynced = new Map<string, Set<number>>()
 
 export function getMockFleetSyncedTasks(projectId: string) {
   const synced = mockFleetSynced.get(projectId) || new Set<number>()
@@ -86,6 +89,7 @@ function normalizeProject(item: Record<string, unknown>): ManagedProject {
       ? { type: 'file' as const, displayName: String(rawGuideline.display_name || rawGuideline.displayName || ''), url: String(rawGuideline.url || '') }
       : null
   return {
+    supplier: normalizeSupplier(item.supplier) || null, fleetSupplierId: item.fleet_supplier_id == null ? undefined : String(item.fleet_supplier_id), autoSyncTime: item.auto_sync_time == null ? null : String(item.auto_sync_time),
     invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list),
     id: String(item.id || item.projectId || ''), code: String(item.code || item.projectCode || ''), name: String(item.name || item.projectName || ''), desc: String(item.desc || item.description || ''), duration: num(item.duration ?? item.duration_seconds ?? item.video_duration),
     status: statusMap[String(item.status)] || 'not-started', teams: rawTeams.map((team) => String(team.name || '')), teamIds: rawTeams.map((team) => String(team.id || '')), memberCount: num(item.annotator_count ?? item.memberCount), dataCount: num(item.video_count ?? item.dataCount),
@@ -102,7 +106,18 @@ export const projectApi = {
   async list(): Promise<ManagedProject[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(projects) }
     if (pendingProjectList) return pendingProjectList
-    const requestPromise = request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100').then((result) => result.items.map(normalizeProject))
+    const requestPromise = (async () => {
+      const items: ManagedProject[] = []
+      let page = 1
+      let pages: number
+      do {
+        const result = await request<{ items: Array<Record<string, unknown>>; pages?: number; total?: number; page_size?: number }>(`/api/projects/?page_size=100${page > 1 ? `&page=${page}` : ''}`)
+        items.push(...result.items.map(normalizeProject))
+        pages = result.pages || Math.ceil((result.total || 0) / (result.page_size || 100)) || 1
+        page += 1
+      } while (page <= pages)
+      return items
+    })()
     pendingProjectList = requestPromise
     try {
       return await requestPromise
@@ -122,6 +137,13 @@ export const projectApi = {
   },
   async save(payload: ProjectPayload): Promise<ManagedProject[]> {
     if (!payload.operationLibraryId) throw new Error('必须选择操作对象库')
+    const changingSupplier = payload.supplierId !== undefined || payload.fleetSupplierId !== undefined
+    if (!payload.projectId && (!payload.supplierId || !payload.fleetSupplierId)) throw new Error('请选择供应商')
+    if (changingSupplier) {
+      if (payload.supplierId === undefined || payload.fleetSupplierId === undefined) throw new Error('供应商本地 ID 和 Fleet ID 必须一起提交')
+      const unbind = !payload.supplierId && !payload.fleetSupplierId
+      if (!unbind && [payload.supplierId, payload.fleetSupplierId].some((id) => !id || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) throw new Error('供应商 ID 无效，请重新选择供应商')
+    }
     if (payload.deliveryAt) {
       const now = new Date()
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -130,11 +152,15 @@ export const projectApi = {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       if (projects.some((item) => item.name === payload.name && item.id !== payload.projectId)) throw new Error('项目名称已存在')
+      const supplierOption = changingSupplier && payload.supplierId ? (await fleetApi.suppliers()).find((item) => item.localId === payload.supplierId && item.fleetSupplierId === payload.fleetSupplierId) : undefined
+      if (changingSupplier && payload.supplierId && !supplierOption) throw new Error('供应商信息不匹配')
+      if (supplierOption && projects.some((item) => item.id !== payload.projectId && item.supplier?.id === supplierOption.localId)) throw new Error('该供应商已绑定其它项目')
+      const binding = changingSupplier ? { supplier: supplierOption ? { id: supplierOption.localId, ...supplierOption } : null, fleetSupplierId: supplierOption?.fleetSupplierId } : {}
       const operationLibraryName = operationLibraries.find((item) => item.id === payload.operationLibraryId)?.name || ''
       if (payload.projectId) {
-        projects = projects.map((item) => item.id === payload.projectId ? { ...item, ...payload, operationLibraryName, labelLibraryIds: [...payload.labelLibraryIds] } : item)
+        projects = projects.map((item) => item.id === payload.projectId ? { ...item, ...payload, ...binding, fleetSupplierId: changingSupplier ? binding.fleetSupplierId : item.fleetSupplierId, operationLibraryName, labelLibraryIds: [...payload.labelLibraryIds] } : item)
       } else {
-        projects = [{ id: String(Date.now()), code: `PRJ-${Date.now().toString(36).toUpperCase()}`, status: 'not-started', memberCount: 0, dataCount: 0, selectedDuration: 0, validDuration: 0, invalidDuration: 0, unselectedDuration: 0, goalCount: 0, actionCount: 0, progress: 0, createdAt: new Date().toISOString().slice(0, 10), ...payload, operationLibraryName }, ...projects]
+        projects = [{ id: String(Date.now()), code: `PRJ-${Date.now().toString(36).toUpperCase()}`, status: 'not-started', memberCount: 0, dataCount: 0, selectedDuration: 0, validDuration: 0, invalidDuration: 0, unselectedDuration: 0, goalCount: 0, actionCount: 0, progress: 0, createdAt: new Date().toISOString().slice(0, 10), ...payload, ...binding, autoSyncTime: null, operationLibraryName }, ...projects]
       }
       return clone(projects)
     }
@@ -144,7 +170,7 @@ export const projectApi = {
       : payload.annotationGuideline?.type === 'file'
         ? { type: 'file', display_name: payload.annotationGuideline.displayName, url: payload.annotationGuideline.url }
         : null
-    const body = { name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : '', delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), operation_library_id: Number(payload.operationLibraryId), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
+    const body = { ...(changingSupplier ? { supplier_id: payload.supplierId ? Number(payload.supplierId) : null, fleet_supplier_id: payload.fleetSupplierId ? Number(payload.fleetSupplierId) : null } : {}), name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : '', delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), operation_library_id: Number(payload.operationLibraryId), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
     await request(payload.projectId ? `/api/projects/${encodeURIComponent(payload.projectId)}` : '/api/projects/', { method: payload.projectId ? 'PATCH' : 'POST', body: JSON.stringify(body) })
     return this.list()
   },
@@ -175,6 +201,16 @@ export const mediaApi = {
 }
 
 export const fleetApi = {
+  async suppliers(keyword = ''): Promise<FleetSupplierOption[]> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      return ['合肥创运', '工厂电脑装配', '商超拣选'].map((name, index) => ({ localId: String(index + 5), fleetSupplierId: String(index + 201), name, code: `SUP-${index + 201}`, type: '服务供应商' })).filter((item) => !keyword || item.name.includes(keyword))
+    }
+    const query = keyword.trim() ? `?${new URLSearchParams({ keyword: keyword.trim() })}` : ''
+    const result = await request<{ items: Array<Record<string, unknown>> }>(`/api/fleet/suppliers${query}`)
+    return (result.items || []).filter((item) => Number.isSafeInteger(Number(item.local_id)) && Number(item.local_id) > 0 && Number.isSafeInteger(Number(item.fleet_supplier_id)) && Number(item.fleet_supplier_id) > 0)
+      .map((item) => ({ localId: String(item.local_id), fleetSupplierId: String(item.fleet_supplier_id), name: String(item.name || ''), code: String(item.code || ''), type: String(item.type || '') }))
+  },
   async videoGroups(projectId: string): Promise<FleetVideoGroup[]> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
@@ -197,6 +233,35 @@ export const fleetApi = {
     const result = await request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(projectId)}/fleet/videos?${params}`)
     return { items: (result.items || []).map((item) => ({ fleetVideoId: num(item.fleet_video_id), filename: String(item.filename || ''), duration: item.duration == null ? null : num(item.duration), fileSize: item.file_size == null ? null : num(item.file_size), ossKey: String(item.oss_key || ''), ossBucket: String(item.oss_bucket || ''), scene1Id: num(item.scene1_id), scene1Name: String(item.scene1_name || ''), scene2Id: num(item.scene2_id), scene2Name: String(item.scene2_name || ''), supplierId: num(item.supplier_id), supplierName: String(item.supplier_name || ''), synced: item.synced === true })), total: result.total || 0, page: result.page || query.page, pageSize: result.page_size || query.pageSize, pages: result.pages || 1 }
   },
+  async unsyncedVideos(projectId: string, query: FleetManualQuery): Promise<FleetManualPage> {
+    if (runtimeConfig.apiMode === 'mock') {
+      const binding = projects.find((project) => project.id === projectId)
+      const source = await this.videos(projectId, { supplierId: Number(binding?.fleetSupplierId || binding?.supplier?.fleetSupplierId) || undefined, page: 1, pageSize: 10000 })
+      const synced = mockFleetManualSynced.get(projectId) || new Set<number>()
+      const items = source.items.map((video, index): FleetManualVideo => ({ ...video, synced: video.synced || synced.has(video.fleetVideoId), personName: video.supplierName, collectedAt: `2026-10-20T${String(index % 12 + 8).padStart(2, '0')}:00:00+08:00`, failureReason: index % 7 === 3 ? '对象存储读取失败，请重试' : '', syncStatus: video.synced || synced.has(video.fleetVideoId) ? 'synced' : index % 7 === 2 ? 'syncing' : index % 7 === 3 ? 'failed' : 'unsynced' }))
+        .filter((video) => (!query.keyword || video.filename.toLowerCase().includes(query.keyword.toLowerCase())) && (!query.personName || video.personName.includes(query.personName)) && (!query.scene1Id || String(video.scene1Id) === query.scene1Id) && (!query.scene2Id || String(video.scene2Id) === query.scene2Id) && (!query.syncStatus || video.syncStatus === query.syncStatus))
+      return { items: items.slice((query.page - 1) * query.pageSize, query.page * query.pageSize), total: items.length, page: query.page, pageSize: query.pageSize, pages: Math.max(1, Math.ceil(items.length / query.pageSize)) }
+    }
+    const params = new URLSearchParams({ page: String(query.page), page_size: String(query.pageSize) })
+    if (query.keyword) params.set('keyword', query.keyword)
+    if (query.personName) params.set('person_name', query.personName)
+    if (query.scene1Id) params.set('scene1_id', query.scene1Id)
+    if (query.scene2Id) params.set('scene2_id', query.scene2Id)
+    if (query.syncStatus) params.set('sync_status', query.syncStatus)
+    const path = `/api/projects/${encodeURIComponent(projectId)}/fleet/videos/unsynced?${params}`
+    const existing = pendingManualVideoRequests.get(path)
+    if (existing) return existing
+    const pending = request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(path).then((result): FleetManualPage => ({
+      items: (result.items || []).map((item) => ({
+        fleetVideoId: num(item.fleet_video_id), filename: String(item.filename || ''), duration: item.duration == null ? null : num(item.duration), fileSize: item.file_size == null ? null : num(item.file_size), ossKey: String(item.oss_key || ''), ossBucket: String(item.oss_bucket || ''),
+        scene1Id: num(item.scene1_id), scene1Name: String(item.scene1_name || ''), scene2Id: num(item.scene2_id), scene2Name: String(item.scene2_name || ''), supplierId: num(item.supplier_id), supplierName: String(item.supplier_name || ''), synced: item.synced === true,
+        syncStatus: normalizeFleetSyncStatus(item.sync_status ?? item.sync_state, item.synced), personName: String(item.person_name || ''), collectedAt: String(item.collected_at || item.collect_time || item.collection_time || ''), failureReason: String(item.failure_reason || item.sync_error || item.error_message || ''),
+      })),
+      total: num(result.total), page: result.page || query.page, pageSize: result.page_size || query.pageSize, pages: result.pages || Math.max(1, Math.ceil(num(result.total) / query.pageSize)),
+    }))
+    pendingManualVideoRequests.set(path, pending)
+    try { return await pending } finally { if (pendingManualVideoRequests.get(path) === pending) pendingManualVideoRequests.delete(path) }
+  },
   async sync(projectId: string, target: { groups?: FleetSyncGroup[]; videoIds?: number[] }): Promise<FleetSyncResult> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
@@ -206,7 +271,9 @@ export const fleetApi = {
         if (group.scene1Id !== index + 1 || (group.scene2Id !== undefined && group.scene2Id !== index + 101) || (group.supplierId !== undefined && group.supplierId !== index + 201)) return
         tasks.forEach((task) => { if (!synced.has(task.id)) { synced.add(task.id); createdCount += task.videoCount } })
       }))
-      createdCount += target.videoIds?.length || 0
+      const manualSynced = mockFleetManualSynced.get(projectId) || new Set<number>()
+      for (const id of target.videoIds || []) { if (!manualSynced.has(id)) { manualSynced.add(id); createdCount += 1 } }
+      mockFleetManualSynced.set(projectId, manualSynced)
       mockFleetSynced.set(projectId, synced)
       projects = projects.map((project) => project.id === projectId ? { ...project, dataCount: project.dataCount + createdCount } : project)
       return clone({ createdCount, updatedCount: 0, skippedCount: 0, skipped: [] })

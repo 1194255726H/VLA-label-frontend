@@ -6,8 +6,8 @@ import { PaginationJump } from '../components/PaginationJump'
 import { VideoSceneEditor } from '../components/VideoSceneEditor'
 import { annotationDataApi } from '../services/annotationDataApi'
 import { projectApi } from '../services/managementApi'
-import type { SessionResponse, VideoListItem } from '../types/api'
-import { FleetSyncModal } from './ProjectManagementPage'
+import type { ManagedProject, SessionResponse, VideoListItem } from '../types/api'
+import { ManualFleetSyncModal } from '../components/ManualFleetSyncModal'
 import { formatDateTime } from '../utils/date'
 import { nodeLabels, nodeToneByLabel } from '../utils/node'
 import { invalidReasons, summarizeInvalidIntervals } from '../utils/invalidReason'
@@ -38,6 +38,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const navigate = useNavigate()
   const [items, setItems] = useState<VideoListItem[]>([])
   const [projectName, setProjectName] = useState('项目视频')
+  const [projectDetail, setProjectDetail] = useState<ManagedProject>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [filenameInput, setFilenameInput] = useState('')
@@ -69,7 +70,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const totalsKey = `${projectId}|${filename}|${personName}|${sceneFilter}|${invalidReason}|${currentAssigneeId}|${createdAtStart}|${createdAtEnd}`
   const [statusTotals, setStatusTotals] = useState<{ key: string; values: Record<string, number> }>({ key: '', values: {} })
   const videoStatusTotals = statusTotals.key === totalsKey ? statusTotals.values : {}
-  const [fleetOpen, setFleetOpen] = useState(false)
+  const [manualSyncOpen, setManualSyncOpen] = useState(false)
   const [toast, setToast] = useState('')
   const queryKey = JSON.stringify([projectId, filename, personName, sceneFilter, invalidReason, videoStatus, currentAssigneeId, createdAtStart, createdAtEnd, page, pageSize])
   const tableLoading = loading || loadedQueryKey !== queryKey
@@ -101,10 +102,14 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       .catch((reason) => { if (active) setSceneFilterData({ key: sceneRequestKey, items: [], error: reason instanceof Error ? reason.message : '场景加载失败' }) })
     return () => { active = false }
   }, [projectId, sceneRequestKey])
-  useEffect(() => { projectApi.list().then((projects) => setProjectName(projects.find((item) => item.id === projectId)?.name || '项目视频')).catch(() => undefined) }, [projectId])
+  useEffect(() => {
+    let active = true
+    projectApi.detail(projectId).then((project) => { if (active) { setProjectName(project.name); setProjectDetail(project) } }).catch(() => undefined)
+    return () => { active = false }
+  }, [projectId])
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2500); return () => window.clearTimeout(timer) }, [toast])
 
-  async function fleetSynced(message: string) { setFleetOpen(false); setStatusTotals({ key: totalsKey, values: {} }); await loadVideos(); setToast(message) }
+  async function manualSynced(message: string) { setManualSyncOpen(false); setStatusTotals({ key: totalsKey, values: {} }); await loadVideos(); setToast(message) }
   function applySearch() { setPage(1); setFilename(filenameInput.trim()); setPersonName(personNameInput.trim()); setCurrentAssigneeId(assigneeInput.trim()) }
   function resetFilters() { setFilenameInput(''); setFilename(''); setPersonNameInput(''); setPersonName(''); setSceneFilter(''); setInvalidReason(''); setVideoStatus(''); setAssigneeInput(''); setCurrentAssigneeId(''); setCreatedAtStart(''); setCreatedAtEnd(''); setPage(1) }
   function toggleSelection(ids: string[], checked: boolean) {
@@ -135,7 +140,8 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
 
   return <AppShell user={session.account}><section className="management-page"><section className="management-panel panel">
     <header className="management-toolbar annotation-data-heading"><div className="detail-title"><button className="icon-button bordered" type="button" onClick={() => navigate('/projects')} aria-label="返回项目管理"><ArrowLeft size={17} /></button><div><h2>{projectName}</h2><p>项目视频管理 · {projectId}</p></div></div><span>共 {total} 条视频，可按场景、无效原因、视频状态、采集人、处理人和创建时间排查</span></header>
-    <div className="annotation-data-tabs"><div className="status-segments">{videoStatusTabs.map((item) => <button key={item.value || 'all'} type="button" className={videoStatus === item.value ? 'active' : ''} onClick={() => { setVideoStatus(item.value); setPage(1) }}>{item.label}{videoStatusTotals[item.value] == null ? null : <span>{videoStatusTotals[item.value]}</span>}</button>)}</div><div className="project-video-toolbar-actions"><button className="secondary-button" type="button" disabled={!selectedVideoIds.size || exporting} onClick={() => void exportSelected()}><Download size={16} />{exporting ? '正在导出...' : '导出 CSV'}</button><button className="primary-button" type="button" onClick={() => setFleetOpen(true)}><Database size={16} />从 Fleet 同步</button></div></div>
+    {projectDetail?.id === projectId && <div className="project-binding-summary"><span>项目供应商：<b>{projectDetail.supplier?.name || '未绑定（手动同步）'}</b></span><span>最近自动同步时间：<b>{projectDetail.autoSyncTime ? formatDateTime(projectDetail.autoSyncTime) : '-'}</b></span></div>}
+    <div className="annotation-data-tabs"><div className="status-segments">{videoStatusTabs.map((item) => <button key={item.value || 'all'} type="button" className={videoStatus === item.value ? 'active' : ''} onClick={() => { setVideoStatus(item.value); setPage(1) }}>{item.label}{videoStatusTotals[item.value] == null ? null : <span>{videoStatusTotals[item.value]}</span>}</button>)}</div><div className="project-video-toolbar-actions"><button className="secondary-button" type="button" disabled={!selectedVideoIds.size || exporting} onClick={() => void exportSelected()}><Download size={16} />{exporting ? '正在导出...' : '导出 CSV'}</button><button className="primary-button" type="button" onClick={() => setManualSyncOpen(true)}><Database size={16} />手动同步</button></div></div>
     <div className="management-filters project-video-filters">
       <label><span>视频名称</span><div className="filter-control"><Search size={16} /><input value={filenameInput} onChange={(event) => setFilenameInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="请输入视频文件名" /></div></label>
       <label className="project-scene-filter"><span>场景</span><div className="filter-control"><select aria-label="场景筛选" value={sceneFilter} disabled={scenesLoading} onChange={(event) => { setSceneFilter(event.target.value); setPage(1) }}><option value="">{scenesLoading ? '正在加载场景...' : '全部场景'}</option>{sceneOptions.map((scene) => <optgroup key={scene.id} label={scene.name}><option value={scene.id}>{scene.name}（全部）</option>{scene.children.map((child) => <option key={child.id} value={`${scene.id}:${child.id}`}>{scene.name} / {child.name}</option>)}</optgroup>)}</select></div></label>
@@ -163,5 +169,5 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       {!tableLoading && !items.length && <tr><td colSpan={19}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
     </tbody></table></div>
     <footer className="management-footer"><span>共 {total} 条{selectedVideoIds.size > 0 && <> · 已选 {selectedVideoIds.size} 条（含其他页）<button className="clear-video-selection" type="button" disabled={exporting} onClick={() => setSelectedVideos({ projectId, ids: new Set() })}>清空选择</button></>}</span><PaginationJump page={page} pages={pages} disabled={tableLoading} onChange={(next) => { setLoading(true); setPage(next) }} pageSize={pageSize} onPageSizeChange={(size) => { setLoading(true); setPageSize(size); setPage(1) }} /></footer>
-  </section></section>{fleetOpen && <FleetSyncModal projectId={projectId} projectName={projectName} onClose={() => setFleetOpen(false)} onSynced={fleetSynced} />}{toast && <div className="toast">{toast}</div>}</AppShell>
+  </section></section>{manualSyncOpen && <ManualFleetSyncModal key={projectId} projectId={projectId} projectName={projectName} supplierName={projectDetail?.id === projectId ? projectDetail.supplier?.name : undefined} onClose={() => setManualSyncOpen(false)} onSynced={manualSynced} />}{toast && <div className="toast">{toast}</div>}</AppShell>
 }
