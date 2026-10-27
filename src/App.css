@@ -693,3 +693,12 @@
 .manual-sync-error { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 4px; color: #b04444; background: #fff2f2; font-size: 12px; }
 .manual-sync-table input[type=checkbox] { accent-color: #2563eb; }
 .manual-sync-advanced { display: flex; min-height: 34px; align-items: center; gap: 5px; padding: 0 8px; border: 0; color: #2563eb; background: transparent; font-size: 12px; }
+.task-table.workbench-video-table th.action-column,
+.task-table.workbench-video-table td.action-column {
+  position: sticky;
+  right: 0;
+  box-shadow: -7px 0 10px rgba(49, 76, 112, .07);
+}
+.task-table.workbench-video-table th.action-column { z-index: 3; background: #edf6ff; }
+.task-table.workbench-video-table td.action-column { z-index: 2; background: #fff; }
+.task-table.workbench-video-table tbody tr:hover td.action-column { background: #f9fbfe; }

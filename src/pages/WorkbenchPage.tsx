@@ -73,7 +73,7 @@ function TaskTable({ items, tab, loading, onError, onScenesUpdated }: { items: V
               {tab === 'submitted' && <td>{submittedNode ? <span className={`node-tag ${nodeTones[submittedNode]}`}>{nodeLabels[submittedNode]}</span> : '-'}</td>}
               <td><span className={`work-type-tag ${video.workType}`}>{workTypeLabels[video.workType]}</span></td>
               <td>{formatClock(video.duration)}</td><td className="segment-duration-column">{formatMilliseconds(video.effectiveDurationMs)}</td><td className="segment-duration-column">{formatMilliseconds(video.invalidDurationMs)}</td><td>{video.atomicTaskCount}</td><td className="count-column">{video.atomicActionCount}</td><td className="assignee-column" title={video.currentAssigneeName || String(video.currentAssigneeId || '')}>{video.currentAssigneeName || video.currentAssigneeId || '未分配'}</td><td>{formatDateTime(video.createdAt)}</td><td>{formatDateTime(video.updatedAt)}</td>
-              <td><div className="row-actions"><button type="button" disabled={action.disabled || Boolean(openingVideoId)} onClick={() => openVideo(video)}>{openingVideoId === video.id ? '正在打开...' : action.label}</button></div></td>
+              <td className="action-column"><div className="row-actions"><button type="button" disabled={action.disabled || Boolean(openingVideoId)} onClick={() => openVideo(video)}>{openingVideoId === video.id ? '正在打开...' : action.label}</button></div></td>
             </tr>
           }))}
         </tbody>
