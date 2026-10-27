@@ -702,3 +702,16 @@
 .task-table.workbench-video-table th.action-column { z-index: 3; background: #edf6ff; }
 .task-table.workbench-video-table td.action-column { z-index: 2; background: #fff; }
 .task-table.workbench-video-table tbody tr:hover td.action-column { background: #f9fbfe; }
+.management-table th.fixed-action-column,
+.management-table td.fixed-action-column {
+  position: sticky;
+  right: 0;
+  min-width: 160px;
+  white-space: nowrap;
+  box-shadow: -7px 0 10px rgba(49, 76, 112, .07);
+}
+.management-table th.fixed-action-column { z-index: 3; background: #edf6ff; }
+.management-table td.fixed-action-column { z-index: 2; background: #fff; }
+.management-table tbody tr:hover td.fixed-action-column { background: #f9fbfe; }
+.management-table tbody tr.selected-row td.fixed-action-column { background: #f2f7ff; }
+.management-table tbody tr.selected-row:hover td.fixed-action-column { background: #eaf3ff; }
