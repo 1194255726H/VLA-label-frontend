@@ -57,7 +57,7 @@ function TaskTable({ items, tab, loading, onError, onScenesUpdated }: { items: V
     <div className="table-scroll">
       <table className={`task-table workbench-video-table ${tab}`}>
         <thead><tr>
-          <th>视频名称</th><th className="scene-info-column">场景信息</th><th className="supplier-column">供应商</th><th>状态</th><th>当前节点</th>
+          <th className="video-name-column">视频名称</th><th className="scene-info-column">场景信息</th><th className="supplier-column">供应商</th><th>状态</th><th>当前节点</th>
           {tab === 'submitted' && <th>提交节点</th>}
           <th>流转类型</th><th>视频时长</th><th className="segment-duration-column">有效片段时长</th><th className="segment-duration-column">无效片段时长</th><th className="count-column">单次任务数</th><th className="count-column">小目标数</th><th className="assignee-column">当前处理人</th><th className="date-column">创建时间</th><th className="date-column">更新时间</th><th className="action-column">操作</th>
         </tr></thead>
@@ -66,7 +66,7 @@ function TaskTable({ items, tab, loading, onError, onScenesUpdated }: { items: V
             const action = actionFor(video, tab)
             const submittedNode = submittedNodeMap[video.submittedNode || '']
             return <tr key={`${video.id}-${video.submittedNode || 'pending'}-${index}`}>
-              <td><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `#${video.id}`}</small></div></td>
+              <td className="video-name-column"><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `#${video.id}`}</small></div></td>
               <td><VideoSceneEditor key={`${video.projectId}:${video.id}`} variant="table" workspace={{ ...video, videoId: video.id }} canEdit onUpdated={(scenes) => onScenesUpdated(video, scenes)} /></td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
               <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
               <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>

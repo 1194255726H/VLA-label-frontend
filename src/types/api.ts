@@ -471,6 +471,7 @@ export interface AnnotationSegment {
   color: string
   descriptionZh: string
   descriptionEn?: string
+  meta?: Record<string, unknown> | null
   descriptionCandidatesZh?: string[]
   descriptionCandidatesEn?: string[]
   descriptionChoiceZh?: number

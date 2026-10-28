@@ -10,6 +10,7 @@ import { ResizableAnnotationLayout } from '../components/ResizableAnnotationLayo
 import { Modal } from '../components/Modal'
 import { SegmentDescriptionModal } from '../components/SegmentDescriptionModal'
 import { SegmentDescriptionFields } from '../components/SegmentDescriptionFields'
+import { SegmentPreAnnotationInfo } from '../components/SegmentPreAnnotationInfo'
 import { hasDescriptionCandidates } from '../utils/segmentDescription'
 import { canManageInvalidSamples } from '../utils/permissions'
 import { annotationApi, normalizeAnnotationResult } from '../services/annotationApi'
@@ -1586,8 +1587,10 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
           <div className="segment-description-columns" role="row"><span role="columnheader">片段</span><span role="columnheader">标签与中英文描述</span><span role="columnheader">总时长</span><span role="columnheader">操作</span></div>
           <div className="segment-description-tree" role="rowgroup">{result.goals.map((goal, index) => <div className="segment-group" key={goal.id}>
             {segmentRow(goal, `单次任务 ${index + 1}`)}
+            <SegmentPreAnnotationInfo segment={goal} />
             {result.actions.filter((action) => action.parentId === goal.id).map((action, actionIndex) => <div className="segment-action-wrap" key={action.id}>
               {segmentRow(action, `小目标 ${index + 1}.${actionIndex + 1}`)}
+              <SegmentPreAnnotationInfo segment={action} />
               {segmentKeyFrameMeta(action)}
             </div>)}
           </div>)}</div>

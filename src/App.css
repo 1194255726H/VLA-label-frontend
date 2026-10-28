@@ -614,6 +614,10 @@
 }
 .segment-description-columns>span:nth-child(n+3) { text-align: center; }
 .segment-description-tree { min-width: 646px; }
+.segment-pre-annotation { display: grid; grid-template-columns: var(--segment-columns); gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--annotation-line); background: #f7fbff; }
+.segment-pre-annotation-content { grid-column: 2; display: flex; min-width: 0; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; color: var(--annotation-muted); font-size: 11px; line-height: 1.6; }
+.segment-pre-annotation-reason { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.segment-pre-annotation-confidence { white-space: nowrap; }
 .annotation-segment-row { background: #fff; }
 .annotation-segment-row.selected { background: #f8fbfd; }
 .annotation-segment-row .segment-select-button {
@@ -682,6 +686,13 @@
 .manual-sync-table th:nth-child(6) { width: 90px; }
 .manual-sync-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manual-sync-table td>strong { display: block; overflow: hidden; text-overflow: ellipsis; }
+.task-table.workbench-video-table th.video-name-column,
+.management-table th.video-name-column { width: 400px; min-width: 400px; }
+.task-table td.video-name-column,
+.management-table td.video-name-column { width: 400px; min-width: 400px; max-width: 400px; padding-top: 10px; padding-bottom: 10px; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.video-name-column .data-name strong,
+.video-name-column .entity-name strong,
+.manual-sync-table td.video-name-column>strong { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
 .manual-sync-table .unselectable>td { color: #a4adba; background: #f6f7f9; }
 .manual-sync-table .selected-row>td { background: #eff6ff; }
 .manual-sync-status { font-size: 12px; }
