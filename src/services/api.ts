@@ -1,6 +1,7 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockClaimPool, mockProjects, mockTasks, mockUser } from '../mocks/data'
 import { normalizeInvalidIntervalList } from '../utils/invalidReason'
+import { normalizeVideoStageFields } from '../utils/videoStage'
 import type {
   ImportValidationError,
   PasswordResetChallenge,
@@ -230,6 +231,7 @@ export function normalizeSupplier(value: unknown) {
 
 function normalizeVideo(item: Record<string, unknown>): VideoListItem {
   return {
+    ...normalizeVideoStageFields(item),
     deviceId: optionalString(item.device_id), personName: optionalString(item.person_name),
     invalidIntervalList: normalizeInvalidIntervalList(Array.isArray(item.invalid_interval_list) ? item.invalid_interval_list : item.invalid_intervals),
     id: String(item.id || ''),

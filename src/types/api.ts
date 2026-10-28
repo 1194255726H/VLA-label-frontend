@@ -72,8 +72,21 @@ export interface VideoSupplier {
   type: string
 }
 
+export type VideoStage = 'pre_annotation' | 'human_processing' | 'model_description' | 'cutting' | 'completed' | 'cancelled'
+export type VideoStageStatus = 'queued' | 'running' | 'retrying' | 'succeeded' | 'failed' | 'skipped' | 'cancelled'
+
+export interface ProjectStageStats {
+  projectId: string
+  total: number
+  items: Array<{ stage: VideoStage; name: string; count: number }>
+}
+
 export interface VideoListItem {
   id: string
+  stage?: VideoStage
+  stageStatus?: VideoStageStatus
+  preAnnotationJobId?: string
+  stageFailureReason?: string
   deviceId?: string
   personName?: string
   projectId: string
@@ -170,6 +183,8 @@ export interface ProjectVideoQuery {
   scene2Id?: string
   invalidReason?: string
   status?: string
+  stage?: VideoStage
+  stageStatus?: VideoStageStatus
   currentAssigneeId?: string
   createdAtStart?: string
   createdAtEnd?: string

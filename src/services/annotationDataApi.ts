@@ -1,10 +1,12 @@
 import { runtimeConfig } from '../config/runtime'
 import { mockProjects, mockTasks } from '../mocks/data'
-import type { ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem } from '../types/api'
+import type { ProjectStageStats, ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem } from '../types/api'
 import { request, requestDownload } from './api'
 import { getMockFleetSyncedTasks } from './managementApi'
 import { normalizeInvalidIntervalList } from '../utils/invalidReason'
+import { normalizeVideoStageFields, videoStages } from '../utils/videoStage'
 
+const pendingStageStatsRequests = new Map<string, Promise<ProjectStageStats>>()
 const pendingVideoListRequests = new Map<string, Promise<ProjectVideoPage>>()
 
 function delay() { return new Promise((resolve) => window.setTimeout(resolve, runtimeConfig.mockDelay)) }
@@ -22,6 +24,7 @@ function normalizeNode(value: unknown): TaskNode {
 
 function normalize(item: Record<string, unknown>): VideoListItem {
   return {
+    ...normalizeVideoStageFields(item),
     deviceId: optionalString(item.device_id), personName: optionalString(item.person_name),
     invalidIntervalList: normalizeInvalidIntervalList(Array.isArray(item.invalid_interval_list) ? item.invalid_interval_list : item.invalid_intervals),
     id: String(item.id || ''), projectId: String(item.project_id || ''), projectName: String(item.project_name || ''),
@@ -36,12 +39,30 @@ function normalize(item: Record<string, unknown>): VideoListItem {
 
 function mockItems(projectId: string): VideoListItem[] {
   const project = mockProjects.find((item) => item.id === projectId) || mockProjects[0]
-  const localVideos = mockTasks.map((item, index) => normalize({ id: `video-${index + 1}`, device_id: `02:00:00:00:00:${String(index + 1).padStart(2, '0')}`, person_name: ['王龙', '李明'][index % 2], project_id: projectId, project_name: project.name, current_node: item.node, current_assignee_id: item.assignee, status: item.status === 'processing' ? 'in_progress' : item.status === 'pending' ? 'assigned' : item.status, sort_order: index, external_video_id: item.dataId, filename: `${item.dataName}.mp4`, uri: '/temp.mp4', duration: item.totalDuration, file_size: 96978164, storage_status: index === 2 ? 'missing' : index === 4 ? 'unchecked' : 'available', storage_error: index === 2 ? '对象存储中未找到该视频' : '', updated_at: item.updatedAt }))
-  const syncedVideos = getMockFleetSyncedTasks(projectId).map((item, index) => normalize({ id: `fleet-video-${item.id}`, device_id: item.device, person_name: item.operator, project_id: projectId, project_name: project.name, fleet_video_id: item.id, current_node: 'annotation', status: 'pending', sort_order: index, external_video_id: item.externalTaskId, filename: `${item.externalTaskId}.mp4`, duration: item.totalDuration, storage_status: 'unchecked', updated_at: new Date().toISOString() }))
+  const localVideos = mockTasks.map((item, index) => normalize({ id: `video-${index + 1}`, stage: index === 0 ? 'pre_annotation' : item.status === 'completed' ? 'completed' : 'human_processing', stage_status: index === 0 ? 'failed' : 'running', pre_annotation_job_id: index === 0 ? 1001 : undefined, pre_annotation_error: index === 0 ? '二级场景选择失败' : '', device_id: `02:00:00:00:00:${String(index + 1).padStart(2, '0')}`, person_name: ['王龙', '李明'][index % 2], project_id: projectId, project_name: project.name, current_node: item.node, current_assignee_id: item.assignee, status: item.status === 'processing' ? 'in_progress' : item.status === 'pending' ? 'assigned' : item.status, sort_order: index, external_video_id: item.dataId, filename: `${item.dataName}.mp4`, uri: '/temp.mp4', duration: item.totalDuration, file_size: 96978164, storage_status: index === 2 ? 'missing' : index === 4 ? 'unchecked' : 'available', storage_error: index === 2 ? '对象存储中未找到该视频' : '', updated_at: item.updatedAt }))
+  const syncedVideos = getMockFleetSyncedTasks(projectId).map((item, index) => normalize({ id: `fleet-video-${item.id}`, stage: 'pre_annotation', stage_status: 'queued', device_id: item.device, person_name: item.operator, project_id: projectId, project_name: project.name, fleet_video_id: item.id, current_node: 'annotation', status: 'pending', sort_order: index, external_video_id: item.externalTaskId, filename: `${item.externalTaskId}.mp4`, duration: item.totalDuration, storage_status: 'unchecked', updated_at: new Date().toISOString() }))
   return [...syncedVideos, ...localVideos]
 }
 
 export const annotationDataApi = {
+  async stageStats(projectId: string): Promise<ProjectStageStats> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const videos = mockItems(projectId)
+      return { projectId, total: videos.length, items: videoStages.map((item) => ({ stage: item.value, name: item.label, count: videos.filter((video) => video.stage === item.value).length })) }
+    }
+    const path = `/api/projects/${encodeURIComponent(projectId)}/stage-stats`
+    const existing = pendingStageStatsRequests.get(path)
+    if (existing) return existing
+    const pending = request<{ project_id: number; total: number; items: ProjectStageStats['items'] }>(path).then((data) => ({ projectId: String(data.project_id), total: Number(data.total || 0), items: data.items || [] }))
+    pendingStageStatsRequests.set(path, pending)
+    try { return await pending } finally { if (pendingStageStatsRequests.get(path) === pending) pendingStageStatsRequests.delete(path) }
+  },
+  async retryPreAnnotation(jobId: string, reason = '') {
+    if (!/^\d+$/.test(jobId) || Number(jobId) <= 0) throw new Error('缺少有效的预标注任务 ID，无法重试')
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return }
+    await request(`/api/pre-annotation-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST', body: JSON.stringify(reason.trim() ? { reason: reason.trim() } : {}) })
+  },
   async sceneFilters(projectId: string): Promise<Array<{ id: string; name: string; children: Array<{ id: string; name: string }> }>> {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
@@ -60,7 +81,7 @@ export const annotationDataApi = {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const filename = query.filename?.toLowerCase()
-      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.personName || (item.personName || '').includes(query.personName)) && (!query.scene1Id || item.scene1?.id === query.scene1Id) && (!query.scene2Id || item.scene2?.id === query.scene2Id) && (!query.invalidReason || item.invalidIntervalList?.some((interval) => interval.reason === query.invalidReason)) && (!query.status || item.videoStatus === query.status) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
+      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.personName || (item.personName || '').includes(query.personName)) && (!query.scene1Id || item.scene1?.id === query.scene1Id) && (!query.scene2Id || item.scene2?.id === query.scene2Id) && (!query.invalidReason || item.invalidIntervalList?.some((interval) => interval.reason === query.invalidReason)) && (!query.status || item.videoStatus === query.status) && (!query.stage || item.stage === query.stage) && (!query.stageStatus || item.stageStatus === query.stageStatus) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
       return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize, pages: Math.max(1, Math.ceil(items.length / pageSize)) }
     }
     const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
@@ -70,6 +91,8 @@ export const annotationDataApi = {
     if (query.scene2Id) params.set('scene2_id', query.scene2Id)
     if (query.invalidReason) params.set('invalid_reason', query.invalidReason)
     if (query.status) params.set('status', query.status)
+    if (query.stage) params.set('stage', query.stage)
+    if (query.stageStatus) params.set('stage_status', query.stageStatus)
     if (query.currentAssigneeId) params.set('current_assignee_id', query.currentAssigneeId)
     if (query.createdAtStart) params.set('created_at_start', query.createdAtStart)
     if (query.createdAtEnd) params.set('created_at_end', query.createdAtEnd)

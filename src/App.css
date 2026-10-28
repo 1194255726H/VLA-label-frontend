@@ -715,3 +715,14 @@
 .management-table tbody tr:hover td.fixed-action-column { background: #f9fbfe; }
 .management-table tbody tr.selected-row td.fixed-action-column { background: #f2f7ff; }
 .management-table tbody tr.selected-row:hover td.fixed-action-column { background: #eaf3ff; }
+.project-stage-tabs { height: auto; min-height: 52px; flex-wrap: wrap; }
+.project-stage-tabs>.status-segments { max-width: 100%; overflow-x: auto; white-space: nowrap; }
+.project-stage-tabs .status-segments>button { flex: 0 0 auto; }
+.video-stage-status { display: flex; max-width: 220px; flex-direction: column; gap: 4px; }
+.video-stage-status>small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bd4545; font-size: 11px; }
+.stage-status { font-size: 12px; }
+.stage-status.queued { color: #7c8ba1; }
+.stage-status.running,.stage-status.retrying { color: #2563eb; }
+.stage-status.succeeded { color: #168267; }
+.stage-status.failed,.stage-status.cancelled { color: #bd4545; }
+.project-video-table th:last-child,.project-video-table td:last-child { min-width: 150px; }
