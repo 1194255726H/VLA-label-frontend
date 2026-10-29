@@ -653,8 +653,12 @@
 .segment-list-table .segment-keyframe-meta>span { flex-wrap: wrap; }
 .segment-list-table .segment-keyframe-meta button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .project-video-filters { flex-wrap: wrap; }
-.project-video-date-filters { display: flex; min-width: 0; flex: 0 0 100%; align-items: flex-end; flex-wrap: wrap; gap: 10px; }
-.project-video-date-filters>label { display: flex; width: 170px; min-width: 150px; flex-direction: column; gap: 6px; color: #66758a; font-size: 11px; }
+.management-filters.project-video-filters>label { width: auto; min-width: min(150px, 100%); flex: 1 1 160px; }
+.management-filters.project-video-filters>label:first-child { flex-basis: 220px; }
+.project-video-filters .filter-control { width: 100%; min-width: 0; }
+.project-video-filters .filter-control input,
+.project-video-filters .filter-control select { width: 100%; min-width: 0; }
+.project-video-filters>button { flex: 0 0 auto; }
 .project-supplier-picker { position: relative; min-width: 0; }
 .project-supplier-input { display: flex; align-items: center; border: 1px solid #ccd9e8; border-radius: 5px; background: #fff; }
 .project-supplier-input>input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }

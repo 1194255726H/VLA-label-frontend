@@ -175,11 +175,9 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       <label><span>无效原因</span><div className="filter-control"><select aria-label="无效原因筛选" value={invalidReason} onChange={(event) => { setInvalidReason(event.target.value); setPage(1) }}><option value="">全部无效原因</option>{invalidReasons.map((reason) => <option key={reason} value={reason}>{reason}</option>)}</select></div></label>
       <label><span>采集人</span><div className="filter-control"><input value={personNameInput} onChange={(event) => setPersonNameInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="请输入采集人姓名" /></div></label>
       <label><span>当前处理人 ID</span><div className="filter-control"><input type="number" min="1" step="1" value={assigneeInput} onChange={(event) => setAssigneeInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && applySearch()} placeholder="请输入处理人 ID" /></div></label>
-      <div className="project-video-date-filters">
       <label><span>创建时间（开始）</span><div className="filter-control"><input type="date" value={createdAtStart} onChange={(event) => { setCreatedAtStart(event.target.value); setPage(1) }} /></div></label>
       <label><span>创建时间（结束）</span><div className="filter-control"><input type="date" value={createdAtEnd} onChange={(event) => { setCreatedAtEnd(event.target.value); setPage(1) }} /></div></label>
       <button className="primary-button compact" type="button" onClick={applySearch}>查询</button><button className="secondary-button compact" type="button" onClick={resetFilters}>重置</button>
-      </div>
     </div>
     {stageStats.key === statsKey && stageStats.error && <div className="error-banner"><CircleAlert size={18} /><span>阶段统计加载失败：{stageStats.error}</span><button type="button" onClick={loadVideos}>重新加载</button></div>}
     {sceneError && <div className="error-banner"><CircleAlert size={18} /><span>场景筛选加载失败：{sceneError}</span><button type="button" onClick={() => setSceneReload((current) => current + 1)}>重新加载场景</button></div>}
