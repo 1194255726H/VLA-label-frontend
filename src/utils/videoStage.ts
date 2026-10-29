@@ -10,8 +10,7 @@ export const videoStageStatusLabels: Record<VideoStageStatus, string> = { queued
 export function normalizeVideoStageFields(raw: Record<string, unknown>): Pick<VideoListItem, 'stage' | 'stageStatus' | 'preAnnotationJobId' | 'stageFailureReason'> {
   const job = (raw.pre_annotation_job || raw.latest_pre_annotation_job || {}) as Record<string, unknown>
   const id = raw.pre_annotation_job_id ?? job.id ?? job.job_id ?? raw.job_id
-  const failure = raw.stage_error ?? raw.pre_annotation_error ?? raw.failure_reason ?? job.error_message ?? job.last_error ?? job.error ?? raw.error_message
-  const message = failure && typeof failure === 'object' ? (failure as Record<string, unknown>).message : failure
+  const message = raw.stage_error_message
   return {
     stage: videoStages.some((item) => item.value === raw.stage) ? raw.stage as VideoStage : undefined,
     stageStatus: Object.hasOwn(videoStageStatusLabels, String(raw.stage_status || '')) ? raw.stage_status as VideoStageStatus : undefined,
