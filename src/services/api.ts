@@ -197,7 +197,14 @@ export const authApi = {
 function filteredMockTasks(query: TaskQuery) {
   return mutableTasks.filter((task) => {
     const matchesTab = query.tab === 'submitted' ? ['submitted', 'completed'].includes(task.status) : ['pending', 'processing'].includes(task.status)
-    return matchesTab
+    const matchesName = !query.filename || `${task.dataName}.mp4`.toLowerCase().includes(query.filename.toLowerCase())
+    const matchesNode = !query.currentNode || normalizeNode(task.node) === query.currentNode
+    const matchesWorkType = !query.workType || task.workType === query.workType
+    const updatedAt = Date.parse(query.tab === 'submitted' ? task.submittedAt || task.updatedAt : task.updatedAt)
+    const start = query.updatedAtStart ? Date.parse(query.updatedAtStart.length === 10 ? `${query.updatedAtStart}T00:00:00` : query.updatedAtStart) : undefined
+    const end = query.updatedAtEnd ? Date.parse(query.updatedAtEnd.length === 10 ? `${query.updatedAtEnd}T23:59:59.999` : query.updatedAtEnd) : undefined
+    const matchesDate = (start === undefined || updatedAt >= start) && (end === undefined || updatedAt <= end)
+    return matchesTab && matchesName && matchesNode && matchesWorkType && matchesDate
   })
 }
 
@@ -322,6 +329,11 @@ export const workbenchApi = {
     const effectiveProjectId = query.projectId || String(projects.items[0]?.id || '')
     const pageNo = query.pageNo || 1; const pageSize = query.pageSize || 10
     const params = new URLSearchParams({ operator_id: query.operatorId, tab: query.tab, page: String(pageNo), page_size: String(pageSize) })
+    if (query.filename?.trim()) params.set('filename', query.filename.trim())
+    if (query.currentNode) params.set('current_node', { annotation: 'annotation', review: 'quality_check', quality: 'review', acceptance: 'acceptance' }[query.currentNode])
+    if (query.workType) params.set('work_type', query.workType)
+    if (query.updatedAtStart) params.set('updated_at_start', query.updatedAtStart)
+    if (query.updatedAtEnd) params.set('updated_at_end', query.updatedAtEnd)
     const emptyClaims = { annotation: 0, quality_check: 0, review: 0, acceptance: 0 }
     const emptySummary: WorkbenchSnapshot['summary'] = { date: '', processedCount: 0, completedCount: 0, effectiveDurationMs: 0, invalidDurationMs: 0, selectedDurationMs: 0, invalidRatePct: 0, atomicTaskCount: 0, atomicActionCount: 0 }
     const [rawVideos, pendingClaims, dailyStats] = effectiveProjectId

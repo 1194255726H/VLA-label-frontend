@@ -171,6 +171,11 @@ export interface TaskQuery {
   projectId: string
   operatorId: string
   tab: TaskTab
+  filename?: string
+  currentNode?: TaskNode
+  workType?: 'normal' | 'returned'
+  updatedAtStart?: string
+  updatedAtEnd?: string
   pageNo?: number
   pageSize?: number
   includeOverview?: boolean

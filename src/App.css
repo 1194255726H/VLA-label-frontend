@@ -659,6 +659,11 @@
 .project-video-filters .filter-control input,
 .project-video-filters .filter-control select { width: 100%; min-width: 0; }
 .project-video-filters>button { flex: 0 0 auto; }
+.workbench-task-filters { flex-wrap: wrap; }
+.workbench-task-filters>label { width: auto; min-width: min(160px, 100%); flex: 0 1 220px; }
+.workbench-task-filters .filter-control { min-width: 0; width: 100%; }
+.workbench-task-filters>button { flex: 0 0 auto; }
+.workbench-date-range { display: flex; min-width: min(320px, 100%); flex: 0 1 340px; flex-direction: column; gap: 6px; color: #66758a; font-size: 11px; }
 .project-supplier-picker { position: relative; min-width: 0; }
 .project-supplier-input { display: flex; align-items: center; border: 1px solid #ccd9e8; border-radius: 5px; background: #fff; }
 .project-supplier-input>input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; }

@@ -9,7 +9,7 @@ import { PaginationJump } from '../components/PaginationJump'
 import { VideoSceneEditor } from '../components/VideoSceneEditor'
 import type { VideoScenes } from '../components/VideoSceneEditor'
 import { workbenchApi } from '../services/api'
-import type { Project, SessionResponse, TaskNode, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
+import type { Project, SessionResponse, TaskNode, TaskQuery, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
 import { formatDateTime } from '../utils/date'
 import { nodeLabels, nodeTones } from '../utils/node'
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
@@ -88,6 +88,12 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [projectId, setProjectId] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [tab, setTab] = useState<TaskTab>('pending')
+  const [filenameInput, setFilenameInput] = useState('')
+  const [nodeInput, setNodeInput] = useState<TaskNode | ''>('')
+  const [workTypeInput, setWorkTypeInput] = useState<'normal' | 'returned' | ''>('')
+  const [updatedAtStartInput, setUpdatedAtStartInput] = useState('')
+  const [updatedAtEndInput, setUpdatedAtEndInput] = useState('')
+  const [taskFilters, setTaskFilters] = useState<Pick<TaskQuery, 'filename' | 'currentNode' | 'workType' | 'updatedAtStart' | 'updatedAtEnd'>>({ filename: '' })
   const [tabTotals, setTabTotals] = useState<Record<TaskTab, number>>({ pending: 0, submitted: 0 })
   const [pageNo, setPageNo] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -102,8 +108,8 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     if (!projectId) throw new Error('请先选择作业项目')
     const otherTab: TaskTab = tab === 'pending' ? 'submitted' : 'pending'
     const [result, otherTabResult] = await Promise.all([
-      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, pageNo, pageSize, includeOverview: true }),
-      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab: otherTab, pageNo: 1, pageSize: 1, includeOverview: false }),
+      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, ...taskFilters, pageNo, pageSize, includeOverview: true }),
+      workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab: otherTab, ...taskFilters, pageNo: 1, pageSize: 1, includeOverview: false }),
     ])
     return {
       result,
@@ -112,7 +118,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
         [otherTab]: otherTabResult.tasks.page.total,
       } as Record<TaskTab, number>,
     }
-  }, [pageNo, pageSize, projectId, session.account.id, tab])
+  }, [pageNo, pageSize, projectId, session.account.id, tab, taskFilters])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -226,6 +232,14 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
               <button className={tab === 'pending' ? 'active' : ''} type="button" onClick={() => { if (tab === 'pending') return; setLoading(true); setTab('pending'); setPageNo(1) }}>待处理<span>{tabTotals.pending}</span></button>
               <button className={tab === 'submitted' ? 'active' : ''} type="button" onClick={() => { if (tab === 'submitted') return; setLoading(true); setTab('submitted'); setPageNo(1) }}>已提交<span>{tabTotals.submitted}</span></button>
             </div>
+            <form className="management-filters workbench-task-filters" onSubmit={(event) => { event.preventDefault(); setLoading(true); setPageNo(1); setTaskFilters({ filename: filenameInput.trim(), currentNode: nodeInput || undefined, workType: workTypeInput || undefined, updatedAtStart: updatedAtStartInput || undefined, updatedAtEnd: updatedAtEndInput || undefined }) }}>
+              <label><span>数据名称</span><div className="filter-control"><input aria-label="数据名称查询" placeholder="请输入数据名称" value={filenameInput} onChange={(event) => setFilenameInput(event.target.value)} /></div></label>
+              <label><span>作业节点</span><div className="filter-control"><select aria-label="作业节点查询" value={nodeInput} onChange={(event) => setNodeInput(event.target.value as TaskNode | '')}><option value="">全部作业节点</option>{Object.entries(nodeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div></label>
+              <label><span>流转类型</span><div className="filter-control"><select aria-label="流转类型查询" value={workTypeInput} onChange={(event) => setWorkTypeInput(event.target.value as typeof workTypeInput)}><option value="">全部流转类型</option>{Object.entries(workTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div></label>
+              <div className="workbench-date-range" role="group" aria-label="日期范围"><span>日期范围</span><div className="filter-control"><input type="date" aria-label="日期范围开始" value={updatedAtStartInput} max={updatedAtEndInput || undefined} onChange={(event) => setUpdatedAtStartInput(event.target.value)} /><span>至</span><input type="date" aria-label="日期范围结束" value={updatedAtEndInput} min={updatedAtStartInput || undefined} onChange={(event) => setUpdatedAtEndInput(event.target.value)} /></div></div>
+              <button className="primary-button compact" type="submit">查询</button>
+              <button className="secondary-button compact" type="button" onClick={() => { setFilenameInput(''); setNodeInput(''); setWorkTypeInput(''); setUpdatedAtStartInput(''); setUpdatedAtEndInput(''); setLoading(true); setPageNo(1); setTaskFilters({ filename: '' }) }}>重置</button>
+            </form>
             <TaskTable items={snapshot?.tasks.items || []} tab={tab} loading={loading} onError={setToast} onScenesUpdated={updateVideoScenes} />
             <footer className="table-footer"><span>共 {snapshot?.tasks.page.total || 0} 条</span><PaginationJump page={pageNo} pages={totalPages} disabled={loading} onChange={(next) => { setLoading(true); setPageNo(next) }} pageSize={pageSize} onPageSizeChange={(size) => { setLoading(true); setPageSize(size); setPageNo(1) }} /></footer>
           </section>
