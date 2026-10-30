@@ -8,6 +8,7 @@ import { annotationDataApi } from '../services/annotationDataApi'
 import { projectApi } from '../services/managementApi'
 import type { ManagedProject, ProjectStageStats, SessionResponse, VideoListItem, VideoStage, VideoStageStatus } from '../types/api'
 import { ManualFleetSyncModal } from '../components/ManualFleetSyncModal'
+import { useRangeSelection } from '../hooks/useRangeSelection'
 import { formatDateTime } from '../utils/date'
 import { nodeLabels, nodeToneByLabel } from '../utils/node'
 import { invalidReasons, summarizeInvalidIntervals } from '../utils/invalidReason'
@@ -79,6 +80,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
   const tableLoading = loading || loadedQueryKey !== queryKey
   const selectedVideoIds = selectedVideos.projectId === projectId ? selectedVideos.ids : new Set<string>()
   const selectableItems = items.filter((item) => item.id)
+  const rowSelection = useRangeSelection(selectableItems.map((item) => item.id), queryKey)
   const allPageSelected = !tableLoading && selectableItems.length > 0 && selectableItems.every((item) => selectedVideoIds.has(item.id))
   const somePageSelected = !tableLoading && selectableItems.some((item) => selectedVideoIds.has(item.id))
 
@@ -184,7 +186,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
     {error && <div className="error-banner"><CircleAlert size={18} /><span>{error}</span><button type="button" onClick={loadVideos}>重新加载</button></div>}
     <div className="management-table-wrap"><table className="management-table annotation-data-table project-video-table"><thead><tr><th className="video-selection-column"><input type="checkbox" aria-label="全选当前页视频" checked={allPageSelected} ref={(element) => { if (element) element.indeterminate = somePageSelected && !allPageSelected }} disabled={tableLoading || exporting || !selectableItems.length} onChange={(event) => toggleSelection(selectableItems.map((item) => item.id), event.target.checked)} /></th><th className="video-name-column">视频名称</th><th className="scene-info-column">场景信息</th><th>供应商</th><th>处理阶段</th><th>阶段状态／失败原因</th><th>作业状态</th><th>作业节点</th><th>流转类型</th><th>视频时长</th><th>有效片段时长</th><th>无效片段时长</th><th className="video-invalid-reasons-column">无效原因</th><th>设备 MAC</th><th>采集人</th><th>单次任务数</th><th>小目标数</th><th>处理人</th><th>创建时间</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
       {tableLoading ? <tr><td colSpan={21}><div className="management-empty">正在加载项目视频...</div></td></tr> : items.map((video) => <tr className={selectedVideoIds.has(video.id) ? 'selected-row' : undefined} key={video.id}>
-        <td className="video-selection-column"><input type="checkbox" aria-label={`选择视频 ${video.filename}`} checked={selectedVideoIds.has(video.id)} disabled={!video.id || exporting} onChange={(event) => toggleSelection([video.id], event.target.checked)} /></td>
+        <td className="video-selection-column"><input type="checkbox" aria-label={`选择视频 ${video.filename}`} checked={selectedVideoIds.has(video.id)} disabled={!video.id || exporting} onChange={(event) => toggleSelection(rowSelection.range(video.id, (event.nativeEvent as MouseEvent).shiftKey), event.target.checked)} /></td>
         <td className="video-name-column"><div className="entity-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `视频记录 #${video.id}`}</small></div></td>
         <td><VideoSceneEditor key={`${projectId}:${video.id}`} variant="table" workspace={{ ...video, projectId: video.projectId || projectId, videoId: video.id }} canEdit onUpdated={(scenes) => { setItems((current) => current.map((item) => item.id === video.id ? { ...item, ...scenes } : item)); setToast('场景信息已更新') }} /></td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
         <td>{videoStages.find((item) => item.value === video.stage)?.label || '-'}</td>
@@ -196,6 +198,6 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
       </tr>)}
       {!tableLoading && !items.length && <tr><td colSpan={21}><div className="management-empty"><CircleAlert size={32} />暂无符合条件的项目视频</div></td></tr>}
     </tbody></table></div>
-    <footer className="management-footer"><span>共 {total} 条{selectedVideoIds.size > 0 && <> · 已选 {selectedVideoIds.size} 条（含其他页）<button className="clear-video-selection" type="button" disabled={exporting} onClick={() => setSelectedVideos({ projectId, ids: new Set() })}>清空选择</button></>}</span><PaginationJump page={page} pages={pages} disabled={tableLoading} onChange={(next) => { setLoading(true); setPage(next) }} pageSize={pageSize} onPageSizeChange={(size) => { setLoading(true); setPageSize(size); setPage(1) }} /></footer>
+    <footer className="management-footer"><span>共 {total} 条{selectedVideoIds.size > 0 && <> · 已选 {selectedVideoIds.size} 条（含其他页）<button className="clear-video-selection" type="button" disabled={exporting} onClick={() => { rowSelection.reset(); setSelectedVideos({ projectId, ids: new Set() }) }}>清空选择</button></>}</span><PaginationJump page={page} pages={pages} disabled={tableLoading} onChange={(next) => { setLoading(true); setPage(next) }} pageSize={pageSize} onPageSizeChange={(size) => { setLoading(true); setPageSize(size); setPage(1) }} /></footer>
   </section></section>{manualSyncOpen && <ManualFleetSyncModal key={projectId} projectId={projectId} projectName={projectName} supplierName={projectDetail?.id === projectId ? projectDetail.supplier?.name : undefined} onClose={() => setManualSyncOpen(false)} onSynced={manualSynced} />}{toast && <div className="toast">{toast}</div>}</AppShell>
 }

@@ -7,6 +7,7 @@ import { formatDateTime } from '../utils/date'
 import { fleetSyncStatusLabels, fleetVideoSelectable } from '../utils/fleetSync'
 import { Modal } from './Modal'
 import { PaginationJump } from './PaginationJump'
+import { useRangeSelection } from '../hooks/useRangeSelection'
 
 type Props = { projectId: string; projectName: string; supplierName?: string; onClose: () => void; onSynced: (message: string) => void | Promise<void> }
 
@@ -38,6 +39,7 @@ export function ManualFleetSyncModal({ projectId, projectName, supplierName, onC
   const items = data?.items || []
   const error = !loading ? result.error : ''
   const selectable = items.filter(fleetVideoSelectable)
+  const rowSelection = useRangeSelection(selectable.map((item) => item.fleetVideoId), requestKey)
   const allSelected = selectable.length > 0 && selectable.every((item) => selected.has(item.fleetVideoId))
   const someSelected = selectable.some((item) => selected.has(item.fleetVideoId))
 
@@ -63,12 +65,13 @@ export function ManualFleetSyncModal({ projectId, projectName, supplierName, onC
     return () => { active = false }
   }, [advanced, projectId, sceneKey, scenes.key])
 
-  function resetSelection() { setPage(1); setSelected(new Map()); setSyncError('') }
+  function resetSelection() { rowSelection.reset(); setPage(1); setSelected(new Map()); setSyncError('') }
   function search() { resetSelection(); setKeyword(keywordInput.trim()); setPersonName(personInput.trim()) }
   function reset() { resetSelection(); setKeywordInput(''); setPersonInput(''); setKeyword(''); setPersonName(''); setScene1Id(''); setScene2Id(''); setSyncStatus('unsynced') }
-  function toggle(video: FleetManualVideo, checked: boolean) {
+  function toggle(video: FleetManualVideo, checked: boolean, shiftKey: boolean) {
     if (syncing || loading || !fleetVideoSelectable(video)) return
-    setSelected((current) => { const next = new Map(current); if (checked) next.set(video.fleetVideoId, video); else next.delete(video.fleetVideoId); return next })
+    const ids = new Set(rowSelection.range(video.fleetVideoId, shiftKey))
+    setSelected((current) => { const next = new Map(current); selectable.filter((item) => ids.has(item.fleetVideoId)).forEach((item) => { if (checked) next.set(item.fleetVideoId, item); else next.delete(item.fleetVideoId) }); return next })
   }
   function togglePage(checked: boolean) {
     if (syncing || loading) return
@@ -111,7 +114,7 @@ export function ManualFleetSyncModal({ projectId, projectName, supplierName, onC
           {loading ? <tr><td colSpan={7}><div className="management-empty">正在加载同步数据...</div></td></tr> : items.map((video) => {
             const selectable = fleetVideoSelectable(video)
             const scene = [video.scene1Name, video.scene2Name].filter(Boolean).join(' / ') || '-'
-            return <tr className={!selectable ? 'unselectable' : selected.has(video.fleetVideoId) ? 'selected-row' : ''} key={video.fleetVideoId}><td><input type="checkbox" aria-label={`选择同步数据 ${video.filename}`} checked={selected.has(video.fleetVideoId)} disabled={syncing || !selectable} onChange={(event) => toggle(video, event.target.checked)} /></td><td className="video-name-column"><strong title={video.filename}>{video.filename || '-'}</strong></td><td title={scene}>{scene}</td><td title={video.personName}>{video.personName || '-'}</td><td>{video.collectedAt ? formatDateTime(video.collectedAt) : '-'}</td><td><span className={`manual-sync-status ${video.syncStatus}`}>{fleetSyncStatusLabels[video.syncStatus]}</span></td><td title={video.failureReason}>{video.failureReason || '-'}</td></tr>
+            return <tr className={!selectable ? 'unselectable' : selected.has(video.fleetVideoId) ? 'selected-row' : ''} key={video.fleetVideoId}><td><input type="checkbox" aria-label={`选择同步数据 ${video.filename}`} checked={selected.has(video.fleetVideoId)} disabled={syncing || !selectable} onChange={(event) => toggle(video, event.target.checked, (event.nativeEvent as MouseEvent).shiftKey)} /></td><td className="video-name-column"><strong title={video.filename}>{video.filename || '-'}</strong></td><td title={scene}>{scene}</td><td title={video.personName}>{video.personName || '-'}</td><td>{video.collectedAt ? formatDateTime(video.collectedAt) : '-'}</td><td><span className={`manual-sync-status ${video.syncStatus}`}>{fleetSyncStatusLabels[video.syncStatus]}</span></td><td title={video.failureReason}>{video.failureReason || '-'}</td></tr>
           })}
           {!loading && !items.length && <tr><td colSpan={7}><div className="management-empty">{error ? '同步数据加载失败，请重试' : '暂无符合条件的数据'}</div></td></tr>}
         </tbody></table></div>
