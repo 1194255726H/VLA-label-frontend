@@ -695,10 +695,12 @@
 .manual-sync-table th:nth-child(6) { width: 90px; }
 .manual-sync-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manual-sync-table td>strong { display: block; overflow: hidden; text-overflow: ellipsis; }
+.workbench-video-table,
+.project-video-table { --video-name-column-width: 280px; }
 .task-table.workbench-video-table th.video-name-column,
-.management-table th.video-name-column { width: 400px; min-width: 400px; }
+.management-table th.video-name-column { width: var(--video-name-column-width, 400px); min-width: var(--video-name-column-width, 400px); }
 .task-table td.video-name-column,
-.management-table td.video-name-column { width: 400px; min-width: 400px; max-width: 400px; padding-top: 10px; padding-bottom: 10px; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.management-table td.video-name-column { width: var(--video-name-column-width, 400px); min-width: var(--video-name-column-width, 400px); max-width: var(--video-name-column-width, 400px); padding-top: 10px; padding-bottom: 10px; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .video-name-column .data-name strong,
 .video-name-column .entity-name strong,
 .manual-sync-table td.video-name-column>strong { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
