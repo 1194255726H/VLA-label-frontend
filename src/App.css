@@ -346,6 +346,12 @@
 .annotation-history:disabled { color: #a6b1b8; background: #f4f6f7; }
 .readonly-badge,.editing-badge { height: 30px; padding: 0 9px; display: inline-flex; align-items: center; border-radius: 4px; font-size: 11px; white-space: nowrap; }
 .readonly-badge { color: #667085; background: #f2f4f7; }.editing-badge { color: #216fc4; background: #eaf4ff; }
+.annotation-edit-switch { gap: 6px; border: 0; cursor: pointer; }
+.annotation-edit-switch>i { position: relative; width: 26px; height: 16px; border-radius: 8px; background: #a5b0be; }
+.annotation-edit-switch>i::after { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; content: ''; transition: transform .15s; }
+.annotation-edit-switch.enabled>i { background: #2563eb; }
+.annotation-edit-switch.enabled>i::after { transform: translateX(10px); }
+.annotation-edit-switch:disabled { cursor: not-allowed; opacity: .55; }
 .annotation-header-actions .danger-button { color: #c63f3a!important; border-color: #ecc7c5!important; background: #fffafa!important; }
 .annotation-header-actions .return-button { color: #b26b14!important; border-color: #ead6b8!important; background: #fffdf8!important; }
 .annotation-page { position: relative; }

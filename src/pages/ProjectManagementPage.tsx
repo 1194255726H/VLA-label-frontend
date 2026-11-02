@@ -138,7 +138,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   }
   async function changeStatus(item: ManagedProject, next: ProjectStatus) {
     if (next === 'archived' && !window.confirm(`确认归档项目“${item.name}”？归档后将不能再编辑。`)) return
-    try { setItems(await projectApi.setStatus(item.id, next)); setToast(`${item.name}已${statusLabels[next]}`) } catch (reason) { setToast(reason instanceof Error ? reason.message : '状态变更失败') }
+    try { setItems(await projectApi.setStatus(item.id, next)); setToast(`${item.name} ${statusLabels[next]}`) } catch (reason) { setToast(reason instanceof Error ? reason.message : '状态变更失败') }
   }
   async function removeProject(item: ManagedProject) { if (!window.confirm(`确认删除项目“${item.name}”？`)) return; try { setItems(await projectApi.delete(item.id)); setToast('项目已删除') } catch (reason) { setToast(reason instanceof Error ? reason.message : '项目删除失败') } }
 

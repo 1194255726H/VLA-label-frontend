@@ -386,6 +386,11 @@ export const annotationApi = {
     return Number(response.version || revision.version || revision.revision || revision.revision_no || response.revision_id || revision.id || baseRevision + 1)
   },
 
+  async submitChanges(projectId: string, videoId: string, result: AnnotationResult) {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); mockResults.set(videoContextKey(projectId, videoId), clone(result)); return }
+    await request(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/submit-annotation`, { method: 'POST', body: JSON.stringify(annotationPayload(result)) })
+  },
+
   async submit(projectId: string, videoId: string, result: AnnotationResult, _revision: number) {
     void _revision
     const key = videoContextKey(projectId, videoId)
