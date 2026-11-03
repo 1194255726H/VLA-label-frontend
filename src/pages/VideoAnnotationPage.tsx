@@ -692,7 +692,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const nextTaskNode = resolveNextTaskNode(session.account, searchParams.get('node'), workspace?.node || 'annotation')
   const editModeActive = canEditLaterStages && editModeEnabled
   const editModeLocked = (approvalStage || canEditLaterStages) && !editModeActive
-  const draftsDisabled = approvalStage || canEditLaterStages
+  const draftsDisabled = (approvalStage || canEditLaterStages) && !editModeActive
   const canReturn = Boolean(!invalidOnly && workspace && ['review', 'quality', 'acceptance'].includes(workspace.node))
   const submitButtonLabel = editModeActive ? '提交修改' : workspace?.node === 'quality' ? '提交审核' : workspace?.node === 'acceptance' ? '提交验收' : '提交'
   const hardReadonly = Boolean((workspace?.readonly && !(approvalStage && canEditLaterStages)) || searchParams.get('readonly') === '1' || submitted || videoLockState !== 'held')
@@ -998,14 +998,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
 
   async function updateInvalidSamples(targets: AnnotationResult['invalidRanges'], isSample: boolean, data = result, forceSave = false): Promise<AnnotationResult | undefined> {
     if (!canManageSamples || !data || !targets.length || invalidReadonly || saving || submitting || editing || sampleUpdatingId) return
-    if (draftsDisabled) {
-      if (!editModeActive) return
-      const ids = new Set(targets.map((range) => range.id))
-      const next = { ...data, invalidRanges: data.invalidRanges.map((range) => ids.has(range.id) ? { ...range, isSample } : range) }
-      mutate(next)
-      setToast('样例状态已修改，请点击提交按钮保存')
-      return next
-    }
     setSampleUpdatingId(targets[0].id)
     let currentData = data
     const identityMap = new Map<string, string>()
@@ -1044,6 +1036,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         redoStack.current = redoStack.current.map(alignSnapshot)
         setResult(currentData)
       }
+      if (editModeActive) editModeSnapshotRef.current = structuredClone(currentData)
       setToast(isSample ? '已设为样例' : '已取消样例')
       return currentData
     } catch (failure) {
@@ -1222,7 +1215,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const data = overrideResult || result
     if (draftsDisabled || !data || hardReadonly || saving || editing || sampleUpdatingId) { if (editing && showToast) setToast('请先完成或取消当前拖动'); return revision }
     setSaving(true)
-    try { const nextRevision = await annotationApi.save(projectId, videoId, data, revision); setRevision(nextRevision); setDirty(false); if (showToast) setToast('草稿已保存'); return nextRevision }
+    try { const nextRevision = await annotationApi.save(projectId, videoId, data, revision); setRevision(nextRevision); setDirty(false); if (editModeActive) editModeSnapshotRef.current = structuredClone(data); if (showToast) setToast('草稿已保存'); return nextRevision }
     catch (reason) { setToast(reason instanceof Error ? reason.message : '保存失败'); throw reason }
     finally { setSaving(false) }
   }
@@ -1230,7 +1223,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   async function submit(options: { ignoreActionGaps?: boolean; submitChanges?: boolean } = {}, overrideResult?: AnnotationResult) {
     const data = overrideResult || result
     const submitChanges = options.submitChanges ?? editModeActive
-    if (!data || hardReadonly || submitting || sampleUpdatingId) return
+    if (!data || hardReadonly || saving || submitting || sampleUpdatingId) return
     if (editing) return setToast('请先完成或取消当前拖动')
     if (submitChanges && (!canEditLaterStages || !editModeActive)) return
     if (invalidOnly && approvalStage && !submitChanges) return setToast('请开启编辑模式后提交已完成视频的调整')
@@ -1271,6 +1264,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     setSubmitting(true)
     try {
       if (submitChanges) {
+        if (dirty || overrideResult) await save(false, data)
         await annotationApi.submitChanges(projectId, videoId, data)
         setDirty(false)
         editModeSnapshotRef.current = structuredClone(data)
@@ -1455,13 +1449,14 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   useEffect(() => {
-    if (draftsDisabled || !dirty || hardReadonly || saving || !result || editing || sampleUpdatingId) return
+    if (draftsDisabled || !dirty || hardReadonly || saving || submitting || !result || editing || sampleUpdatingId) return
     const snapshot = result
     const timer = window.setTimeout(() => {
       setSaving(true)
       annotationApi.save(projectId, videoId, snapshot, revision)
         .then((nextRevision) => {
           setRevision(nextRevision)
+          if (editModeActive) editModeSnapshotRef.current = structuredClone(snapshot)
           setResult((current) => {
             if (current === snapshot) setDirty(false)
             return current
@@ -1471,7 +1466,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         .finally(() => setSaving(false))
     }, 700)
     return () => window.clearTimeout(timer)
-  }, [draftsDisabled, dirty, editing, hardReadonly, projectId, result, revision, saving, sampleUpdatingId, videoId])
+  }, [draftsDisabled, dirty, editModeActive, editing, hardReadonly, projectId, result, revision, saving, submitting, sampleUpdatingId, videoId])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -1608,7 +1603,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     <header className="annotation-header">
       <button className="annotation-back" type="button" onClick={() => navigate('/workbench')} aria-label="返回工作台"><BrandLogo compact /><ArrowLeft className="annotation-back-arrow" size={19} /></button>
       <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><span className={`workflow-stage-chip ${nodeTones[workspace.node]}`}>{nodeLabels[workspace.node]}</span></div><small>{workspace.videoCode} · {workspace.projectName}</small></div>
-      <div className="annotation-save-state"><i className={dirty ? 'dirty' : ''} />{saving ? '正在保存' : dirty ? (approvalStage ? '有未提交修改' : '有未保存修改') : approvalStage ? '标注内容已同步' : `草稿已保存 · V${revision}`}</div>
+      <div className="annotation-save-state"><i className={dirty ? 'dirty' : ''} />{saving ? '正在保存' : dirty ? '有未保存修改' : `草稿已保存 · V${revision}`}</div>
       <div className="annotation-header-actions">
         <VideoSceneEditor key={`${projectId}:${videoId}`} workspace={workspace} canEdit={canEditScenes} onUpdated={(scenes) => setWorkspace((current) => current && current.videoId === workspace.videoId ? { ...current, ...scenes } : current)} />
         {approvalStage && <button className={`comment-add-button${commentPlacementMode ? ' active' : ''}`} type="button" disabled={!canComment} onClick={() => { setCommentsOpen(false); setCommentPlacementMode((value) => !value) }}><Plus size={17} />添加批注</button>}
