@@ -243,8 +243,8 @@ export const fleetApi = {
       return { items: items.slice((query.page - 1) * query.pageSize, query.page * query.pageSize), total: items.length, page: query.page, pageSize: query.pageSize, pages: Math.max(1, Math.ceil(items.length / query.pageSize)) }
     }
     const params = new URLSearchParams({ page: String(query.page), page_size: String(query.pageSize) })
-    if (query.keyword) params.set('keyword', query.keyword)
-    if (query.personName) params.set('person_name', query.personName)
+    if (query.keyword?.trim()) params.set('keyword', query.keyword.trim())
+    if (query.personName?.trim()) params.set('person_name', query.personName.trim())
     if (query.scene1Id) params.set('scene1_id', query.scene1Id)
     if (query.scene2Id) params.set('scene2_id', query.scene2Id)
     if (query.syncStatus) params.set('sync_status', query.syncStatus)

@@ -14,18 +14,18 @@ type Props = { projectId: string; projectName: string; supplierName?: string; on
 export function ManualFleetSyncModal({ projectId, projectName, supplierName, onClose, onSynced }: Props) {
   const [keywordInput, setKeywordInput] = useState('')
   const [personInput, setPersonInput] = useState('')
-  const [personName, setPersonName] = useState('')
-  const [scene1Id, setScene1Id] = useState('')
-  const [scene2Id, setScene2Id] = useState('')
+  const [scene1Input, setScene1Input] = useState('')
+  const [scene2Input, setScene2Input] = useState('')
+  const [syncStatusInput, setSyncStatusInput] = useState<FleetManualQuery['syncStatus']>('unsynced')
+  const [filters, setFilters] = useState<Omit<FleetManualQuery, 'page' | 'pageSize'>>({ syncStatus: 'unsynced' })
+  const { keyword, personName, scene1Id, scene2Id, syncStatus } = filters
   const [advanced, setAdvanced] = useState(false)
   const [sceneRefresh, setSceneRefresh] = useState(0)
   const [scenes, setScenes] = useState<{ key: string; items: Awaited<ReturnType<typeof annotationDataApi.sceneFilters>>; error: string }>({ key: '', items: [], error: '' })
   const sceneKey = `${projectId}:${sceneRefresh}`
   const sceneLoading = scenes.key !== sceneKey
   const sceneOptions = sceneLoading ? [] : scenes.items
-  const sceneChildren = sceneOptions.find((scene) => scene.id === scene1Id)?.children || []
-  const [keyword, setKeyword] = useState('')
-  const [syncStatus, setSyncStatus] = useState<FleetManualQuery['syncStatus']>('unsynced')
+  const sceneChildren = sceneOptions.find((scene) => scene.id === scene1Input)?.children || []
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [refresh, setRefresh] = useState(0)
@@ -66,8 +66,8 @@ export function ManualFleetSyncModal({ projectId, projectName, supplierName, onC
   }, [advanced, projectId, sceneKey, scenes.key])
 
   function resetSelection() { rowSelection.reset(); setPage(1); setSelected(new Map()); setSyncError('') }
-  function search() { resetSelection(); setKeyword(keywordInput.trim()); setPersonName(personInput.trim()) }
-  function reset() { resetSelection(); setKeywordInput(''); setPersonInput(''); setKeyword(''); setPersonName(''); setScene1Id(''); setScene2Id(''); setSyncStatus('unsynced') }
+  function search() { resetSelection(); setFilters({ keyword: keywordInput.trim(), personName: personInput.trim(), scene1Id: scene1Input, scene2Id: scene2Input, syncStatus: syncStatusInput }); setRefresh((value) => value + 1) }
+  function reset() { resetSelection(); setKeywordInput(''); setPersonInput(''); setScene1Input(''); setScene2Input(''); setSyncStatusInput('unsynced'); setFilters({ syncStatus: 'unsynced' }); setRefresh((value) => value + 1) }
   function toggle(video: FleetManualVideo, checked: boolean, shiftKey: boolean) {
     if (syncing || loading || !fleetVideoSelectable(video)) return
     const ids = new Set(rowSelection.range(video.fleetVideoId, shiftKey))
@@ -98,13 +98,13 @@ export function ManualFleetSyncModal({ projectId, projectName, supplierName, onC
         <form className="manual-sync-filters" onSubmit={(event) => { event.preventDefault(); search() }}>
           <fieldset disabled={syncing}><div className="manual-sync-filter-row">
             <label><span>数据名称</span><input aria-label="同步数据名称" value={keywordInput} placeholder="请输入数据名称" onChange={(event) => setKeywordInput(event.target.value)} /></label>
-            <label><span>同步状态</span><select aria-label="同步状态" value={syncStatus} onChange={(event) => { resetSelection(); setSyncStatus(event.target.value as FleetManualQuery['syncStatus']) }}><option value="">全部状态</option>{(['unsynced', 'syncing', 'synced', 'failed'] as const).map((status) => <option key={status} value={status}>{fleetSyncStatusLabels[status]}</option>)}</select></label>
+            <label><span>同步状态</span><select aria-label="同步状态" value={syncStatusInput} onChange={(event) => setSyncStatusInput(event.target.value as FleetManualQuery['syncStatus'])}><option value="">全部状态</option>{(['unsynced', 'syncing', 'synced', 'failed'] as const).map((status) => <option key={status} value={status}>{fleetSyncStatusLabels[status]}</option>)}</select></label>
             <button className="manual-sync-advanced" type="button" aria-expanded={advanced} onClick={() => setAdvanced((value) => !value)}>高级筛选<ChevronDown size={14} /></button>
           </div>
           {advanced && <div className="manual-sync-filter-row">
             <label><span>采集人</span><input aria-label="同步数据采集人" value={personInput} placeholder="请输入采集人" onChange={(event) => setPersonInput(event.target.value)} /></label>
-            <label><span>场景</span><select aria-label="同步一级场景" value={scene1Id} disabled={sceneLoading} onChange={(event) => { resetSelection(); setScene1Id(event.target.value); setScene2Id('') }}><option value="">{sceneLoading ? '正在加载场景...' : '全部一级场景'}</option>{sceneOptions.map((scene) => <option key={scene.id} value={scene.id}>{scene.name}</option>)}</select></label>
-            <label><span>二级场景</span><select aria-label="同步二级场景" value={scene2Id} disabled={!scene1Id || !sceneChildren.length} onChange={(event) => { resetSelection(); setScene2Id(event.target.value) }}><option value="">全部二级场景</option>{sceneChildren.map((scene) => <option key={scene.id} value={scene.id}>{scene.name}</option>)}</select></label>
+            <label><span>场景</span><select aria-label="同步一级场景" value={scene1Input} disabled={sceneLoading} onChange={(event) => { setScene1Input(event.target.value); setScene2Input('') }}><option value="">{sceneLoading ? '正在加载场景...' : '全部一级场景'}</option>{sceneOptions.map((scene) => <option key={scene.id} value={scene.id}>{scene.name}</option>)}</select></label>
+            <label><span>二级场景</span><select aria-label="同步二级场景" value={scene2Input} disabled={!scene1Input || !sceneChildren.length} onChange={(event) => setScene2Input(event.target.value)}><option value="">全部二级场景</option>{sceneChildren.map((scene) => <option key={scene.id} value={scene.id}>{scene.name}</option>)}</select></label>
           </div>}
           <div className="manual-sync-query-actions"><button className="primary-button compact" type="submit">查询</button><button className="secondary-button compact" type="button" onClick={reset}>重置</button></div></fieldset>
         </form>

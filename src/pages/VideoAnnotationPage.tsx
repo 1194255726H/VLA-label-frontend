@@ -365,11 +365,12 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', cancel); window.addEventListener('blur', cancel); window.addEventListener('keydown', keydown)
   }
   function startPlayheadScrub(event: React.PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId)
     const bounds = trackRef.current?.getBoundingClientRect(); if (!bounds) return
     const rect = { left: bounds.left, right: bounds.right, width: bounds.width }
     const restorePlayback = onScrubStart?.() || false
-    let frame = frameFromPointer(event.clientX, rect, normalizedViewport)
+    let frame = currentFrame
     let lastPreview = 0
     function move(pointer: PointerEvent) {
       frame = frameFromPointer(pointer.clientX, rect, normalizedViewport)
@@ -420,7 +421,7 @@ function TimelineLane({ level, label, items, childItems = [], draft, totalFrames
     {items.flatMap((item) => (item.keyFrames || []).filter((keyFrame) => keyFrame.frame >= safeStart && keyFrame.frame < safeEnd).map((keyFrame) => <i className="timeline-keyframe-overlay" aria-hidden="true" key={`${item.id}:${keyFrame.id}`} style={{ left: `${(keyFrame.frame - safeStart) / safeSpan * 100}%` }} />))}
     {draft && (draft.level === (label === '单次任务' ? 'goal' : 'action') || level === 'goal' && draft.level === 'invalid') && draft.endFrame >= safeStart && draft.startFrame <= safeEnd && <span className={`timeline-draft${draft.level === 'invalid' ? ' invalid' : ''}`} style={{ left: `${(Math.max(safeStart, draft.startFrame) - safeStart) / safeSpan * 100}%`, width: `${Math.max(1, Math.min(safeEnd, draft.endFrame) - Math.max(safeStart, draft.startFrame)) / safeSpan * 100}%` }} />}
     {!items.length && <span className="timeline-empty-hint">{label === '单次任务' ? '暂无单次任务片段' : '暂无小目标片段'}</span>}
-    {showPlayhead && currentFrame >= safeStart && currentFrame <= safeEnd && <button type="button" className="annotation-playhead" aria-label={`${label}播放头 F${currentFrame}`} style={{ left: `${(currentFrame - safeStart) / safeSpan * 100}%` }} onPointerDown={startPlayheadScrub} />}
+    {showPlayhead && currentFrame >= safeStart && currentFrame <= safeEnd && <span className="annotation-playhead" style={{ left: `${(currentFrame - safeStart) / safeSpan * 100}%` }}><button type="button" className="annotation-playhead-handle" aria-label={`${label}播放头 F${currentFrame}`} title="左右拖动三角形调整播放位置" onPointerDown={startPlayheadScrub} onClick={(event) => event.stopPropagation()} /></span>}
     <span className="timeline-boundary start">{timeText(safeStart / frameRate)}</span><span className="timeline-boundary end">{timeText(safeEnd / frameRate)}</span>
   </div></div>
 }
@@ -462,10 +463,12 @@ function GlobalTimeline({ goals, invalidRanges, draft, selectedRange, totalFrame
     if (event.key === 'Home') onSeek(0)
     if (event.key === 'End') onSeek(totalFrames)
   }
-  function startGlobalScrub(event: React.PointerEvent<HTMLDivElement>) {
+  function startGlobalScrub(event: React.PointerEvent<HTMLElement>) {
+    if (event.button !== 0) return
     if ((event.target as HTMLElement).closest('.timeline-viewport')) return
-    event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.focus(); onClearSelection()
-    const rect = event.currentTarget.getBoundingClientRect(); const full = { startFrame: 0, endFrame: totalFrames }
+    const track = trackRef.current; if (!track) return
+    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); track.focus(); onClearSelection()
+    const rect = track.getBoundingClientRect(); const full = { startFrame: 0, endFrame: totalFrames }
     const restorePlayback = onScrubStart(); let frame = frameFromPointer(event.clientX, rect, full); let lastPreview = 0
     onScrubPreview(frame)
     function move(pointer: PointerEvent) { frame = frameFromPointer(pointer.clientX, rect, full); const now = performance.now(); if (now - lastPreview >= 1000 / 15) { lastPreview = now; onScrubPreview(frame) } }
@@ -481,7 +484,7 @@ function GlobalTimeline({ goals, invalidRanges, draft, selectedRange, totalFrame
     {selectedRange && <span className="global-selected-range" style={{ left: `${selectedRange.startFrame / safeTotal * 100}%`, right: `${(totalFrames - selectedRange.endFrame) / safeTotal * 100}%` }} />}
     <span className="global-time start">00:00.000</span><span className="global-time current" style={{ left: `${Math.max(4, Math.min(96, currentFrame / safeTotal * 100))}%` }}>{timeText(currentFrame / frameRate)}</span><span className="global-time end">{timeText(totalFrames / frameRate)}</span>
     <span className={`timeline-viewport${zoomRatio === 1 ? ' full' : ''}`} style={{ left: `${normalized.startFrame / safeTotal * 100}%`, width: `${(normalized.endFrame - normalized.startFrame) / safeTotal * 100}%` }} onPointerDown={startViewportDrag} onClick={(event) => event.stopPropagation()} title={`视窗 ${zoomRatio.toFixed(2)} 倍 · F${normalized.startFrame} - F${normalized.endFrame}`}><i data-viewport-handle="start" /><b>{Math.round(zoomRatio * 100)}%</b><i data-viewport-handle="end" /></span>
-    <span className="annotation-playhead overview" style={{ left: `${currentFrame / safeTotal * 100}%` }} />
+    <span className="annotation-playhead overview" style={{ left: `${currentFrame / safeTotal * 100}%` }} onPointerDown={(event) => event.stopPropagation()}><button type="button" className="annotation-playhead-handle" aria-label={`全局播放头 F${currentFrame}`} title="左右拖动三角形调整播放位置" onPointerDown={startGlobalScrub} /></span>
   </div></div>
 }
 
@@ -1271,16 +1274,14 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         setDirty(false)
         editModeSnapshotRef.current = structuredClone(data)
         undoStack.current = []; redoStack.current = []; setHistory({ undo: 0, redo: 0 })
-        setToast('标注修改已提交')
-        return
-      }
-      if (invalidOnly && !approvalStage) {
+      } else if (invalidOnly && !approvalStage) {
         await save(false, data)
         setToast('已完成视频的草稿已更新')
         return
+      } else {
+        const nextRevision = !draftsDisabled && (dirty || overrideResult) ? await save(false, data) : revision
+        await annotationApi.submit(projectId, videoId, data, nextRevision)
       }
-      const nextRevision = !draftsDisabled && (dirty || overrideResult) ? await save(false, data) : revision
-      await annotationApi.submit(projectId, videoId, data, nextRevision)
       setSubmitted(true)
       setVideoLockState('stopped')
       try {
