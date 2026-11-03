@@ -18,7 +18,7 @@ import { operationObjectApi } from '../services/managementApi'
 import type { AnnotationKeyFrame, AnnotationResult, AnnotationSegment, AnnotationWorkspace, OperationObject, SessionResponse, VideoComment } from '../types/api'
 import { formatDateTime } from '../utils/date'
 import { createClientId } from '../utils/id'
-import { nodeLabels, nodeTones } from '../utils/node'
+import { nodeLabels, nodeTones, resolveNextTaskNode, taskNodeApiValues } from '../utils/node'
 import { formatInvalidReason, invalidReasons, normalizeInvalidRanges, normalizeInvalidReason } from '../utils/invalidReason'
 const TIMELINE_FRAME_WIDTH = 6
 const keyFrameTypeLabels: Record<AnnotationKeyFrame['type'], string> = { contact: '接触', object_change: '物体变化', abnormal: '异常' }
@@ -689,6 +689,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2400); return () => clearTimeout(timer) }, [toast])
 
   const approvalStage = Boolean(workspace && workspace.node !== 'annotation')
+  const nextTaskNode = resolveNextTaskNode(session.account, searchParams.get('node'), workspace?.node || 'annotation')
   const editModeActive = canEditLaterStages && editModeEnabled
   const editModeLocked = (approvalStage || canEditLaterStages) && !editModeActive
   const draftsDisabled = approvalStage || canEditLaterStages
@@ -1285,10 +1286,11 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       setSubmitted(true)
       setVideoLockState('stopped')
       try {
-        const nextVideoId = await annotationApi.nextVideo(projectId, workspace?.node || 'annotation')
+        const nextVideoId = await annotationApi.nextVideo(projectId, nextTaskNode)
         if (nextVideoId) {
+          if (nextVideoId === videoId) throw new Error('下一条接口返回了当前视频，未返回其他待处理数据')
           setToast('任务提交成功，正在进入下一条')
-          navigate(`/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(nextVideoId)}/annotation`, { replace: true })
+          navigate(`/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(nextVideoId)}/annotation?node=${taskNodeApiValues[nextTaskNode]}`, { replace: true })
         } else {
           setToast('任务提交成功，当前暂无下一条')
           window.setTimeout(() => navigate('/workbench'), 700)

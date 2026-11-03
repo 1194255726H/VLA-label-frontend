@@ -11,7 +11,7 @@ import type { VideoScenes } from '../components/VideoSceneEditor'
 import { workbenchApi } from '../services/api'
 import type { Project, SessionResponse, TaskNode, TaskQuery, TaskTab, VideoListItem, WorkbenchSnapshot } from '../types/api'
 import { formatDateTime } from '../utils/date'
-import { nodeLabels, nodeTones } from '../utils/node'
+import { nodeLabels, nodeTones, taskNodeApiValues } from '../utils/node'
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
 const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
 const submittedNodeMap: Record<string, TaskNode> = { annotation: 'annotation', quality_check: 'review', review: 'quality', acceptance: 'acceptance' }
@@ -45,6 +45,7 @@ function TaskTable({ items, tab, loading, onError, onScenesUpdated }: { items: V
       if (!video.projectId || !video.id) throw new Error('视频缺少项目或视频 ID')
       if (!action.readonly && !video.currentAssigneeId && !['in_progress', 'processing'].includes(video.videoStatus)) await workbenchApi.claimVideo(video.projectId, video.id)
       const params = new URLSearchParams()
+      params.set('node', taskNodeApiValues[tab === 'submitted' ? submittedNodeMap[video.submittedNode || ''] || video.currentNode : video.currentNode])
       if (action.readonly) params.set('readonly', '1')
       navigate(`/projects/${encodeURIComponent(video.projectId)}/videos/${encodeURIComponent(video.id)}/annotation${params.size ? `?${params}` : ''}`)
     } catch (reason) {
@@ -200,7 +201,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     try {
       if (!video.projectId || !video.id) throw new Error('视频缺少项目或视频 ID')
       if (!video.currentAssigneeId && !['in_progress', 'processing'].includes(video.videoStatus)) await workbenchApi.claimVideo(video.projectId, video.id)
-      navigate(`/projects/${encodeURIComponent(video.projectId)}/videos/${encodeURIComponent(video.id)}/annotation`)
+      navigate(`/projects/${encodeURIComponent(video.projectId)}/videos/${encodeURIComponent(video.id)}/annotation?node=${taskNodeApiValues[video.currentNode]}`)
     } catch (reason) { setToast(reason instanceof Error ? reason.message : '无法进入视频作业页') }
     finally { setOpeningRecommended(false) }
   }
