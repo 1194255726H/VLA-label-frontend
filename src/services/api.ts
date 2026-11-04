@@ -304,11 +304,17 @@ function mockVideo(task: WorkbenchTask, index: number): VideoListItem {
   })
 }
 
+function workbenchProjectOwnerId(item: Record<string, unknown>) {
+  const owner = item.owner && typeof item.owner === 'object' ? item.owner as Record<string, unknown> : {}
+  const id = owner.id ?? item.owner_id
+  return id == null ? undefined : String(id)
+}
+
 export const workbenchApi = {
   async listProjects(): Promise<Project[]> {
     if (runtimeConfig.apiMode === 'mock') { await sleep(); return mockProjects.map((item) => ({ ...item })) }
     const result = await loadWorkbenchProjects()
-    return result.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: 0, claimLimit: numberValue(config.active_task_limit) || 10, invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list) } })
+    return result.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: 0, claimLimit: numberValue(config.active_task_limit) || 10, ownerId: workbenchProjectOwnerId(item), invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list) } })
   },
   async getSnapshot(query: TaskQuery): Promise<WorkbenchSnapshot> {
     if (runtimeConfig.apiMode === 'mock') {
@@ -322,7 +328,6 @@ export const workbenchApi = {
         recommendedTask: query.tab === 'pending' ? all.map(mockVideo)[0] || null : null,
         tasks: { items: all.map(mockVideo).slice((pageNo - 1) * pageSize, pageNo * pageSize), page: { pageNo, pageSize, total: all.length }, pages: Math.max(1, Math.ceil(all.length / pageSize)), viewMode: 'personal', selfClaimEnabled: true },
         claimPool: mutablePool.map((item) => ({ ...item })),
-        summary: { date: new Date().toISOString().slice(0, 10), processedCount: 12, completedCount: 10, effectiveDurationMs: 972000, invalidDurationMs: 86000, selectedDurationMs: 1058000, invalidRatePct: 8.13, atomicTaskCount: 68, atomicActionCount: 214 },
       }
     }
     const projects = await loadWorkbenchProjects()
@@ -335,21 +340,19 @@ export const workbenchApi = {
     if (query.updatedAtStart) params.set('updated_at_start', query.updatedAtStart)
     if (query.updatedAtEnd) params.set('updated_at_end', query.updatedAtEnd)
     const emptyClaims = { annotation: 0, quality_check: 0, review: 0, acceptance: 0 }
-    const emptySummary: WorkbenchSnapshot['summary'] = { date: '', processedCount: 0, completedCount: 0, effectiveDurationMs: 0, invalidDurationMs: 0, selectedDurationMs: 0, invalidRatePct: 0, atomicTaskCount: 0, atomicActionCount: 0 }
-    const [rawVideos, pendingClaims, dailyStats] = effectiveProjectId
+    const [rawVideos, pendingClaims] = effectiveProjectId
       ? await Promise.all([
           request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/workbench/videos?${params}`),
           query.includeOverview === false ? Promise.resolve(emptyClaims) : request<typeof emptyClaims>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/pending-claims`),
-          query.includeOverview === false ? Promise.resolve(emptySummary) : request<{ date: string; processed_count: number; completed_count: number; effective_duration_ms: number; invalid_duration_ms: number; selected_duration_ms: number; invalid_rate_pct: number; atomic_task_count: number; atomic_action_count: number }>(`/api/projects/${encodeURIComponent(effectiveProjectId)}/my-daily-stats`),
         ])
-      : [{ items: [], total: 0, page: pageNo, page_size: pageSize, pages: 0 }, emptyClaims, emptySummary]
+      : [{ items: [], total: 0, page: pageNo, page_size: pageSize, pages: 0 }, emptyClaims]
     const videoItems = rawVideos.items.map((item) => {
       const video = normalizeVideo(item)
       return video.projectId ? video : { ...video, projectId: effectiveProjectId }
     })
     const tasks: WorkbenchSnapshot['tasks'] = { items: videoItems, page: { pageNo: rawVideos.page || pageNo, pageSize: rawVideos.page_size || pageSize, total: rawVideos.total || 0 }, pages: rawVideos.pages || 1, viewMode: 'personal', selfClaimEnabled: true }
     return {
-      projects: projects.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: String(item.id) === effectiveProjectId && query.tab === 'pending' ? rawVideos.total : 0, claimLimit: numberValue(config.active_task_limit) || 10, invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list) } }),
+      projects: projects.items.map((item) => { const config = (item.work_config || {}) as Record<string, unknown>; return { id: String(item.id), code: String(item.code || item.external_project_id || ''), name: String(item.name || ''), batchName: String(item.description || ''), status: String(item.status || 'running').replace('_', '-') as Project['status'], pendingCount: String(item.id) === effectiveProjectId && query.tab === 'pending' ? rawVideos.total : 0, claimLimit: numberValue(config.active_task_limit) || 10, ownerId: workbenchProjectOwnerId(item), invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list) } }),
       currentProjectId: effectiveProjectId,
       recommendedTask: query.tab === 'pending' ? videoItems[0] || null : null,
       tasks,
@@ -359,11 +362,6 @@ export const workbenchApi = {
         { node: 'quality', label: '审核', count: numberValue(pendingClaims.review) },
         { node: 'acceptance', label: '验收', count: numberValue(pendingClaims.acceptance) },
       ],
-      summary: 'processed_count' in dailyStats ? {
-        date: String(dailyStats.date || ''), processedCount: numberValue(dailyStats.processed_count), completedCount: numberValue(dailyStats.completed_count),
-        effectiveDurationMs: numberValue(dailyStats.effective_duration_ms), invalidDurationMs: numberValue(dailyStats.invalid_duration_ms), selectedDurationMs: numberValue(dailyStats.selected_duration_ms),
-        invalidRatePct: numberValue(dailyStats.invalid_rate_pct), atomicTaskCount: numberValue(dailyStats.atomic_task_count), atomicActionCount: numberValue(dailyStats.atomic_action_count),
-      } : dailyStats,
     }
   },
   async claim(projectId: string, node: string): Promise<VideoListItem> {

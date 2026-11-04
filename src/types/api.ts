@@ -26,6 +26,7 @@ export interface Project {
   status: 'running' | 'paused' | 'finished'
   pendingCount: number
   claimLimit: number
+  ownerId?: string
   invalidIntervalList?: InvalidIntervalSummary[]
 }
 
@@ -146,16 +147,22 @@ export interface ClaimPoolItem {
   count: number
 }
 
-export interface WorkbenchSummary {
-  date: string
+export interface WorkbenchNodeStats {
   processedCount: number
-  completedCount: number
   effectiveDurationMs: number
   invalidDurationMs: number
-  selectedDurationMs: number
+  videoDurationMs: number
   invalidRatePct: number
   atomicTaskCount: number
   atomicActionCount: number
+}
+
+export interface WorkbenchDailyStats {
+  projectId: string
+  scope: { type: 'user' | 'all'; userId: string | null; displayName: string | null }
+  range: { startDate: string | null; endDate: string | null }
+  nodes: Record<TaskNode, WorkbenchNodeStats>
+  total: WorkbenchNodeStats
 }
 
 export interface WorkbenchSnapshot {
@@ -164,7 +171,6 @@ export interface WorkbenchSnapshot {
   recommendedTask: VideoListItem | null
   tasks: TaskPage
   claimPool: ClaimPoolItem[]
-  summary: WorkbenchSummary
 }
 
 export interface TaskQuery {

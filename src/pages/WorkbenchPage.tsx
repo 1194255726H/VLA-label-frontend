@@ -1,10 +1,11 @@
 import {
-  ArrowRight, ChevronDown, CircleAlert, Clock3,
+  ArrowRight, ChevronDown, CircleAlert,
   ListFilter, Play, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
+import { DailyWorkStats } from '../components/DailyWorkStats'
 import { PaginationJump } from '../components/PaginationJump'
 import { VideoSceneEditor } from '../components/VideoSceneEditor'
 import type { VideoScenes } from '../components/VideoSceneEditor'
@@ -104,6 +105,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [claimingNode, setClaimingNode] = useState<TaskNode | null>(null)
   const [openingRecommended, setOpeningRecommended] = useState(false)
   const [toast, setToast] = useState('')
+  const [statsRefresh, setStatsRefresh] = useState(0)
 
   const fetchWorkbenchData = useCallback(async () => {
     if (!projectId) throw new Error('请先选择作业项目')
@@ -127,6 +129,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
     try {
       const { result, totals } = await fetchWorkbenchData()
       setSnapshot(result)
+      setStatsRefresh((value) => value + 1)
       setProjects(result.projects)
       setTabTotals(totals)
       if (result.currentProjectId) setProjectId((current) => current || result.currentProjectId)
@@ -246,11 +249,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
           </section>
 
           <aside className="workbench-side">
-            <section className="metric-panel panel">
-              <header><div><span>今日作业统计</span><small>{snapshot?.summary.date || '截至当前'}</small></div><Clock3 size={19} /></header>
-              <div className="metric-main"><strong>{snapshot?.summary.processedCount.toLocaleString() || 0}</strong><span>条处理数据</span></div>
-              <div className="metric-grid daily-stats-grid"><div><span>完成作业</span><strong>{snapshot?.summary.completedCount || 0} 条</strong></div><div><span>有效片段时长</span><strong>{formatMilliseconds(snapshot?.summary.effectiveDurationMs || 0)}</strong></div><div><span>无效片段时长</span><strong>{formatMilliseconds(snapshot?.summary.invalidDurationMs || 0)}</strong></div><div><span>无效率</span><strong>{snapshot?.summary.invalidRatePct || 0}%</strong></div><div><span>单次任务</span><strong>{snapshot?.summary.atomicTaskCount || 0}</strong></div><div><span>小目标</span><strong>{snapshot?.summary.atomicActionCount || 0}</strong></div></div>
-            </section>
+            <DailyWorkStats projectId={projectId} projectOwnerId={currentProject?.id === projectId ? currentProject.ownerId : undefined} user={session.account} refreshKey={statsRefresh} />
             <section className="claim-panel panel">
               <header><div><h2>待领取数据</h2><span>共 {(snapshot?.claimPool || []).reduce((sum, item) => sum + item.count, 0)} 条</span></div></header>
               <div className="claim-list">{snapshot?.claimPool.map((item) => <article className={`claim-card ${nodeTones[item.node]}`} key={item.node}><div><span>{item.label}</span><strong>{item.count}<small> 条可领取</small></strong></div><button type="button" disabled={item.count === 0 || claimingNode !== null} onClick={() => claimTask(item.node)}>{claimingNode === item.node ? <RefreshCw className="spinning" size={16} /> : <ArrowRight size={16} />}<span>领取</span></button></article>)}</div>

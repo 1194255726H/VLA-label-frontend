@@ -10,7 +10,7 @@ export const mockUser: User = {
 }
 
 export const mockProjects: Project[] = [
-  { id: '1', code: 'PRJ-QH-ROAD', name: '清华路端项目', batchName: '第一批次 · 路口行为采集', status: 'running', pendingCount: 6, claimLimit: 10 },
+  { id: '1', ownerId: mockUser.id, code: 'PRJ-QH-ROAD', name: '清华路端项目', batchName: '第一批次 · 路口行为采集', status: 'running', pendingCount: 6, claimLimit: 10 },
   { id: '3', code: 'PRJ-SEGMENT', name: '园区视频动作专项', batchName: '园区多场景 · 2026-08', status: 'running', pendingCount: 3, claimLimit: 10 },
 ]
 
