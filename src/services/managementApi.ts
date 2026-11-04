@@ -239,7 +239,7 @@ export const fleetApi = {
       const source = await this.videos(projectId, { supplierId: Number(binding?.fleetSupplierId || binding?.supplier?.fleetSupplierId) || undefined, page: 1, pageSize: 10000 })
       const synced = mockFleetManualSynced.get(projectId) || new Set<number>()
       const items = source.items.map((video, index): FleetManualVideo => ({ ...video, synced: video.synced || synced.has(video.fleetVideoId), personName: video.supplierName, collectedAt: `2026-10-20T${String(index % 12 + 8).padStart(2, '0')}:00:00+08:00`, failureReason: index % 7 === 3 ? '对象存储读取失败，请重试' : '', syncStatus: video.synced || synced.has(video.fleetVideoId) ? 'synced' : index % 7 === 2 ? 'syncing' : index % 7 === 3 ? 'failed' : 'unsynced' }))
-        .filter((video) => (!query.keyword || video.filename.toLowerCase().includes(query.keyword.toLowerCase())) && (!query.personName || video.personName.includes(query.personName)) && (!query.scene1Id || String(video.scene1Id) === query.scene1Id) && (!query.scene2Id || String(video.scene2Id) === query.scene2Id) && (!query.syncStatus || video.syncStatus === query.syncStatus))
+        .filter((video) => (!query.keyword || video.filename.toLowerCase().includes(query.keyword.toLowerCase())) && (!query.personName || video.personName.includes(query.personName)) && (!query.scene1Id || String(video.scene1Id) === query.scene1Id) && (!query.scene2Id || String(video.scene2Id) === query.scene2Id))
       return { items: items.slice((query.page - 1) * query.pageSize, query.page * query.pageSize), total: items.length, page: query.page, pageSize: query.pageSize, pages: Math.max(1, Math.ceil(items.length / query.pageSize)) }
     }
     const params = new URLSearchParams({ page: String(query.page), page_size: String(query.pageSize) })
@@ -247,7 +247,6 @@ export const fleetApi = {
     if (query.personName?.trim()) params.set('person_name', query.personName.trim())
     if (query.scene1Id) params.set('scene1_id', query.scene1Id)
     if (query.scene2Id) params.set('scene2_id', query.scene2Id)
-    if (query.syncStatus) params.set('sync_status', query.syncStatus)
     const path = `/api/projects/${encodeURIComponent(projectId)}/fleet/videos/unsynced?${params}`
     const existing = pendingManualVideoRequests.get(path)
     if (existing) return existing

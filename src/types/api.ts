@@ -352,7 +352,6 @@ export interface FleetManualQuery {
   personName?: string
   scene1Id?: string
   scene2Id?: string
-  syncStatus: Exclude<FleetSyncStatus, 'unknown'> | ''
   page: number
   pageSize: number
 }

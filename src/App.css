@@ -703,7 +703,6 @@
 .manual-sync-table th:nth-child(3) { width: 160px; }
 .manual-sync-table th:nth-child(4) { width: 90px; }
 .manual-sync-table th:nth-child(5) { width: 160px; }
-.manual-sync-table th:nth-child(6) { width: 90px; }
 .manual-sync-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manual-sync-table td>strong { display: block; overflow: hidden; text-overflow: ellipsis; }
 .workbench-video-table,
