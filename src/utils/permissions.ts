@@ -17,7 +17,5 @@ export function canEditAfterAnnotation(user: User) {
 }
 
 export function canViewAllDailyStats(user: User, projectOwnerId?: string) {
-  const adminRoles = [...sampleManagementRoles].filter((role) => !['projectmanager', 'manager', '项目经理'].includes(role))
-  return Boolean(user.isStaff || user.isSuperuser || (projectOwnerId && projectOwnerId === String(user.id)) || [...user.roles, ...user.roleLabels]
-    .some((role) => adminRoles.includes(role.toLowerCase().replace(/[\s_-]/g, ''))))
+  return Boolean(canManageInvalidSamples(user) || (projectOwnerId && projectOwnerId === String(user.id)))
 }
