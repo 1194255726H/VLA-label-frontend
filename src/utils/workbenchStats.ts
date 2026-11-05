@@ -8,8 +8,9 @@ export function normalizeWorkbenchDailyStats(raw: Record<string, unknown>): Work
   const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0
   const metrics = (item: Record<string, unknown> = {}): WorkbenchNodeStats => ({
     processedCount: number(item.processed_count), effectiveDurationMs: number(item.effective_duration_ms),
-    invalidDurationMs: number(item.invalid_duration_ms), videoDurationMs: number(item.video_duration_ms),
+    invalidDurationMs: number(item.invalid_duration_ms),
     invalidRatePct: number(item.invalid_rate_pct), atomicTaskCount: number(item.atomic_task_count), atomicActionCount: number(item.atomic_action_count),
+    approvedCount: number(item.approved_count), rejectedCount: number(item.rejected_count), invalidatedCount: number(item.invalidated_count),
   })
   return {
     projectId: String(raw.project_id || ''),

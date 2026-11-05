@@ -154,10 +154,12 @@ export interface WorkbenchNodeStats {
   processedCount: number
   effectiveDurationMs: number
   invalidDurationMs: number
-  videoDurationMs: number
   invalidRatePct: number
   atomicTaskCount: number
   atomicActionCount: number
+  approvedCount: number
+  rejectedCount: number
+  invalidatedCount: number
 }
 
 export interface WorkbenchDailyStats {

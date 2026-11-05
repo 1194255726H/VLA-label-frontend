@@ -42,14 +42,19 @@ export function DailyWorkStats({ projectId, projectOwnerId, user, refreshKey }: 
     <div className="daily-stats-nodes" role="tablist" aria-label="统计作业节点">{nodes.map((node) => <button key={node} type="button" role="tab" aria-selected={selectedNode === node} onClick={() => setSelection({ key: contextKey, scope: selectedScope, node })}>{nodeLabels[node]}</button>)}</div>
     {!hasNode ? <p className="daily-stats-caption">当前账号没有可查看的作业节点</p> : <>
       {error && <div className="daily-stats-error" role="alert"><span>{error}</span><button type="button" onClick={() => setRetry((value) => value + 1)}>重新加载</button></div>}
-      <div className="metric-main"><strong>{metrics ? metrics.processedCount.toLocaleString() : '—'}</strong><span>{loading ? '加载中...' : '次处理'}</span></div>
+      <div className="metric-main"><strong>{metrics ? duration(metrics.effectiveDurationMs) : '—'}</strong><span>{loading ? '加载中...' : '有效时长'}</span></div>
+      <div className="daily-stats-invalid-duration"><span>无效时长</span><strong>{metrics ? duration(metrics.invalidDurationMs) : '—'}</strong></div>
       <div className="metric-grid daily-stats-grid">
-        <div><span>有效片段时长</span><strong>{metrics ? duration(metrics.effectiveDurationMs) : '—'}</strong></div>
-        <div><span>无效片段时长</span><strong>{metrics ? duration(metrics.invalidDurationMs) : '—'}</strong></div>
+        <div><span>处理总数</span><strong>{metrics ? metrics.processedCount.toLocaleString() : '—'}</strong></div>
+        {selectedNode === 'annotation' ? <>
         <div><span>无效率</span><strong>{metrics ? `${metrics.invalidRatePct.toFixed(2)}%` : '—'}</strong></div>
-        <div><span>视频总时长</span><strong>{metrics ? duration(metrics.videoDurationMs) : '—'}</strong></div>
         <div><span>单次任务数</span><strong>{metrics ? metrics.atomicTaskCount.toLocaleString() : '—'}</strong></div>
         <div><span>小目标数</span><strong>{metrics ? metrics.atomicActionCount.toLocaleString() : '—'}</strong></div>
+        </> : <>
+        <div><span>通过次数</span><strong>{metrics ? metrics.approvedCount.toLocaleString() : '—'}</strong></div>
+        <div><span>退回次数</span><strong>{metrics ? metrics.rejectedCount.toLocaleString() : '—'}</strong></div>
+        <div><span>作废次数</span><strong>{metrics ? metrics.invalidatedCount.toLocaleString() : '—'}</strong></div>
+        </>}
       </div>
     </>}
   </section>
