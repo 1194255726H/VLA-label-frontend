@@ -1,3 +1,5 @@
+import { VideoInvalidationBadge } from '../components/VideoInvalidationBadge'
+import { workTypeLabels } from '../utils/videoInvalidation'
 import {
   ArrowRight, ChevronDown, CircleAlert,
   ListFilter, Play, RefreshCw, Sparkles,
@@ -14,7 +16,6 @@ import type { Project, SessionResponse, TaskNode, TaskQuery, TaskTab, VideoListI
 import { formatDateTime } from '../utils/date'
 import { nodeLabels, nodeTones, taskNodeApiValues } from '../utils/node'
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', claimed: '已领取', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
-const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
 const submittedNodeMap: Record<string, TaskNode> = { annotation: 'annotation', quality_check: 'review', review: 'quality', acceptance: 'acceptance' }
 
 function formatClock(value: number | null) {
@@ -68,7 +69,7 @@ function TaskTable({ items, tab, loading, onError, onScenesUpdated }: { items: V
             const action = actionFor(video, tab)
             const submittedNode = submittedNodeMap[video.submittedNode || '']
             return <tr key={`${video.id}-${video.submittedNode || 'pending'}-${index}`}>
-              <td className="video-name-column"><div className="data-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `#${video.id}`}</small></div></td>
+              <td className="video-name-column"><div className="data-name"><strong title={video.filename}>{video.filename}</strong><VideoInvalidationBadge video={video} /><small>{video.externalVideoId || video.videoId || `#${video.id}`}</small></div></td>
               <td><VideoSceneEditor key={`${video.projectId}:${video.id}`} variant="table" workspace={{ ...video, videoId: video.id }} canEdit onUpdated={(scenes) => onScenesUpdated(video, scenes)} /></td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
               <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
               <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>
@@ -92,7 +93,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [tab, setTab] = useState<TaskTab>('pending')
   const [filenameInput, setFilenameInput] = useState('')
   const [nodeInput, setNodeInput] = useState<TaskNode | ''>('')
-  const [workTypeInput, setWorkTypeInput] = useState<'normal' | 'returned' | ''>('')
+  const [workTypeInput, setWorkTypeInput] = useState<NonNullable<TaskQuery['workType']> | ''>('')
   const [updatedAtStartInput, setUpdatedAtStartInput] = useState('')
   const [updatedAtEndInput, setUpdatedAtEndInput] = useState('')
   const [taskFilters, setTaskFilters] = useState<Pick<TaskQuery, 'filename' | 'currentNode' | 'workType' | 'updatedAtStart' | 'updatedAtEnd'>>({ filename: '' })

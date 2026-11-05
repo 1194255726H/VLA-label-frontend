@@ -1,3 +1,5 @@
+import { normalizeVideoInvalidation, taskNodeFromApi } from '../utils/videoInvalidation'
+import { normalizeVideoStageFields } from '../utils/videoStage'
 import { runtimeConfig } from '../config/runtime'
 import { mockLabelLibraries, mockTasks } from '../mocks/data'
 import type { AnnotationKeyFrame, AnnotationResult, AnnotationSegment, AnnotationWorkspace, TaskNode, VideoComment } from '../types/api'
@@ -157,16 +159,16 @@ function annotationPayload(rawResult: AnnotationResult) {
 }
 
 async function loadTaskConfiguration(projectId: string) {
-  if (!projectId) return { labels: [], bound: false, operationLibraryId: '', operationLibraryName: '' }
+  if (!projectId) return { labels: [], bound: false, operationLibraryId: '', operationLibraryName: '', completionNode: undefined }
   const project = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}`)
   const projectData = (project.project || project) as Record<string, unknown>
   const config = (projectData.work_config || {}) as Record<string, unknown>
   const ids = Array.isArray(config.label_library_ids) ? config.label_library_ids : []
   const groups = await Promise.all(ids.map((id) => request<{ items: Array<Record<string, unknown>> }>(`/api/data/label-libraries/${encodeURIComponent(String(id))}/labels?page_size=100`)))
-  return { labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0, operationLibraryId: String(config.operation_library_id || ''), operationLibraryName: String(config.operation_library_name || '') }
+  return { completionNode: taskNodeFromApi(projectData.completion_node || config.completion_node), labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0, operationLibraryId: String(config.operation_library_id || ''), operationLibraryName: String(config.operation_library_name || '') }
 }
 
-function normalizeWorkspace(projectId: string, videoId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, operationLibraryId: string, operationLibraryName: string, viewOnly: boolean, allowCompletedInvalidEdit = false): AnnotationWorkspace {
+function normalizeWorkspace(projectId: string, videoId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, operationLibraryId: string, operationLibraryName: string, viewOnly: boolean, allowCompletedInvalidEdit = false, completionNode?: TaskNode): AnnotationWorkspace {
   const task = (raw.task || raw) as Record<string, unknown>
   const selectedVideo = (raw.selected_video || task.selected_video || {}) as Record<string, unknown>
   const project = (task.project || raw.project || {}) as Record<string, unknown>
@@ -226,6 +228,7 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
     Math.max(baseResult.totalFrames || 0, Math.round(durationSeconds * frameRate)),
   )
   return {
+    completionNode, stage: normalizeVideoStageFields({ ...task, ...selectedVideo }).stage, ...normalizeVideoInvalidation({ ...task, ...selectedVideo }),
     scene1: normalizeScene(selectedVideo.scene1), scene2: normalizeScene(selectedVideo.scene2), supplier: normalizeSupplier(selectedVideo.supplier),
     currentAssigneeId: selectedVideo.current_assignee_id == null ? undefined : String(selectedVideo.current_assignee_id),
     videoId,
@@ -356,7 +359,7 @@ export const annotationApi = {
       const result = clone(mockResult(key))
       return {
         videoId, videoCode: videoId, dataId: videoId, dataName: task.dataName,
-        projectId, projectName: '清华路端项目', node: task.node, readonly: viewOnly || task.status === 'submitted' || (task.status === 'completed' && !allowCompletedInvalidEdit),
+        projectId, projectName: '清华路端项目', stage: 'human_processing', completionNode: 'acceptance', node: task.node, readonly: viewOnly || task.status === 'submitted' || (task.status === 'completed' && !allowCompletedInvalidEdit),
         videoUrl: '/temp.mp4', frameRate: result.frameRate, durationSeconds: result.totalFrames / result.frameRate, mediaStartTime: result.mediaStartTime,
         currentRevision: mockRevisions.get(key) || 0,
         labels: mockLabelLibraries.flatMap((library) => library.tags.filter((tag) => tag.enabled)), labelLibraryBound: true, operationLibraryId: '1', operationLibraryName: '常用操作对象库', result,
@@ -369,7 +372,7 @@ export const annotationApi = {
     const workspaceRequest = (async () => {
       const raw = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}`)
       const configuration = await loadTaskConfiguration(projectId)
-      const workspace = normalizeWorkspace(projectId, videoId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly, allowCompletedInvalidEdit)
+      const workspace = normalizeWorkspace(projectId, videoId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly, allowCompletedInvalidEdit, configuration.completionNode)
       videoNodes.set(videoContextKey(projectId, videoId), workspace.node)
       return workspace
     })()
@@ -402,10 +405,19 @@ export const annotationApi = {
   clearVideoContext(projectId: string, videoId: string) {
     videoNodes.delete(videoContextKey(projectId, videoId))
   },
-  async cancelVideo(projectId: string, videoId: string) {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); return { videoId: Number(videoId), currentNode: 'annotation', status: 'cancelled', currentAssigneeId: null, cancelled: true } }
-    const response = await request<{ video_id: number; current_node: string; status: string; current_assignee_id: number | null; cancelled: boolean }>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/cancel`, { method: 'POST', body: '{}' })
-    return { videoId: Number(response.video_id), currentNode: response.current_node, status: response.status, currentAssigneeId: response.current_assignee_id === null ? null : String(response.current_assignee_id), cancelled: Boolean(response.cancelled) }
+  async cancelVideo(projectId: string, videoId: string, node?: TaskNode) {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const order: TaskNode[] = ['annotation', 'review', 'quality', 'acceptance']
+      const cancelled = !node || node === 'acceptance'
+      return { videoId, currentNode: cancelled ? undefined : order[order.indexOf(node!) + 1], status: cancelled ? 'cancelled' : 'pending', currentAssigneeId: null, cancelled, invalidated: !cancelled, stage: cancelled ? 'cancelled' : 'human_processing' }
+    }
+    const response = await request<{ video_id: number; current_node: string; stage?: string; stage_status?: string; status: string; current_assignee_id: number | null; cancelled: boolean; invalidated: boolean }>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}/cancel`, { method: 'POST', body: JSON.stringify(node ? { node: backendNode(node) } : {}) })
+    const currentNode = taskNodeFromApi(response.current_node)
+    const key = videoContextKey(projectId, videoId)
+    if (response.cancelled || !currentNode) videoNodes.delete(key)
+    else videoNodes.set(key, currentNode)
+    return { videoId: String(response.video_id), currentNode, stage: response.stage, stageStatus: response.stage_status, status: response.status, currentAssigneeId: response.current_assignee_id == null ? null : String(response.current_assignee_id), cancelled: response.cancelled === true, invalidated: response.invalidated === true }
   },
   async reject(projectId: string, videoId: string, reason: string) {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return }

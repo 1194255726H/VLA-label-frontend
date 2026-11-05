@@ -1,3 +1,5 @@
+import { VideoInvalidationBadge } from '../components/VideoInvalidationBadge'
+import { cancellationMessage } from '../utils/videoInvalidation'
 import {
   ArrowLeft, Check, ChevronDown, CircleAlert, Expand, GripVertical, Keyboard, Pause, Play, Plus, Redo2, RotateCcw,
   SkipBack, SkipForward, Trash2, Undo2, X,
@@ -520,6 +522,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const [returning, setReturning] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [voidingVideo, setVoidingVideo] = useState(false)
+  const cancelRequestRef = useRef(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
   const [errorCode, setErrorCode] = useState('')
@@ -696,8 +699,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const canReturn = Boolean(!invalidOnly && workspace && ['review', 'quality', 'acceptance'].includes(workspace.node))
   const submitButtonLabel = editModeActive ? '提交修改' : workspace?.node === 'quality' ? '提交审核' : workspace?.node === 'acceptance' ? '提交验收' : '提交'
   const hardReadonly = Boolean((workspace?.readonly && !(approvalStage && canEditLaterStages)) || searchParams.get('readonly') === '1' || submitted || videoLockState !== 'held')
-  const readonly = Boolean(hardReadonly || invalidOnly || editModeLocked || submitting || sampleUpdatingId)
-  const invalidReadonly = Boolean(hardReadonly || editModeLocked || submitting || sampleUpdatingId)
+  const readonly = Boolean(hardReadonly || invalidOnly || editModeLocked || submitting || voidingVideo || sampleUpdatingId)
+  const invalidReadonly = Boolean(hardReadonly || editModeLocked || submitting || voidingVideo || sampleUpdatingId)
   const descriptionEditable = Boolean(!invalidOnly && !readonly)
   const canComment = Boolean(!invalidOnly && approvalStage && !hardReadonly)
   const keyFrameNeedsObject = keyFrameForm.type !== 'abnormal'
@@ -1075,10 +1078,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   async function confirmSubmitInvalidFix() {
-    if (!result || !submitInvalidFix || !invalidReason) return
+    if (!result || !submitInvalidFix || voidingVideo) return
+    if (submitInvalidFix.voidVideo) { await cancelCurrentVideo(false); return }
+    if (!invalidReason) return
     const { reason, description } = normalizeInvalidReason({ reason: invalidReason, description: invalidReasonOther })
     if (invalidReason === '其他' && !invalidReasonOther.trim()) return
-    const { ranges, voidVideo, submitChanges } = submitInvalidFix
+    const { ranges, submitChanges } = submitInvalidFix
     let sequence = result.nextInvalidSequence
     const created = ranges.map((range) => ({ id: `${workspace?.dataName || 'VLA'}-INVALID-${String(sequence++).padStart(3, '0')}`, sequence: sequence - 1, ...range, reason, description, isSample: (invalidOnly || approvalStage) && canManageSamples && invalidIsSample }))
     let nextResult: AnnotationResult = { ...result, nextInvalidSequence: sequence, invalidRanges: canManageSamples && invalidIsSample ? [...result.invalidRanges, ...created] : normalizeInvalidRanges([...result.invalidRanges, ...created]) }
@@ -1089,21 +1094,6 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       const sampledResult = await updateInvalidSamples(created, true, nextResult, true)
       if (!sampledResult) return
       nextResult = sampledResult
-    }
-    if (voidVideo) {
-      setVoidingVideo(true)
-      try {
-        try { await save(false, nextResult) } catch { /* 草稿保存失败不阻断作废流程 */ }
-        await annotationApi.cancelVideo(projectId, videoId)
-        videoRef.current?.pause()
-        setDirty(false)
-        setVideoLockState('stopped')
-        setToast('整个视频未标注，已标记无效并作废当前视频')
-        window.setTimeout(() => navigate('/workbench'), 900)
-      } catch (failure) {
-        setToast(failure instanceof Error ? failure.message : '视频作废失败')
-      } finally { setVoidingVideo(false) }
-      return
     }
     const firstCreated = nextResult.invalidRanges.find((range) => range.startFrame === created[0].startFrame && range.endFrame === created[0].endFrame && range.reason === reason && range.description === description)
     setSelectedId(`invalid:${firstCreated?.id || created[0].id}`)
@@ -1279,23 +1269,44 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       }
       setSubmitted(true)
       setVideoLockState('stopped')
-      try {
-        const nextVideoId = await annotationApi.nextVideo(projectId, nextTaskNode)
-        if (nextVideoId) {
-          if (nextVideoId === videoId) throw new Error('下一条接口返回了当前视频，未返回其他待处理数据')
-          setToast('任务提交成功，正在进入下一条')
-          navigate(`/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(nextVideoId)}/annotation?node=${taskNodeApiValues[nextTaskNode]}`, { replace: true })
-        } else {
-          setToast('任务提交成功，当前暂无下一条')
-          window.setTimeout(() => navigate('/workbench'), 700)
-        }
-      } catch (nextError) {
-        setToast(`任务已提交，但获取下一条失败：${nextError instanceof Error ? nextError.message : '未知错误'}`)
-      }
+      await goToNextVideo('任务提交成功')
     } catch (reason) {
       setToast(reason instanceof Error ? reason.message : '任务提交失败')
     }
     finally { setSubmitting(false) }
+  }
+
+  async function goToNextVideo(message: string) {
+    try {
+      const nextVideoId = await annotationApi.nextVideo(projectId, nextTaskNode)
+      if (nextVideoId) {
+        if (nextVideoId === videoId) throw new Error('下一条接口返回了当前视频，未返回其他待处理数据')
+        setToast(`${message}，正在进入下一条`)
+        navigate(`/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(nextVideoId)}/annotation?node=${taskNodeApiValues[nextTaskNode]}`, { replace: true })
+      } else {
+        setToast(`${message}，当前暂无下一条`)
+        window.setTimeout(() => navigate('/workbench'), 700)
+      }
+    } catch (nextError) {
+      setToast(`${message}，但获取下一条失败：${nextError instanceof Error ? nextError.message : '未知错误'}`)
+    }
+  }
+
+  async function cancelCurrentVideo(confirm = true) {
+    if (!workspace || hardReadonly || saving || submitting || returning || editing || sampleUpdatingId || cancelRequestRef.current) return
+    if (confirm && !window.confirm(`${cancellationMessage(workspace)}${dirty ? '\n当前未保存的标注修改不会随作废提交。' : ''}`)) return
+    cancelRequestRef.current = true
+    setVoidingVideo(true)
+    videoRef.current?.pause()
+    try {
+      const outcome = await annotationApi.cancelVideo(projectId, videoId, !workspace.stage || workspace.stage === 'human_processing' ? workspace.node : undefined)
+      if (!outcome.cancelled && !outcome.invalidated) throw new Error('作废接口未返回有效的作废结果，请刷新后确认状态')
+      setDirty(false); setSubmitted(true); setVideoLockState('stopped'); setSubmitInvalidFix(undefined)
+      setWorkspace((current) => current ? { ...current, readonly: true, node: outcome.currentNode || current.node, currentAssigneeId: outcome.currentAssigneeId || undefined } : current)
+      const message = outcome.cancelled ? '视频已作废' : `视频已标记预作废${outcome.currentNode ? `，已流转至${nodeLabels[outcome.currentNode]}` : '，等待下游复核'}`
+      await goToNextVideo(message)
+    } catch (failure) { setToast(failure instanceof Error ? failure.message : '视频作废失败') }
+    finally { setVoidingVideo(false); cancelRequestRef.current = false }
   }
 
   function toggleEditMode() {
@@ -1449,7 +1460,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   useEffect(() => {
-    if (draftsDisabled || !dirty || hardReadonly || saving || submitting || !result || editing || sampleUpdatingId) return
+    if (draftsDisabled || !dirty || hardReadonly || saving || submitting || voidingVideo || !result || editing || sampleUpdatingId) return
     const snapshot = result
     const timer = window.setTimeout(() => {
       setSaving(true)
@@ -1466,7 +1477,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         .finally(() => setSaving(false))
     }, 700)
     return () => window.clearTimeout(timer)
-  }, [draftsDisabled, dirty, editModeActive, editing, hardReadonly, projectId, result, revision, saving, submitting, sampleUpdatingId, videoId])
+  }, [draftsDisabled, dirty, editModeActive, editing, hardReadonly, projectId, result, revision, saving, submitting, voidingVideo, sampleUpdatingId, videoId])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -1602,7 +1613,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   return <main className="annotation-page">
     <header className="annotation-header">
       <button className="annotation-back" type="button" onClick={() => navigate('/workbench')} aria-label="返回工作台"><BrandLogo compact /><ArrowLeft className="annotation-back-arrow" size={19} /></button>
-      <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><span className={`workflow-stage-chip ${nodeTones[workspace.node]}`}>{nodeLabels[workspace.node]}</span></div><small>{workspace.videoCode} · {workspace.projectName}</small></div>
+      <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><VideoInvalidationBadge video={workspace} /><span className={`workflow-stage-chip ${nodeTones[workspace.node]}`}>{nodeLabels[workspace.node]}</span></div><small>{workspace.videoCode} · {workspace.projectName}</small></div>
       <div className="annotation-save-state"><i className={dirty ? 'dirty' : ''} />{saving ? '正在保存' : dirty ? '有未保存修改' : `草稿已保存 · V${revision}`}</div>
       <div className="annotation-header-actions">
         <VideoSceneEditor key={`${projectId}:${videoId}`} workspace={workspace} canEdit={canEditScenes} onUpdated={(scenes) => setWorkspace((current) => current && current.videoId === workspace.videoId ? { ...current, ...scenes } : current)} />
@@ -1610,11 +1621,12 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         {commentsAvailable &&
           <button className="comment-all-button" type="button" onClick={() => commentsOpen ? setCommentsOpen(false) : openComments()}>全部批注 <b>{videoComments.length}</b></button>
         }
-        {canEditLaterStages ? <button className={`editing-badge annotation-edit-switch${editModeEnabled ? ' enabled' : ''}`} type="button" role="switch" aria-label="编辑模式" aria-checked={editModeEnabled} disabled={hardReadonly || saving || submitting || returning || Boolean(editing) || Boolean(sampleUpdatingId)} onClick={toggleEditMode}><span>编辑模式</span><i aria-hidden="true" /><span>{editModeEnabled ? '开' : '关'}</span></button> : <span className={readonly ? 'readonly-badge' : 'editing-badge'}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>}
+        {canEditLaterStages ? <button className={`editing-badge annotation-edit-switch${editModeEnabled ? ' enabled' : ''}`} type="button" role="switch" aria-label="编辑模式" aria-checked={editModeEnabled} disabled={hardReadonly || saving || submitting || returning || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId)} onClick={toggleEditMode}><span>编辑模式</span><i aria-hidden="true" /><span>{editModeEnabled ? '开' : '关'}</span></button> : <span className={readonly ? 'readonly-badge' : 'editing-badge'}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>}
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
         {/* <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button> */}
-        {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning || submitting || commentsLoading || unresolvedCommentCount === 0} title={unresolvedCommentCount === 0 ? '至少需要一条未解决批注才能退回' : undefined} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}
-        <button className="primary-button" type="button" disabled={hardReadonly || saving || submitting || Boolean(editing) || Boolean(sampleUpdatingId) || Boolean(descriptionEditingId) || Boolean(descriptionModalId)} onClick={() => void submit()}>{submitting ? <><RotateCcw className="spinning" size={16} />正在{submitButtonLabel}...</> : <><Check size={16} />{submitButtonLabel}</>}</button>
+        {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning || submitting || voidingVideo || commentsLoading || unresolvedCommentCount === 0} title={unresolvedCommentCount === 0 ? '至少需要一条未解决批注才能退回' : undefined} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}
+        {!invalidOnly && <button className="secondary-button annotation-cancel-button" type="button" disabled={hardReadonly || saving || submitting || returning || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId) || Boolean(descriptionEditingId) || Boolean(descriptionModalId)} onClick={() => void cancelCurrentVideo()}>{voidingVideo ? '正在作废...' : '作废'}</button>}
+        <button className="primary-button" type="button" disabled={hardReadonly || saving || submitting || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId) || Boolean(descriptionEditingId) || Boolean(descriptionModalId)} onClick={() => void submit()}>{submitting ? <><RotateCcw className="spinning" size={16} />正在{submitButtonLabel}...</> : <><Check size={16} />{submitButtonLabel}</>}</button>
       </div>
     </header>
 
@@ -1641,7 +1653,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
           <div className="segment-list-columns invalid-list-columns" role="row"><span role="columnheader">区间</span><span role="columnheader">无效原因</span><span role="columnheader">是否样例</span><span role="columnheader">总时长</span><span role="columnheader">操作</span></div>
           <div className="segment-tree invalid-segment-list" role="rowgroup">{result.invalidRanges.map((range, index) => {
             const active = selectedLevel === 'invalid' && selectedId === `invalid:${range.id}`
-            const sampleBusy = Boolean(sampleUpdatingId) || saving || submitting || Boolean(editing)
+            const sampleBusy = Boolean(sampleUpdatingId) || saving || submitting || voidingVideo || Boolean(editing)
             const selectRange = () => { videoRef.current?.pause(); setActiveGoalId(undefined); setDescriptionEditingId(undefined); setSelectedId(`invalid:${range.id}`); setSelectedLevel('invalid'); seek(range.startFrame) }
             return <div className={`invalid-list-row${active ? ' selected' : ''}`} key={range.id} role="row" onClick={(event) => { if (!(event.target as HTMLElement).closest('button')) selectRange() }}>
               <button className="invalid-row-main" type="button" aria-pressed={active} onClick={selectRange}>
@@ -1678,7 +1690,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       <div className="page-comment-dialog-list">{commentsLoading ? <div className="comment-empty">批注加载中...</div> : visibleVideoComments.length === 0 ? <div className="comment-empty">暂无批注</div> : visibleVideoComments.map((comment) => <article className={comment.resolved ? 'resolved' : ''} key={comment.id}><header><span className="page-comment-sequence">{comment.sequence}</span><strong>{nodeLabels[comment.node]}批注</strong><span className={comment.resolved ? 'resolved' : 'pending'}>{comment.resolved ? '已解决' : '待处理'}</span></header><p>{comment.content}</p><footer><small>{comment.createdByName || '未知用户'} · {formatDateTime(comment.createdAt)} · 页面位置 {Math.round(comment.positionX * 100)}%, {Math.round(comment.positionY * 100)}%</small>{!comment.resolved && <button type="button" disabled={!canResolveComment} onClick={() => resolveComment(comment.id)}>标记已解决</button>}</footer></article>)}</div>
       <footer><button className="secondary-button" type="button" onClick={() => setCommentsOpen(false)}>关闭</button></footer>
     </div>}
-    {(pendingInvalidRange || submitInvalidFix) && <Modal title="选择无效原因" onClose={() => { if (voidingVideo) return; setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined); setSubmitInvalidFix(undefined) }} footer={<><button className="secondary-button" type="button" disabled={voidingVideo} onClick={() => { setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined); setSubmitInvalidFix(undefined) }}>取消</button><button className="primary-button" type="button" disabled={voidingVideo || Boolean(sampleUpdatingId) || !invalidReason || invalidReason === '其他' && !invalidReasonOther.trim()} onClick={() => { if (submitInvalidFix) void confirmSubmitInvalidFix(); else void confirmInvalidRange() }}>{voidingVideo ? '正在作废...' : submitInvalidFix ? (submitInvalidFix.voidVideo ? '确认作废视频' : `确认标记 ${submitInvalidFix.ranges.length} 处并提交`) : editingInvalidRangeId ? '确认修改' : '确认标记'}</button></>}><div className="invalid-reason-dialog">{submitInvalidFix ? (submitInvalidFix.voidVideo ? <p>整个视频未标注，将生成覆盖全片（{timeText(0)} - {timeText(result.totalFrames / result.frameRate)}）的无效片段；确认原因后将执行作废流程，不会进入下一环节。</p> : <p>检测到 {submitInvalidFix.ranges.length} 个未标注区间，共 {submitInvalidFix.ranges.reduce((sum, range) => sum + range.endFrame - range.startFrame, 0)} 帧，将自动生成无效片段；确认原因后{submitInvalidFix.submitChanges ? '提交修改' : '正常提交并进入下一环节'}。<small>{submitInvalidFix.ranges.map((range) => `${timeText(range.startFrame / result.frameRate)}-${timeText(range.endFrame / result.frameRate)}`).join('、')}</small></p>) : <p>无效区间：{timeText(pendingInvalidRange!.startFrame / result.frameRate)} - {timeText(pendingInvalidRange!.endFrame / result.frameRate)}</p>}<fieldset><legend>无效原因 <i className="required-mark">*</i></legend><div>{invalidReasons.map((reason) => <label key={reason}><input type="radio" name="invalid-reason" checked={invalidReason === reason} onChange={() => setInvalidReason(reason)} />{reason}</label>)}</div></fieldset>{canManageSamples && <label className="invalid-sample-checkbox"><input type="checkbox" checked={invalidIsSample} disabled={voidingVideo || Boolean(sampleUpdatingId)} onChange={(event) => setInvalidIsSample(event.target.checked)} />设为样例</label>}{invalidReason === '其他' && <label className="invalid-reason-other"><span>其他原因 <i className="required-mark">*</i></span><input autoFocus value={invalidReasonOther} maxLength={200} onChange={(event) => setInvalidReasonOther(event.target.value)} placeholder="请输入其他无效原因" /><small>{invalidReasonOther.length}/200</small></label>}</div></Modal>}
+    {(pendingInvalidRange || submitInvalidFix) && <Modal title={submitInvalidFix?.voidVideo ? '确认作废视频' : '选择无效原因'} onClose={() => { if (voidingVideo) return; setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined); setSubmitInvalidFix(undefined) }} footer={<><button className="secondary-button" type="button" disabled={voidingVideo} onClick={() => { setPendingInvalidRange(undefined); setEditingInvalidRangeId(undefined); setSubmitInvalidFix(undefined) }}>取消</button><button className="primary-button" type="button" disabled={voidingVideo || Boolean(sampleUpdatingId) || !submitInvalidFix?.voidVideo && (!invalidReason || invalidReason === '其他' && !invalidReasonOther.trim())} onClick={() => { if (submitInvalidFix) void confirmSubmitInvalidFix(); else void confirmInvalidRange() }}>{voidingVideo ? '正在作废...' : submitInvalidFix ? (submitInvalidFix.voidVideo ? '确认作废视频' : `确认标记 ${submitInvalidFix.ranges.length} 处并提交`) : editingInvalidRangeId ? '确认修改' : '确认标记'}</button></>}><div className="invalid-reason-dialog">{submitInvalidFix ? (submitInvalidFix.voidVideo ? <p>整个视频未标注。{cancellationMessage(workspace)}作废操作不提交标注内容。</p> : <p>检测到 {submitInvalidFix.ranges.length} 个未标注区间，共 {submitInvalidFix.ranges.reduce((sum, range) => sum + range.endFrame - range.startFrame, 0)} 帧，将自动生成无效片段；确认原因后{submitInvalidFix.submitChanges ? '提交修改' : '正常提交并进入下一环节'}。<small>{submitInvalidFix.ranges.map((range) => `${timeText(range.startFrame / result.frameRate)}-${timeText(range.endFrame / result.frameRate)}`).join('、')}</small></p>) : <p>无效区间：{timeText(pendingInvalidRange!.startFrame / result.frameRate)} - {timeText(pendingInvalidRange!.endFrame / result.frameRate)}</p>}{!submitInvalidFix?.voidVideo && <><fieldset><legend>无效原因 <i className="required-mark">*</i></legend><div>{invalidReasons.map((reason) => <label key={reason}><input type="radio" name="invalid-reason" checked={invalidReason === reason} onChange={() => setInvalidReason(reason)} />{reason}</label>)}</div></fieldset>{canManageSamples && <label className="invalid-sample-checkbox"><input type="checkbox" checked={invalidIsSample} disabled={voidingVideo || Boolean(sampleUpdatingId)} onChange={(event) => setInvalidIsSample(event.target.checked)} />设为样例</label>}{invalidReason === '其他' && <label className="invalid-reason-other"><span>其他原因 <i className="required-mark">*</i></span><input autoFocus value={invalidReasonOther} maxLength={200} onChange={(event) => setInvalidReasonOther(event.target.value)} placeholder="请输入其他无效原因" /><small>{invalidReasonOther.length}/200</small></label>}</>}</div></Modal>}
     {submitIssue && <Modal title="当前标注未完成" onClose={() => setSubmitIssue(undefined)} footer={<><button className="secondary-button" type="button" onClick={() => { setSubmitIssue(undefined); void submit({ ignoreActionGaps: true, submitChanges: submitIssue.submitChanges }) }}>确认不标注，继续提交</button><button className="primary-button" type="button" onClick={() => { setActiveGoalId(submitIssue.goal.id); setSelectedId(submitIssue.goal.id); setSelectedLevel('goal'); seek(submitIssue.gaps[0].startFrame); setSubmitIssue(undefined) }}>返回检查第一个</button></>}><div className="submit-validation-dialog"><strong>当前单次任务还有 {submitIssue.gaps.length} 个小目标未覆盖区间，共 {submitIssue.gaps.reduce((sum, gap) => sum + gap.endFrame - gap.startFrame, 0)} 帧</strong><p>可确认这些区间不标注并继续，也可返回检查第一个并补充小目标或标记无效。</p></div></Modal>}
     {shortcutsOpen && <Modal title="快捷键与操作" onClose={() => setShortcutsOpen(false)}><div className="shortcut-guide"><ShortcutColumn title="键盘快捷键" items={keyboardShortcuts} /><ShortcutColumn title="时间轴操作" items={timelineShortcuts} /></div></Modal>}
     {candidateModalOpen && <Modal title="新增操作对象候选" onClose={() => { if (!candidateSaving) setCandidateModalOpen(false) }} footer={<><button className="secondary-button" type="button" disabled={candidateSaving} onClick={() => setCandidateModalOpen(false)}>取消</button><button className="primary-button" type="button" disabled={candidateSaving || !candidateForm.name.trim()} onClick={() => void createOperationCandidate()}>{candidateSaving ? '正在提交...' : '提交候选'}</button></>}><div className="candidate-object-form"><p>候选对象将提交到“{workspace.operationLibraryName || '项目操作对象库'}”，审核通过后才可用于关键帧。</p><label><span>对象名称 <i className="required-mark">*</i></span><input autoFocus value={candidateForm.name} maxLength={100} onChange={(event) => setCandidateForm({ ...candidateForm, name: event.target.value })} placeholder="请输入对象名称" /></label><label><span>别名</span><input value={candidateForm.alias} maxLength={100} onChange={(event) => setCandidateForm({ ...candidateForm, alias: event.target.value })} placeholder="请输入对象别名（选填）" /></label><label><span>属性</span><input value={candidateForm.attribute} maxLength={500} onChange={(event) => setCandidateForm({ ...candidateForm, attribute: event.target.value })} placeholder="请输入对象属性（选填）" /></label></div></Modal>}

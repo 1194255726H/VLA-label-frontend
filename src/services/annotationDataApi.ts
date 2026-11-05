@@ -1,3 +1,4 @@
+import { normalizeVideoInvalidation } from '../utils/videoInvalidation'
 import { runtimeConfig } from '../config/runtime'
 import { mockProjects, mockTasks } from '../mocks/data'
 import type { ProjectStageStats, ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem } from '../types/api'
@@ -33,7 +34,7 @@ function normalize(item: Record<string, unknown>): VideoListItem {
     filename: String(item.filename || item.external_video_id || item.video_id || item.uri || `视频 ${item.id || ''}`), uri: String(item.uri || item.preview_url || ''), sourceUri: String(item.source_uri || ''), previewUrl: String(item.preview_url || item.uri || ''), ossBucket: String(item.oss_bucket || ''), ossKey: String(item.oss_key || ''),
     duration: numberValue(item.duration), fileSize: numberValue(item.file_size), storageStatus: String(item.storage_status || 'unchecked') as VideoListItem['storageStatus'], storageError: optionalString(item.storage_error), storageCheckedAt: optionalString(item.storage_checked_at),
     videoMeta: item.video_meta && typeof item.video_meta === 'object' ? item.video_meta as Record<string, unknown> : {}, createdAt: String(item.created_at || ''), updatedAt: String(item.updated_at || ''), scene1: normalizeScene(item.scene1), scene2: normalizeScene(item.scene2), supplier: normalizeSupplier(item.supplier), submittedNode: optionalString(item.submitted_node), submittedById: optionalString(item.submitted_by_id), submittedAt: optionalString(item.submitted_at), submittedDecision: optionalString(item.submitted_decision),
-    workType: String(item.work_type || 'normal') === 'returned' ? 'returned' : 'normal', selectedDurationMs: numberValue(item.selected_duration_ms), effectiveDurationMs: numberValue(item.effective_duration_ms), invalidDurationMs: numberValue(item.invalid_duration_ms), unselectedDurationMs: nullableNumberValue(item.unselected_duration_ms), atomicTaskCount: numberValue(item.atomic_task_count), atomicActionCount: numberValue(item.atomic_action_count),
+    ...normalizeVideoInvalidation(item), selectedDurationMs: numberValue(item.selected_duration_ms), effectiveDurationMs: numberValue(item.effective_duration_ms), invalidDurationMs: numberValue(item.invalid_duration_ms), unselectedDurationMs: nullableNumberValue(item.unselected_duration_ms), atomicTaskCount: numberValue(item.atomic_task_count), atomicActionCount: numberValue(item.atomic_action_count),
   }
 }
 

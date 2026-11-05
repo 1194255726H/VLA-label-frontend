@@ -33,13 +33,14 @@ export interface Project {
 export type TaskNode = 'annotation' | 'review' | 'quality' | 'acceptance'
 export type TaskTab = 'pending' | 'submitted'
 export type TaskStatus = 'pending' | 'processing' | 'submitted' | 'completed'
+export type VideoWorkType = 'normal' | 'returned' | 'invalidated'
 
 export interface WorkbenchTask {
   id: string
   dataId: string
   dataName: string
   node: TaskNode
-  workType: 'normal' | 'returned'
+  workType: VideoWorkType
   status: TaskStatus
   totalDuration: number
   selectedDuration: number
@@ -83,6 +84,8 @@ export interface ProjectStageStats {
 }
 
 export interface VideoListItem {
+  invalidatedAt?: string | null
+  invalidatedNode?: TaskNode
   id: string
   stage?: VideoStage
   stageStatus?: VideoStageStatus
@@ -123,7 +126,7 @@ export interface VideoListItem {
   submittedById?: string
   submittedAt?: string
   submittedDecision?: string
-  workType: 'normal' | 'returned'
+  workType: VideoWorkType
   selectedDurationMs: number
   effectiveDurationMs: number
   invalidDurationMs: number
@@ -179,7 +182,7 @@ export interface TaskQuery {
   tab: TaskTab
   filename?: string
   currentNode?: TaskNode
-  workType?: 'normal' | 'returned'
+  workType?: VideoWorkType
   updatedAtStart?: string
   updatedAtEnd?: string
   pageNo?: number
@@ -568,6 +571,11 @@ export interface AnnotationResult {
 }
 
 export interface AnnotationWorkspace {
+  stage?: VideoStage
+  completionNode?: TaskNode
+  invalidatedAt?: string | null
+  invalidatedNode?: TaskNode
+  workType?: VideoWorkType
   scene1?: VideoScene
   scene2?: VideoScene
   supplier?: VideoSupplier
@@ -600,7 +608,7 @@ export interface AnnotationDataItem {
   status: AnnotationDataStatus
   statusLabel: string
   node: TaskNode
-  workType: 'normal' | 'returned'
+  workType: VideoWorkType
   totalDuration: number
   selectedDuration: number
   validDuration: number

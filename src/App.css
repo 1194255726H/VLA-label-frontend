@@ -683,6 +683,9 @@
 .workbench-task-filters>label { width: auto; min-width: min(160px, 100%); flex: 0 1 220px; }
 .workbench-task-filters .filter-control { min-width: 0; width: 100%; }
 .workbench-task-filters>button { flex: 0 0 auto; }
+.work-type-tag.invalidated { color: #b54708; background: #fff0d6; }
+.video-invalidation-badge { width: fit-content; flex: 0 0 auto; }
+.annotation-header-actions .annotation-cancel-button { color: #c24141; border-color: #efc4c4; background: #fff7f7; }
 .workbench-date-range { display: flex; min-width: min(320px, 100%); flex: 0 1 340px; flex-direction: column; gap: 6px; color: #66758a; font-size: 11px; }
 .project-supplier-picker { position: relative; min-width: 0; }
 .project-supplier-input { display: flex; align-items: center; border: 1px solid #ccd9e8; border-radius: 5px; background: #fff; }

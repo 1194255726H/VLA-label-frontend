@@ -1,3 +1,5 @@
+import { VideoInvalidationBadge } from '../components/VideoInvalidationBadge'
+import { workTypeLabels } from '../utils/videoInvalidation'
 import { ArrowLeft, CircleAlert, Database, Download, Eye, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -15,7 +17,6 @@ import { invalidReasons, summarizeInvalidIntervals } from '../utils/invalidReaso
 import { preAnnotationRetryAvailable, videoStages, videoStageStatusLabels } from '../utils/videoStage'
 
 const videoStatusLabels: Record<string, string> = { pending: '待处理', assigned: '待处理', processing: '处理中', in_progress: '处理中', describing: '模型描述中', cutting: '切割中', completed: '已完成', cancelled: '已作废', abnormal: '异常' }
-const workTypeLabels = { normal: '正常流转', returned: '退回返修' }
 function clockDuration(value: number | null) {
   if (value === null || !Number.isFinite(value)) return '—'
   const totalSeconds = Math.max(0, Math.round(value))
@@ -187,7 +188,7 @@ export function AnnotationDataPage({ session }: { session: SessionResponse }) {
     <div className="management-table-wrap"><table className="management-table annotation-data-table project-video-table"><thead><tr><th className="video-selection-column"><input type="checkbox" aria-label="全选当前页视频" checked={allPageSelected} ref={(element) => { if (element) element.indeterminate = somePageSelected && !allPageSelected }} disabled={tableLoading || exporting || !selectableItems.length} onChange={(event) => toggleSelection(selectableItems.map((item) => item.id), event.target.checked)} /></th><th className="video-name-column">视频名称</th><th className="scene-info-column">场景信息</th><th>供应商</th><th>处理阶段</th><th>阶段状态／失败原因</th><th>作业状态</th><th>作业节点</th><th>流转类型</th><th>视频时长</th><th>有效片段时长</th><th>无效片段时长</th><th className="video-invalid-reasons-column">无效原因</th><th>设备 MAC</th><th>采集人</th><th>单次任务数</th><th>小目标数</th><th>处理人</th><th>创建时间</th><th>更新时间</th><th>操作</th></tr></thead><tbody>
       {tableLoading ? <tr><td colSpan={21}><div className="management-empty">正在加载项目视频...</div></td></tr> : items.map((video) => <tr className={selectedVideoIds.has(video.id) ? 'selected-row' : undefined} key={video.id}>
         <td className="video-selection-column"><input type="checkbox" aria-label={`选择视频 ${video.filename}`} checked={selectedVideoIds.has(video.id)} disabled={!video.id || exporting} onChange={(event) => toggleSelection(rowSelection.range(video.id, (event.nativeEvent as MouseEvent).shiftKey), event.target.checked)} /></td>
-        <td className="video-name-column"><div className="entity-name"><strong title={video.filename}>{video.filename}</strong><small>{video.externalVideoId || video.videoId || `视频记录 #${video.id}`}</small></div></td>
+        <td className="video-name-column"><div className="entity-name"><strong title={video.filename}>{video.filename}</strong><VideoInvalidationBadge video={video} /><small>{video.externalVideoId || video.videoId || `视频记录 #${video.id}`}</small></div></td>
         <td><VideoSceneEditor key={`${projectId}:${video.id}`} variant="table" workspace={{ ...video, projectId: video.projectId || projectId, videoId: video.id }} canEdit onUpdated={(scenes) => { setItems((current) => current.map((item) => item.id === video.id ? { ...item, ...scenes } : item)); setToast('场景信息已更新') }} /></td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
         <td>{videoStages.find((item) => item.value === video.stage)?.label || '-'}</td>
         <td><div className="video-stage-status"><span className={`stage-status ${video.stageStatus || ''}`}>{video.stageStatus ? videoStageStatusLabels[video.stageStatus] : '-'}</span>{video.stageFailureReason && <small title={video.stageFailureReason}>{video.stageFailureReason}</small>}</div></td>
