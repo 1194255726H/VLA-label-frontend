@@ -1319,11 +1319,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
       const nextRevision = await annotationApi.save(projectId, videoId, invalidResult, revision)
       setRevision(nextRevision); setResult(invalidResult); setDirty(false)
       if (editModeActive) editModeSnapshotRef.current = structuredClone(invalidResult)
-      await annotationApi.submitChanges(projectId, videoId, invalidResult)
-      // Formal submission may advance the node. Cancel must use the latest video state.
-      const submittedWorkspace = await annotationApi.getWorkspace(projectId, videoId, false, invalidOnly)
-      setWorkspace(submittedWorkspace)
-      const outcome = await annotationApi.cancelVideo(projectId, videoId, !submittedWorkspace.stage || submittedWorkspace.stage === 'human_processing' ? submittedWorkspace.node : undefined)
+      await annotationApi.submitChanges(projectId, videoId, invalidResult, { advance: false })
+      const outcome = await annotationApi.cancelVideo(projectId, videoId, !workspace.stage || workspace.stage === 'human_processing' ? workspace.node : undefined)
       if (!outcome.cancelled && !outcome.invalidated) throw new Error('作废接口未返回有效的作废结果，请刷新后确认状态')
       setDirty(false); setSubmitted(true); setVideoLockState('stopped'); setSubmitInvalidFix(undefined)
       setWorkspace((current) => current ? { ...current, readonly: true, node: outcome.currentNode || current.node, currentAssigneeId: outcome.currentAssigneeId || undefined } : current)
