@@ -100,8 +100,8 @@ function firstOverlap(items: Array<{ id: string; startFrame: number; endFrame: n
   return undefined
 }
 
-function hasEffectiveAction(data: AnnotationResult) {
-  return data.actions.some((action) => action.type !== 'no_action' && action.segmentType !== 'no_action' && data.goals.some((goal) => goal.id === action.parentId && coverageGaps(Math.max(goal.startFrame, action.startFrame), Math.min(goal.endFrame, action.endFrame), data.invalidRanges).length > 0))
+function hasEffectiveGoal(data: AnnotationResult) {
+  return data.goals.some((goal) => coverageGaps(goal.startFrame, goal.endFrame, data.invalidRanges).length > 0)
 }
 
 function fullyInvalidResult(data: AnnotationResult, dataName: string) {
@@ -1231,7 +1231,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     if (submitChanges && (!canEditLaterStages || !editModeActive)) return
     if (invalidOnly && approvalStage && !submitChanges) return setToast('请开启编辑模式后提交已完成视频的调整')
     if (draftsDisabled && dirty && !submitChanges) return setToast('请开启编辑模式并提交修改，再执行原提交操作')
-    if (!hasEffectiveAction(data)) {
+    if (!hasEffectiveGoal(data)) {
       setSubmitInvalidFix({ ranges: [{ startFrame: 0, endFrame: data.totalFrames }], voidVideo: true, submitChanges })
       return
     }
