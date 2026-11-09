@@ -712,8 +712,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   const canReturn = Boolean(!invalidOnly && workspace && ['review', 'quality', 'acceptance'].includes(workspace.node))
   const submitButtonLabel = editModeActive ? '提交修改' : workspace?.node === 'quality' ? '提交审核' : workspace?.node === 'acceptance' ? '提交验收' : '提交'
   const hardReadonly = Boolean((workspace?.readonly && !(approvalStage && canEditLaterStages)) || searchParams.get('readonly') === '1' || submitted || videoLockState !== 'held')
-  const readonly = Boolean(hardReadonly || invalidOnly || editModeLocked || submitting || voidingVideo || sampleUpdatingId)
-  const invalidReadonly = Boolean(hardReadonly || editModeLocked || submitting || voidingVideo || sampleUpdatingId)
+  const readonly = Boolean(hardReadonly || invalidOnly || editModeLocked || submitting || returning || voidingVideo || sampleUpdatingId)
+  const invalidReadonly = Boolean(hardReadonly || editModeLocked || submitting || returning || voidingVideo || sampleUpdatingId)
   const descriptionEditable = Boolean(!invalidOnly && !readonly)
   const canComment = Boolean(!invalidOnly && approvalStage && !hardReadonly)
   const keyFrameNeedsObject = keyFrameForm.type !== 'abnormal'
@@ -1226,7 +1226,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   async function submit(options: { ignoreActionGaps?: boolean; submitChanges?: boolean } = {}, overrideResult?: AnnotationResult) {
     const data = overrideResult || result
     const submitChanges = options.submitChanges ?? editModeActive
-    if (!data || hardReadonly || saving || submitting || voidingVideo || sampleUpdatingId || cancelRequestRef.current) return
+    if (!data || hardReadonly || saving || submitting || returning || voidingVideo || sampleUpdatingId || cancelRequestRef.current) return
     if (editing) return setToast('请先完成或取消当前拖动')
     if (submitChanges && (!canEditLaterStages || !editModeActive)) return
     if (invalidOnly && approvalStage && !submitChanges) return setToast('请开启编辑模式后提交已完成视频的调整')
@@ -1469,19 +1469,30 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   }
 
   async function returnTask() {
-    if (!result || returning) return
+    if (!result || !canReturn || hardReadonly || returning || saving || submitting || voidingVideo || editing || sampleUpdatingId || descriptionEditingId || descriptionModalId) return
     if (commentsLoading) return setToast('批注仍在加载，请稍后再试')
     const unresolved = videoComments.filter((item) => !item.resolved)
     if (!unresolved.length) return setToast('至少需要一条未解决批注才能退回')
     if (!window.confirm('确认将该视频退回上一个流程环节？')) return
     const opinion = unresolved.map((item) => item.content.trim()).filter(Boolean).join('；')
     setReturning(true)
-    try { if (dirty && draftsDisabled) { setToast('请先开启编辑模式并提交修改，再退回视频'); return }; if (dirty) await save(false); await annotationApi.reject(projectId, videoId, opinion); setDirty(false); setSubmitted(true); setVideoLockState('stopped'); setToast('视频已退回'); window.setTimeout(() => navigate('/workbench'), 700) } catch (failure) { setToast(failure instanceof Error ? failure.message : '退回失败') }
+    try {
+      if (dirty && draftsDisabled) { setToast('请先开启编辑模式并提交修改，再退回视频'); return }
+      if (editModeActive) {
+        // Autosave clears dirty, so persist the current edit result even when its draft is saved.
+        await annotationApi.submitChanges(projectId, videoId, result, { advance: false })
+        setDirty(false)
+        editModeSnapshotRef.current = structuredClone(result)
+      } else if (dirty) await save(false)
+      await annotationApi.reject(projectId, videoId, opinion)
+      setDirty(false); setSubmitted(true); setVideoLockState('stopped'); setToast('视频已退回')
+      window.setTimeout(() => navigate('/workbench'), 700)
+    } catch (failure) { setToast(failure instanceof Error ? failure.message : '退回失败') }
     finally { setReturning(false) }
   }
 
   useEffect(() => {
-    if (draftsDisabled || !dirty || hardReadonly || saving || submitting || voidingVideo || !result || editing || sampleUpdatingId) return
+    if (draftsDisabled || !dirty || hardReadonly || saving || submitting || returning || voidingVideo || !result || editing || sampleUpdatingId) return
     const snapshot = result
     const timer = window.setTimeout(() => {
       setSaving(true)
@@ -1498,7 +1509,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         .finally(() => setSaving(false))
     }, 700)
     return () => window.clearTimeout(timer)
-  }, [draftsDisabled, dirty, editModeActive, editing, hardReadonly, projectId, result, revision, saving, submitting, voidingVideo, sampleUpdatingId, videoId])
+  }, [draftsDisabled, dirty, editModeActive, editing, hardReadonly, projectId, result, revision, saving, submitting, returning, voidingVideo, sampleUpdatingId, videoId])
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -1645,8 +1656,8 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
         {canEditLaterStages ? <button className={`editing-badge annotation-edit-switch${editModeEnabled ? ' enabled' : ''}`} type="button" role="switch" aria-label="编辑模式" aria-checked={editModeEnabled} disabled={hardReadonly || saving || submitting || returning || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId)} onClick={toggleEditMode}><span>编辑模式</span><i aria-hidden="true" /><span>{editModeEnabled ? '开' : '关'}</span></button> : <span className={readonly ? 'readonly-badge' : 'editing-badge'}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>}
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
         {/* <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button> */}
-        {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning || submitting || voidingVideo || commentsLoading || unresolvedCommentCount === 0} title={unresolvedCommentCount === 0 ? '至少需要一条未解决批注才能退回' : undefined} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}
-        <button className="primary-button" type="button" disabled={hardReadonly || saving || submitting || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId) || Boolean(descriptionEditingId) || Boolean(descriptionModalId)} onClick={() => void submit()}>{submitting ? <><RotateCcw className="spinning" size={16} />正在{submitButtonLabel}...</> : <><Check size={16} />{submitButtonLabel}</>}</button>
+        {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning || saving || submitting || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId) || Boolean(descriptionEditingId) || Boolean(descriptionModalId) || commentsLoading || unresolvedCommentCount === 0} title={unresolvedCommentCount === 0 ? '至少需要一条未解决批注才能退回' : undefined} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}
+        <button className="primary-button" type="button" disabled={hardReadonly || saving || submitting || returning || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId) || Boolean(descriptionEditingId) || Boolean(descriptionModalId)} onClick={() => void submit()}>{submitting ? <><RotateCcw className="spinning" size={16} />正在{submitButtonLabel}...</> : <><Check size={16} />{submitButtonLabel}</>}</button>
       </div>
     </header>
 
