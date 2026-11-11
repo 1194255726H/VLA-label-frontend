@@ -6,6 +6,7 @@ import { LabelManagementPage } from './pages/LabelManagementPage'
 import { LoginPage } from './pages/LoginPage'
 import { OperationObjectManagementPage } from './pages/OperationObjectManagementPage'
 import { ProjectManagementPage } from './pages/ProjectManagementPage'
+import { ProductManagementPage } from './pages/ProductManagementPage'
 import { TeamMembersPage } from './pages/TeamMembersPage'
 import { VideoAnnotationPage } from './pages/VideoAnnotationPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
@@ -27,7 +28,9 @@ function App() {
     <Routes>
       <Route path="/login" element={session ? <Navigate to="/workbench" replace /> : <LoginPage onLogin={() => setSession(authApi.getStoredSession())} />} />
       <Route path="/workbench" element={session ? <WorkbenchPage session={session} /> : <Navigate to="/login" replace />} />
-      <Route path="/projects" element={session ? <ProjectManagementPage session={session} /> : <Navigate to="/login" replace />} />
+      <Route path="/projects" element={<Navigate to="/products" replace />} />
+      <Route path="/products" element={session ? <ProductManagementPage session={session} /> : <Navigate to="/login" replace />} />
+      <Route path="/products/:productId/datasets" element={session ? <ProjectManagementPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/projects/:projectId/annotation-data" element={session ? <AnnotationDataPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/labels" element={session ? <LabelManagementPage session={session} /> : <Navigate to="/login" replace />} />
       <Route path="/operation-objects" element={session ? <OperationObjectManagementPage session={session} /> : <Navigate to="/login" replace />} />

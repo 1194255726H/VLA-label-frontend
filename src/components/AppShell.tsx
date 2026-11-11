@@ -11,7 +11,7 @@ interface Props { user: User; children: ReactNode }
 
 const menus = [
   { label: '工作台', icon: LayoutDashboard, path: '/workbench' },
-  { label: '项目管理', icon: FolderKanban, path: '/projects' },
+  { label: '项目管理', icon: FolderKanban, path: '/products' },
   { label: '标注配置', icon: Settings2, path: '', group: true },
   { label: '动作标签库', icon: Tags, path: '/labels', child: true },
   { label: '操作对象库', icon: Boxes, path: '/operation-objects', child: true },
@@ -41,7 +41,8 @@ export function AppShell({ user, children }: Props) {
   const hasOperationRole = roleIdentities.some((role) => operationRoles.has(role))
   const hasManagementRole = Boolean(user.isStaff || user.isSuperuser || roleIdentities.some((role) => managementRoles.has(role)))
   const visibleMenus = hasOperationRole && !hasManagementRole ? menus.slice(0, 1) : menus
-  const currentMenu = visibleMenus.find((item) => item.path && location.pathname.startsWith(item.path))
+  const menuPath = location.pathname.startsWith('/projects') ? '/products' : location.pathname
+  const currentMenu = visibleMenus.find((item) => item.path && menuPath.startsWith(item.path))
 
   async function logout() {
     await authApi.logout()
@@ -54,7 +55,7 @@ export function AppShell({ user, children }: Props) {
         <div className="sidebar-brand"><BrandLogo compact={collapsed} /></div>
         <nav aria-label="主导航">
           {visibleMenus.map(({ label, icon: Icon, path, group, child }) => (
-            <button key={label} className={`${path && location.pathname.startsWith(path) ? 'active ' : ''}${group ? 'menu-group ' : ''}${child ? 'menu-child' : ''}`.trim()} type="button" disabled={group} title={collapsed ? label : undefined} onClick={() => path && navigate(path)}>
+            <button key={label} className={`${path && menuPath.startsWith(path) ? 'active ' : ''}${group ? 'menu-group ' : ''}${child ? 'menu-child' : ''}`.trim()} type="button" disabled={group} title={collapsed ? label : undefined} onClick={() => path && navigate(path)}>
               <Icon size={19} /><span>{label}</span>
             </button>
           ))}

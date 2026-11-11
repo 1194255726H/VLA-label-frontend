@@ -16,7 +16,7 @@ export function ProjectSupplierSelect({ value, options, loading, disabled, onCha
     onChange(option); setOpen(false); setKeyword('')
   }
   return <div className="project-supplier-picker" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}>
-    <div className="project-supplier-input"><input role="combobox" aria-label="项目供应商" aria-required="true" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined} disabled={disabled || loading} value={open ? keyword : selected?.name || ''} placeholder={loading ? '正在加载供应商...' : '请选择或输入供应商名称搜索'} onFocus={() => { setKeyword(''); setActive(-1); setOpen(true) }} onClick={() => setOpen(true)} onChange={(event) => { setKeyword(event.target.value); setActive(-1); setOpen(true) }} onKeyDown={(event) => {
+    <div className="project-supplier-input"><input role="combobox" aria-label="数据集供应商" aria-required="true" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined} disabled={disabled || loading} value={open ? keyword : selected?.name || ''} placeholder={loading ? '正在加载供应商...' : '请选择或输入供应商名称搜索'} onFocus={() => { setKeyword(''); setActive(-1); setOpen(true) }} onClick={() => setOpen(true)} onChange={(event) => { setKeyword(event.target.value); setActive(-1); setOpen(true) }} onKeyDown={(event) => {
       if (event.key === 'Escape') { event.preventDefault(); setOpen(false); return }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault(); setOpen(true)

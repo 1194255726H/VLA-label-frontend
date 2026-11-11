@@ -38,3 +38,11 @@ npm run build:real
 ```
 
 实际后端接口契约以根目录 [backend-api.md](backend-api.md) 为准。`docs/frontend-api-contract.md` 是后端定稿前的历史前端草案，不应再用于实现接口。
+
+## 生产项目与数据集
+
+项目管理采用「生产项目 Product → 数据集 Project → 视频 TaskVideo」三级结构。`#/products` 管理生产项目，进入 `#/products/{productId}/datasets` 管理旗下数据集，视频列表及标注仍使用原 `/projects/{projectId}/...` 页面和 API。
+
+生产项目通过 `/api/products/` 配置团队、负责人、标签库、对象库和交付时间；数据集创建带 `product_id`，配置只能选所属生产项目的关联项，交付日期不能晚于生产项目。生产项目状态不自动级联数据集。
+
+上线前需由后端创建首个生产项目，并执行文档中的 `python manage.py attach_legacy_projects --product-id <ID>` 迁移历史数据集；前端不自动挂载或更改历史数据归属。

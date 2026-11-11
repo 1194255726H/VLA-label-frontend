@@ -1645,7 +1645,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
   return <main className="annotation-page">
     <header className="annotation-header">
       <button className="annotation-back" type="button" onClick={() => navigate('/workbench')} aria-label="返回工作台"><BrandLogo compact /><ArrowLeft className="annotation-back-arrow" size={19} /></button>
-      <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><VideoInvalidationBadge video={workspace} /><span className={`workflow-stage-chip ${nodeTones[workspace.node]}`}>{nodeLabels[workspace.node]}</span></div><small>{workspace.videoCode} · {workspace.projectName}</small></div>
+      <div className="annotation-task-title"><div><strong>{workspace.dataName}</strong><VideoInvalidationBadge video={workspace} /><span className={`workflow-stage-chip ${nodeTones[workspace.node]}`}>{nodeLabels[workspace.node]}</span></div><small>{workspace.videoCode} · {workspace.productName ? `${workspace.productName} / ` : ''}{workspace.projectName}</small></div>
       <div className="annotation-save-state"><i className={dirty ? 'dirty' : ''} />{saving ? '正在保存' : dirty ? '有未保存修改' : `草稿已保存 · V${revision}`}</div>
       <div className="annotation-header-actions">
         <VideoSceneEditor key={`${projectId}:${videoId}`} workspace={workspace} canEdit={canEditScenes} onUpdated={(scenes) => setWorkspace((current) => current && current.videoId === workspace.videoId ? { ...current, ...scenes } : current)} />

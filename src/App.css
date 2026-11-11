@@ -203,6 +203,20 @@
 .spinning { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Management */
+.hierarchy-caption { color: #8a97a9; font-size: 12px; }
+.status-segments.product-status-tabs { padding: 0 18px; height: 46px; min-height: 46px; flex: 0 0 auto; border-bottom: 1px solid var(--border); }
+.product-filters { flex-wrap: wrap; }
+.product-filters select { min-width: 150px; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 4px; color: #607086; background: #fff; }
+.management-table.product-table { min-width: 2100px; }
+.product-table th:first-child { min-width: 220px; }
+.product-table th:last-child,.product-table td:last-child { position: sticky; right: 0; min-width: 310px; background: #fff; box-shadow: -7px 0 10px rgba(49,76,112,.07); }
+.product-table th:last-child { z-index: 4; background: #edf6ff; }
+.product-table tbody tr:hover td:last-child { background: #f9fbfe; }
+.product-association-picker { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 5px; }
+.product-association-picker legend { padding: 0 4px; color: #526178; font-size: 12px; }
+.product-association-picker > div { display: flex; flex-wrap: wrap; gap: 10px 18px; max-height: 150px; overflow: auto; }
+.product-association-picker > div > label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 12px; }
+.product-association-picker input[type=checkbox] { width: 14px; height: 14px; padding: 0; accent-color: var(--primary); }
 .management-page { display: flex; width: 100%; max-width: 1720px; height: calc(100vh - 64px); min-height: 0; margin: 0 auto; padding: 18px; overflow: hidden; }
 .management-panel { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
 .management-toolbar { display: flex; min-height: 64px; padding: 12px 18px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--border); }

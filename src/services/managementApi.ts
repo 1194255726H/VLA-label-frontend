@@ -1,17 +1,18 @@
 import { runtimeConfig } from '../config/runtime'
+import { productReference } from '../utils/product'
 import { normalizeInvalidIntervalList } from '../utils/invalidReason'
 import { normalizeFleetSyncStatus } from '../utils/fleetSync'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
 import type { FleetManualPage, FleetManualQuery, FleetManualVideo, FleetSupplierOption, FleetSyncGroup, FleetSyncResult, FleetVideoGroup, FleetVideoPreviewPage, ImportResult, LabelItem, LabelLibrary, ManagedProject, MediaUploadResult, Member, OperationObject, OperationObjectLibrary, OperationObjectPage, ProjectPayload, ProjectStatus, Team, TeamMembersData } from '../types/api'
 import { normalizeSupplier, request } from './api'
 
-let projects = mockManagedProjects.map((item) => ({ ...item, teams: [...item.teams], labelLibraryIds: [...item.labelLibraryIds] }))
+let projects: ManagedProject[] = mockManagedProjects.map((item) => ({ ...item, productId: item.productId || '1', productName: item.productName || '示例生产项目', teams: [...item.teams], labelLibraryIds: [...item.labelLibraryIds] }))
 let libraries = mockLabelLibraries.map((item) => ({ ...item, tags: item.tags.map((tag) => ({ ...tag })) }))
 let operationLibraries: OperationObjectLibrary[] = [{ id: '1', name: '常用操作对象库', desc: '标注常用对象', createdAt: '2026-08-25 06:15', objectCount: 1, pendingApprovalCount: 0 }]
 let operationObjects: OperationObject[] = [{ id: '1', libraryId: '1', name: '水杯', alias: '杯子', attribute: '容器', approved: true, createdAt: '2026-08-25 06:16' }]
 let teams = mockTeams.map((item) => ({ ...item }))
 let members = mockMembers.map((item) => ({ ...item, roles: [...item.roles], projects: [...item.projects] }))
-let pendingProjectList: Promise<ManagedProject[]> | undefined
+const pendingProjectLists = new Map<string, Promise<ManagedProject[]>>()
 const pendingManualVideoRequests = new Map<string, Promise<FleetManualPage>>()
 interface MockFleetTask { id: number; externalTaskId: string; name: string; path: string; device: string; operator: string; videoCount: number; syncedCount: number; availableCount: number; totalDuration: number }
 const mockFleetTasks: Record<string, MockFleetTask[]> = {
@@ -35,6 +36,19 @@ function itemsOf(value: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(value)) return value as Array<Record<string, unknown>>
   const valueRecord = record(value)
   return Array.isArray(valueRecord.items) ? valueRecord.items as Array<Record<string, unknown>> : []
+}
+
+async function allItems(path: string) {
+  const items: Array<Record<string, unknown>> = []
+  let page = 1
+  let pages: number
+  do {
+    const result = await request<{ items: Array<Record<string, unknown>>; total?: number; pages?: number; page_size?: number }>(`${path}?page_size=100${page > 1 ? `&page=${page}` : ''}`)
+    items.push(...result.items)
+    pages = result.pages || Math.ceil((result.total || 0) / (result.page_size || 100)) || 1
+    page += 1
+  } while (page <= pages)
+  return items
 }
 
 function triggerJsonDownload(content: BlobPart, filename: string) {
@@ -89,6 +103,7 @@ function normalizeProject(item: Record<string, unknown>): ManagedProject {
       ? { type: 'file' as const, displayName: String(rawGuideline.display_name || rawGuideline.displayName || ''), url: String(rawGuideline.url || '') }
       : null
   return {
+    ...productReference(item),
     supplier: normalizeSupplier(item.supplier) || null, fleetSupplierId: item.fleet_supplier_id == null ? undefined : String(item.fleet_supplier_id), autoSyncTime: item.auto_sync_time == null ? null : String(item.auto_sync_time),
     invalidIntervalList: normalizeInvalidIntervalList(item.invalid_interval_list),
     id: String(item.id || item.projectId || ''), code: String(item.code || item.projectCode || ''), name: String(item.name || item.projectName || ''), desc: String(item.desc || item.description || ''), duration: num(item.duration ?? item.duration_seconds ?? item.video_duration),
@@ -103,26 +118,28 @@ function normalizeProject(item: Record<string, unknown>): ManagedProject {
 }
 
 export const projectApi = {
-  async list(): Promise<ManagedProject[]> {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(projects) }
-    if (pendingProjectList) return pendingProjectList
+  async list(productId?: string): Promise<ManagedProject[]> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(productId ? projects.filter((item) => item.productId === productId) : projects) }
+    const key = productId || ''
+    const pending = pendingProjectLists.get(key)
+    if (pending) return pending
     const requestPromise = (async () => {
       const items: ManagedProject[] = []
       let page = 1
       let pages: number
       do {
-        const result = await request<{ items: Array<Record<string, unknown>>; pages?: number; total?: number; page_size?: number }>(`/api/projects/?page_size=100${page > 1 ? `&page=${page}` : ''}`)
+        const result = await request<{ items: Array<Record<string, unknown>>; pages?: number; total?: number; page_size?: number }>(`/api/projects/?page_size=100${productId ? `&product_id=${encodeURIComponent(productId)}` : ''}${page > 1 ? `&page=${page}` : ''}`)
         items.push(...result.items.map(normalizeProject))
         pages = result.pages || Math.ceil((result.total || 0) / (result.page_size || 100)) || 1
         page += 1
       } while (page <= pages)
       return items
     })()
-    pendingProjectList = requestPromise
+    pendingProjectLists.set(key, requestPromise)
     try {
       return await requestPromise
     } finally {
-      if (pendingProjectList === requestPromise) pendingProjectList = undefined
+      if (pendingProjectLists.get(key) === requestPromise) pendingProjectLists.delete(key)
     }
   },
   async detail(projectId: string): Promise<ManagedProject> {
@@ -136,6 +153,7 @@ export const projectApi = {
     return normalizeProject(record(result.project || result))
   },
   async save(payload: ProjectPayload): Promise<ManagedProject[]> {
+    if (!payload.projectId && !payload.productId) throw new Error('请选择所属生产项目')
     if (!payload.operationLibraryId) throw new Error('必须选择操作对象库')
     const changingSupplier = payload.supplierId !== undefined || payload.fleetSupplierId !== undefined
     if (!payload.projectId && (!payload.supplierId || !payload.fleetSupplierId)) throw new Error('请选择供应商')
@@ -162,7 +180,7 @@ export const projectApi = {
       } else {
         projects = [{ id: String(Date.now()), code: `PRJ-${Date.now().toString(36).toUpperCase()}`, status: 'not-started', memberCount: 0, dataCount: 0, selectedDuration: 0, validDuration: 0, invalidDuration: 0, unselectedDuration: 0, goalCount: 0, actionCount: 0, progress: 0, createdAt: new Date().toISOString().slice(0, 10), ...payload, ...binding, autoSyncTime: null, operationLibraryName }, ...projects]
       }
-      return clone(projects)
+      return this.list(payload.productId)
     }
     const nodeValues = { '标注': 'annotation', '质检': 'quality_check', '审核': 'review', '验收': 'acceptance' }
     const annotationGuideline = payload.annotationGuideline?.type === 'link'
@@ -170,20 +188,20 @@ export const projectApi = {
       : payload.annotationGuideline?.type === 'file'
         ? { type: 'file', display_name: payload.annotationGuideline.displayName, url: payload.annotationGuideline.url }
         : null
-    const body = { ...(changingSupplier ? { supplier_id: payload.supplierId ? Number(payload.supplierId) : null, fleet_supplier_id: payload.fleetSupplierId ? Number(payload.fleetSupplierId) : null } : {}), name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : '', delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), operation_library_id: Number(payload.operationLibraryId), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
+    const body = { ...(!payload.projectId ? { product_id: Number(payload.productId) } : {}), ...(changingSupplier ? { supplier_id: payload.supplierId ? Number(payload.supplierId) : null, fleet_supplier_id: payload.fleetSupplierId ? Number(payload.fleetSupplierId) : null } : {}), name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : '', delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), operation_library_id: Number(payload.operationLibraryId), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
     await request(payload.projectId ? `/api/projects/${encodeURIComponent(payload.projectId)}` : '/api/projects/', { method: payload.projectId ? 'PATCH' : 'POST', body: JSON.stringify(body) })
-    return this.list()
+    return this.list(payload.productId)
   },
-  async setStatus(projectId: string, status: ProjectStatus): Promise<ManagedProject[]> {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); projects = projects.map((item) => item.id === projectId ? { ...item, status } : item); return clone(projects) }
+  async setStatus(projectId: string, status: ProjectStatus, productId?: string): Promise<ManagedProject[]> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); projects = projects.map((item) => item.id === projectId ? { ...item, status } : item); return this.list(productId) }
     const wireStatus = status === 'not-started' ? 'not_started' : status
     await request(`/api/projects/${encodeURIComponent(projectId)}/status`, { method: 'POST', body: JSON.stringify({ status: wireStatus, reason: '前端项目管理操作' }) })
-    return this.list()
+    return this.list(productId)
   },
-  async delete(projectId: string): Promise<ManagedProject[]> {
-    if (runtimeConfig.apiMode === 'mock') { await delay(); projects = projects.filter((item) => item.id !== projectId); return clone(projects) }
+  async delete(projectId: string, productId?: string): Promise<ManagedProject[]> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); projects = projects.filter((item) => item.id !== projectId); return this.list(productId) }
     await request(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' })
-    return this.list()
+    return this.list(productId)
   },
 }
 
@@ -336,8 +354,7 @@ export const labelApi = {
   },
   async listSummaries(): Promise<LabelLibrary[]> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(libraries.map((library) => ({ ...library, tags: [] }))) }
-    const result = await request<{ items: Array<Record<string, unknown>> }>('/api/data/label-libraries?page_size=100')
-    return result.items.map(normalizeLibrary)
+    return (await allItems('/api/data/label-libraries')).map(normalizeLibrary)
   },
   /** 查某个标签库下的标签：只在打开标签库详情时调用 */
   async labels(libraryId: string): Promise<LabelItem[]> {
@@ -390,6 +407,10 @@ function normalizeOperationObject(item: Record<string, unknown>): OperationObjec
 }
 
 export const operationObjectApi = {
+  async allLibraries(): Promise<OperationObjectLibrary[]> {
+    if (runtimeConfig.apiMode === 'mock') { await delay(); return clone(operationLibraries) }
+    return (await allItems('/api/data/operation-libraries')).map(normalizeOperationLibrary)
+  },
   async downloadImportTemplate() {
     return downloadTemplate('/api/data/operation-object-import-template', 'operation-object-import-template.json', {
       _说明: ['name：操作对象名称（必填）', 'alias：别名（可选）', 'attribute：属性说明（可选）', 'approved：是否审核通过（可选）'],
@@ -469,8 +490,8 @@ export const teamApi = {
   async getData(includeProjects = true): Promise<TeamMembersData> {
     if (runtimeConfig.apiMode === 'mock') { await delay(); return clone({ teams, members, projects: mockProjectDistribution }) }
     const [rawTeams, rawMembers, rawProjects] = await Promise.all([
-      request<{ items: Array<Record<string, unknown>> }>('/api/auth/teams?page_size=100'),
-      request<{ items: Array<Record<string, unknown>> }>('/api/auth/members?page_size=100'),
+      allItems('/api/auth/teams').then((items) => ({ items })),
+      allItems('/api/auth/members').then((items) => ({ items })),
       includeProjects ? request<{ items: Array<Record<string, unknown>> }>('/api/projects/?page_size=100') : Promise.resolve({ items: [] }),
     ])
     const normalizedTeams: Team[] = rawTeams.items.map((item) => ({ id: String(item.id), name: String(item.name || ''), desc: String(item.description || ''), enabled: item.status !== 'disabled', memberCount: num(item.member_count) }))

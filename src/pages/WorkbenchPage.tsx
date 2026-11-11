@@ -109,7 +109,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
   const [statsRefresh, setStatsRefresh] = useState(0)
 
   const fetchWorkbenchData = useCallback(async () => {
-    if (!projectId) throw new Error('请先选择作业项目')
+    if (!projectId) throw new Error('请先选择作业数据集')
     const otherTab: TaskTab = tab === 'pending' ? 'submitted' : 'pending'
     const [result, otherTabResult] = await Promise.all([
       workbenchApi.getSnapshot({ projectId, operatorId: session.account.id, tab, ...taskFilters, pageNo, pageSize, includeOverview: true }),
@@ -216,9 +216,9 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
         {error && <div className="error-banner"><CircleAlert size={18} /><span>{error}</span><button type="button" onClick={load}>重新加载</button></div>}
         <section className="project-hero panel">
           <div className="project-hero-main">
-            <div className="project-kicker"><span className="live-dot" />当前作业项目</div>
-            <div className="project-title-row"><h1>{currentProject?.name || (loading ? '加载中...' : '暂无可作业项目')}</h1><div className="project-select-wrap"><select value={projectId} disabled={!projects.length} onChange={(event) => { setLoading(true); setError(''); setSnapshot(null); setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{!projects.length && <option value="">暂无项目</option>}{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
-            <p>{currentProject?.batchName} <span /> {tab === 'pending' ? '待处理' : '已提交'} {snapshot?.tasks.page.total || 0} 条 <span /> 当前任务额度 {currentProject?.pendingCount || 0}/{currentProject?.claimLimit || 10}</p>
+            <div className="project-kicker"><span className="live-dot" />当前作业数据集</div>
+            <div className="project-title-row"><h1>{currentProject?.name || (loading ? '加载中...' : '暂无可作业数据集')}</h1><div className="project-select-wrap"><select value={projectId} disabled={!projects.length} onChange={(event) => { setLoading(true); setError(''); setSnapshot(null); setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{!projects.length && <option value="">暂无数据集</option>}{projects.map((project) => <option key={project.id} value={project.id}>{project.productName ? `${project.productName} / ` : ''}{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
+            <p>{currentProject?.productName && <>{currentProject.productName} / </>}{currentProject?.batchName} <span /> {tab === 'pending' ? '待处理' : '已提交'} {snapshot?.tasks.page.total || 0} 条 <span /> 当前任务额度 {currentProject?.pendingCount || 0}/{currentProject?.claimLimit || 10}</p>
           </div>
           {!loading && snapshot && (snapshot.recommendedTask ? <div className="recommended-task">
             <div className="recommended-icon"><Sparkles size={19} /></div>

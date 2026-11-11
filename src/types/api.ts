@@ -20,6 +20,8 @@ export interface SessionResponse {
 
 export interface Project {
   id: string
+  productId?: string
+  productName?: string
   code: string
   name: string
   batchName: string
@@ -228,8 +230,47 @@ export interface PasswordResetChallenge {
 
 export type ProjectStatus = 'not-started' | 'running' | 'paused' | 'finished' | 'archived'
 
+export type ProductStatus = 'not_started' | 'running' | 'paused' | 'finished'
+export interface ProductAssociation { id: string; name: string; status?: string }
+export interface Product {
+  id: string
+  name: string
+  description: string
+  status: ProductStatus
+  ownerId: string
+  ownerName: string
+  teams: ProductAssociation[]
+  labelLibraries: ProductAssociation[]
+  operationLibraries: ProductAssociation[]
+  deliveryAt: string
+  annotatorCount: number
+  datasetCount: number
+  videoCount: number
+  pendingAnnotationCount: number
+  duration: number
+  effectiveDurationMs: number
+  invalidDurationMs: number
+  unprocessedDurationMs: number
+  atomicTaskCount: number
+  atomicActionCount: number
+  progressPercent: number
+  createdAt: string
+}
+export interface ProductPayload {
+  name: string
+  description: string
+  deliveryAt: string
+  teamIds: string[]
+  ownerId: string
+  labelLibraryIds: string[]
+  operationLibraryIds: string[]
+}
+export interface ProductQuery { page: number; pageSize: number; name?: string; status?: ProductStatus; teamId?: string; ownerId?: string }
+
 export interface ManagedProject {
   id: string
+  productId?: string
+  productName?: string
   supplier?: VideoSupplier | null
   fleetSupplierId?: string | null
   autoSyncTime?: string | null
@@ -278,6 +319,7 @@ export interface MediaUploadResult {
 
 export interface ProjectPayload {
   projectId?: string
+  productId?: string
   supplierId?: string | null
   fleetSupplierId?: string | null
   name: string
@@ -573,6 +615,8 @@ export interface AnnotationResult {
 }
 
 export interface AnnotationWorkspace {
+  productId?: string
+  productName?: string
   stage?: VideoStage
   completionNode?: TaskNode
   invalidatedAt?: string | null

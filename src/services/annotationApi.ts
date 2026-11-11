@@ -8,6 +8,7 @@ import { request, normalizeScene, normalizeSupplier } from './api'
 import { normalizeInvalidReason } from '../utils/invalidReason'
 import { readSegmentDescriptions, segmentDescriptionPayload } from '../utils/segmentDescription'
 import { readSegmentMeta } from '../utils/segmentPreAnnotation'
+import { productReference } from '../utils/product'
 
 const mockResults = new Map<string, AnnotationResult>()
 const mockRevisions = new Map<string, number>()
@@ -159,13 +160,13 @@ function annotationPayload(rawResult: AnnotationResult) {
 }
 
 async function loadTaskConfiguration(projectId: string) {
-  if (!projectId) return { labels: [], bound: false, operationLibraryId: '', operationLibraryName: '', completionNode: undefined }
+  if (!projectId) return { product: {}, labels: [], bound: false, operationLibraryId: '', operationLibraryName: '', completionNode: undefined }
   const project = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}`)
   const projectData = (project.project || project) as Record<string, unknown>
   const config = (projectData.work_config || {}) as Record<string, unknown>
   const ids = Array.isArray(config.label_library_ids) ? config.label_library_ids : []
   const groups = await Promise.all(ids.map((id) => request<{ items: Array<Record<string, unknown>> }>(`/api/data/label-libraries/${encodeURIComponent(String(id))}/labels?page_size=100`)))
-  return { completionNode: taskNodeFromApi(projectData.completion_node || config.completion_node), labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0, operationLibraryId: String(config.operation_library_id || ''), operationLibraryName: String(config.operation_library_name || '') }
+  return { product: productReference(projectData), completionNode: taskNodeFromApi(projectData.completion_node || config.completion_node), labels: groups.flatMap((group) => group.items).filter((item) => item.enabled !== false).map((item) => ({ id: String(item.id), name: String(item.name || ''), code: String(item.code || ''), color: String(item.color || '#2563EB'), appliesTo: String(item.applies_to || 'goal') as 'goal' | 'action', enabled: true, createdAt: String(item.created_at || '') })), bound: ids.length > 0, operationLibraryId: String(config.operation_library_id || ''), operationLibraryName: String(config.operation_library_name || '') }
 }
 
 function normalizeWorkspace(projectId: string, videoId: string, raw: Record<string, unknown>, labels: AnnotationWorkspace['labels'], labelLibraryBound: boolean, operationLibraryId: string, operationLibraryName: string, viewOnly: boolean, allowCompletedInvalidEdit = false, completionNode?: TaskNode): AnnotationWorkspace {
@@ -372,7 +373,7 @@ export const annotationApi = {
     const workspaceRequest = (async () => {
       const raw = await request<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}`)
       const configuration = await loadTaskConfiguration(projectId)
-      const workspace = normalizeWorkspace(projectId, videoId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly, allowCompletedInvalidEdit, configuration.completionNode)
+      const workspace = { ...normalizeWorkspace(projectId, videoId, raw, configuration.labels, configuration.bound, configuration.operationLibraryId, configuration.operationLibraryName, viewOnly, allowCompletedInvalidEdit, configuration.completionNode), ...configuration.product }
       videoNodes.set(videoContextKey(projectId, videoId), workspace.node)
       return workspace
     })()
