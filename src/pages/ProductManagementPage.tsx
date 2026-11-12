@@ -34,6 +34,7 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
   const [editing, setEditing] = useState<Product>()
   const [form, setForm] = useState<ProductPayload>(emptyForm)
   const [formError, setFormError] = useState('')
+  const [associationSearch, setAssociationSearch] = useState({ teamIds: '', labelLibraryIds: '', operationLibraryIds: '' })
   const [options, setOptions] = useState<{ teams: ProductAssociation[]; owners: ProductAssociation[]; labels: ProductAssociation[]; operations: ProductAssociation[] }>({ teams: [], owners: [], labels: [], operations: [] })
   const [loadedOptions, setLoadedOptions] = useState(-1)
   const [optionsError, setOptionsError] = useState('')
@@ -65,6 +66,7 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
     try {
       const detail = item ? await productApi.detail(item.id) : undefined
       setEditing(detail)
+      setAssociationSearch({ teamIds: '', labelLibraryIds: '', operationLibraryIds: '' })
       setForm(detail ? { name: detail.name, description: detail.description, deliveryAt: detail.deliveryAt, ownerId: detail.ownerId, teamIds: detail.teams.map((team) => team.id), labelLibraryIds: detail.labelLibraries.map((library) => library.id), operationLibraryIds: detail.operationLibraries.map((library) => library.id) } : { ...emptyForm })
       setModalOpen(true)
     } catch (reason) { setToast(reason instanceof Error ? reason.message : '详情加载失败') }
@@ -73,7 +75,12 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
   function toggle(key: 'teamIds' | 'labelLibraryIds' | 'operationLibraryIds', id: string) { setForm((current) => ({ ...current, [key]: current[key].includes(id) ? current[key].filter((value) => value !== id) : [...current[key], id] })) }
   function choices(label: string, key: 'teamIds' | 'labelLibraryIds' | 'operationLibraryIds', available: ProductAssociation[], original: ProductAssociation[] = [], required = false) {
     const all = mergeOptions(available, original)
-    return <fieldset className="product-association-picker wide"><legend>{label}{required && <i className="required-mark"> *</i>}</legend><div>{all.map((item) => <label key={item.id}><input type="checkbox" checked={form[key].includes(item.id)} disabled={readOnly || busy || (additionsOnly && original.some((entry) => entry.id === item.id))} onChange={() => toggle(key, item.id)} />{item.name}</label>)}{!all.length && <span>暂无可选项</span>}</div></fieldset>
+    const keyword = associationSearch[key].trim().toLowerCase()
+    const filtered = all.filter((item) => item.name.toLowerCase().includes(keyword))
+    return <fieldset className="product-association-picker wide"><legend>{label}{required && <i className="required-mark"> *</i>}</legend>
+      <label className="product-association-search"><Search size={14} /><input type="search" aria-label={`搜索${label}`} placeholder={`输入${label}名称搜索`} value={associationSearch[key]} onChange={(event) => setAssociationSearch((current) => ({ ...current, [key]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} /></label>
+      <div>{filtered.map((item) => <label key={item.id}><input type="checkbox" checked={form[key].includes(item.id)} disabled={readOnly || busy || (additionsOnly && original.some((entry) => entry.id === item.id))} onChange={() => toggle(key, item.id)} />{item.name}</label>)}{!filtered.length && <span>{keyword ? '未找到匹配项' : '暂无可选项'}</span>}</div>
+    </fieldset>
   }
   async function save(event: FormEvent) {
     event.preventDefault()

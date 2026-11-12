@@ -215,6 +215,9 @@
 .product-table tbody tr:hover td:last-child { background: #f9fbfe; }
 .product-association-picker { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 5px; }
 .product-association-picker legend { padding: 0 4px; color: #526178; font-size: 12px; }
+.product-association-picker > label.product-association-search { display: flex; margin-bottom: 10px; padding: 0 8px; flex-direction: row; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 4px; color: #8a97a9; }
+.product-association-picker .product-association-search input[type=search] { min-width: 0; height: 30px; padding: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: 12px; }
+.product-association-picker > label.product-association-search:focus-within { border-color: var(--primary); }
 .product-association-picker > div { display: flex; flex-wrap: wrap; gap: 10px 18px; max-height: 150px; overflow: auto; }
 .product-association-picker > div > label { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 12px; }
 .product-association-picker input[type=checkbox] { width: 14px; height: 14px; padding: 0; accent-color: var(--primary); }
