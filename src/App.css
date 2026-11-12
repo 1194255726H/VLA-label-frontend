@@ -207,8 +207,9 @@
 .status-segments.product-status-tabs { padding: 0 18px; height: 46px; min-height: 46px; flex: 0 0 auto; border-bottom: 1px solid var(--border); }
 .product-filters { flex-wrap: wrap; }
 .product-filters select { min-width: 150px; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 4px; color: #607086; background: #fff; }
-.management-table.product-table { min-width: 2100px; }
+.management-table.product-table { min-width: 2500px; }
 .product-table th:first-child { min-width: 220px; }
+.management-table.product-table td.product-description-column { min-width: 220px; max-width: 280px; white-space: normal; overflow-wrap: anywhere; }
 .product-table th:last-child,.product-table td:last-child { position: sticky; right: 0; min-width: 310px; background: #fff; box-shadow: -7px 0 10px rgba(49,76,112,.07); }
 .product-table th:last-child { z-index: 4; background: #edf6ff; }
 .product-table tbody tr:hover td:last-child { background: #f9fbfe; }
