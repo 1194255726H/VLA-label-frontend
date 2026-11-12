@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { Modal } from '../components/Modal'
 import { PaginationJump } from '../components/PaginationJump'
+import { ProductOwnerSelect } from '../components/ProductOwnerSelect'
+import { DeliveryDatePicker } from '../components/DeliveryDatePicker'
 import { labelApi, operationObjectApi, teamApi } from '../services/managementApi'
 import { productApi, productStatusLabels, productTransitions } from '../services/productApi'
 import type { Product, ProductAssociation, ProductPayload, ProductQuery, ProductStatus, SessionResponse } from '../types/api'
@@ -34,6 +36,7 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
   const [editing, setEditing] = useState<Product>()
   const [form, setForm] = useState<ProductPayload>(emptyForm)
   const [formError, setFormError] = useState('')
+  const [deliverySelected, setDeliverySelected] = useState(false)
   const [associationSearch, setAssociationSearch] = useState({ teamIds: '', labelLibraryIds: '', operationLibraryIds: '' })
   const [options, setOptions] = useState<{ teams: ProductAssociation[]; owners: ProductAssociation[]; labels: ProductAssociation[]; operations: ProductAssociation[] }>({ teams: [], owners: [], labels: [], operations: [] })
   const [loadedOptions, setLoadedOptions] = useState(-1)
@@ -41,7 +44,6 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
   const [optionsRefresh, setOptionsRefresh] = useState(0)
   const optionsLoading = loadedOptions !== optionsRefresh
   const readOnly = editing?.status === 'finished'
-  const additionsOnly = editing?.status === 'running' || editing?.status === 'paused'
 
   useEffect(() => {
     let active = true
@@ -66,6 +68,7 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
     try {
       const detail = item ? await productApi.detail(item.id) : undefined
       setEditing(detail)
+      setDeliverySelected(Boolean(detail))
       setAssociationSearch({ teamIds: '', labelLibraryIds: '', operationLibraryIds: '' })
       setForm(detail ? { name: detail.name, description: detail.description, deliveryAt: detail.deliveryAt, ownerId: detail.ownerId, teamIds: detail.teams.map((team) => team.id), labelLibraryIds: detail.labelLibraries.map((library) => library.id), operationLibraryIds: detail.operationLibraries.map((library) => library.id) } : { ...emptyForm })
       setModalOpen(true)
@@ -79,12 +82,13 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
     const filtered = all.filter((item) => item.name.toLowerCase().includes(keyword))
     return <fieldset className="product-association-picker wide"><legend>{label}{required && <i className="required-mark"> *</i>}</legend>
       <label className="product-association-search"><Search size={14} /><input type="search" aria-label={`搜索${label}`} placeholder={`输入${label}名称搜索`} value={associationSearch[key]} onChange={(event) => setAssociationSearch((current) => ({ ...current, [key]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} /></label>
-      <div>{filtered.map((item) => <label key={item.id}><input type="checkbox" checked={form[key].includes(item.id)} disabled={readOnly || busy || (additionsOnly && original.some((entry) => entry.id === item.id))} onChange={() => toggle(key, item.id)} />{item.name}</label>)}{!filtered.length && <span>{keyword ? '未找到匹配项' : '暂无可选项'}</span>}</div>
+      <div>{filtered.map((item) => { const inUse = original.some((entry) => entry.id === item.id && entry.inUse); return <label key={item.id} title={inUse ? '已被子数据集使用，不可移除' : undefined}><input type="checkbox" checked={form[key].includes(item.id)} disabled={readOnly || busy || inUse} onChange={() => toggle(key, item.id)} />{item.name}</label> })}{!filtered.length && <span>{keyword ? '未找到匹配项' : '暂无可选项'}</span>}</div>
     </fieldset>
   }
   async function save(event: FormEvent) {
     event.preventDefault()
     if (!canManage || busy || readOnly || optionsLoading || optionsError) return
+    if (!deliverySelected) { setFormError('请选择交付时间或无固定日期'); return }
     setBusy(true); setFormError('')
     try { await productApi.save(form, editing?.id); setModalOpen(false); setToast(editing ? '生产项目已更新' : '生产项目创建成功'); setRefresh((value) => value + 1) }
     catch (reason) { setFormError(reason instanceof Error ? reason.message : '保存失败') }
@@ -126,12 +130,12 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
   </section></section>
     {modalOpen && <Modal title={`${readOnly || !canManage ? '查看' : editing ? '编辑' : '创建'}生产项目`} onClose={() => { if (!busy) setModalOpen(false) }} footer={<><button type="button" className="secondary-button" disabled={busy} onClick={() => setModalOpen(false)}>{readOnly || !canManage ? '关闭' : '取消'}</button>{!readOnly && canManage && <button type="submit" form="product-form" className="primary-button" disabled={busy || optionsLoading || Boolean(optionsError)}>{busy ? '保存中...' : '保存'}</button>}</>}>
       <form id="product-form" className="project-form" onSubmit={save}>
-        {additionsOnly && <p className="project-readonly-notice">进行中或暂停时，团队、标签库和对象库只能新增，不能移除；数据集状态不会自动改变。</p>}
+        {editing && !readOnly && <p className="project-readonly-notice">已被子数据集使用的团队、标签库和对象库不可移除；未使用项可调整。数据集状态不会自动改变。</p>}
         {optionsError && <p className="inline-error">{optionsError} <button type="button" onClick={() => setOptionsRefresh((value) => value + 1)}>重新加载选项</button></p>}
         <fieldset className="project-form-fields" disabled={busy || optionsLoading || readOnly || !canManage}><div className="modal-form-grid">
           <label><span>生产项目名称 <i className="required-mark">*</i></span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-          <label><span>交付时间 <i className="required-mark">*</i></span><input type="date" required value={form.deliveryAt} onChange={(event) => setForm({ ...form, deliveryAt: event.target.value })} /></label>
-          <label><span>负责人 <i className="required-mark">*</i></span><select required value={form.ownerId} onChange={(event) => setForm({ ...form, ownerId: event.target.value })}><option value="">请选择项目经理</option>{mergeOptions(options.owners, editing?.ownerId ? [{ id: editing.ownerId, name: editing.ownerName }] : []).map((owner) => <option value={owner.id} key={owner.id}>{owner.name}</option>)}</select></label>
+          <div className="project-field"><span>交付时间 <i className="required-mark">*</i></span><DeliveryDatePicker value={form.deliveryAt} noFixedDate={deliverySelected && !form.deliveryAt} disabled={busy || optionsLoading || Boolean(readOnly) || !canManage} onChange={(deliveryAt, noFixedDate) => { setForm((current) => ({ ...current, deliveryAt })); setDeliverySelected(Boolean(deliveryAt) || noFixedDate) }} /></div>
+          <div className="project-field"><span>项目负责人 <i className="required-mark">*</i></span><ProductOwnerSelect value={form.ownerId} options={mergeOptions(options.owners, editing?.ownerId ? [{ id: editing.ownerId, name: editing.ownerName }] : [])} disabled={busy || Boolean(readOnly) || !canManage} loading={optionsLoading} onChange={(ownerId) => setForm((current) => ({ ...current, ownerId }))} /></div>
           <label className="wide"><span>描述</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
           {choices('团队', 'teamIds', options.teams, editing?.teams, true)}
           {choices('标签库', 'labelLibraryIds', options.labels, editing?.labelLibraries)}

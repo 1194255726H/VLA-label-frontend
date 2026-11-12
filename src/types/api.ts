@@ -231,7 +231,7 @@ export interface PasswordResetChallenge {
 export type ProjectStatus = 'not-started' | 'running' | 'paused' | 'finished' | 'archived'
 
 export type ProductStatus = 'not_started' | 'running' | 'paused' | 'finished'
-export interface ProductAssociation { id: string; name: string; status?: string }
+export interface ProductAssociation { id: string; name: string; status?: string; inUse?: boolean }
 export interface Product {
   id: string
   name: string

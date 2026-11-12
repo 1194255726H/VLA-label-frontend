@@ -7,7 +7,7 @@ import { projectApi } from './managementApi'
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' ? value as Record<string, unknown> : {} }
 function number(value: unknown) { const result = Number(value); return Number.isFinite(result) ? result : 0 }
 function associations(value: unknown): ProductAssociation[] {
-  return Array.isArray(value) ? value.map((item) => { const data = record(item); return { id: String(data.id), name: String(data.name || ''), status: data.status == null ? undefined : String(data.status) } }) : []
+  return Array.isArray(value) ? value.map((item) => { const data = record(item); return { id: String(data.id), name: String(data.name || ''), status: data.status == null ? undefined : String(data.status), inUse: data.in_use === true } }) : []
 }
 export function normalizeProduct(value: unknown): Product {
   const data = record(value)
@@ -32,10 +32,14 @@ const clone = <T,>(value: T): T => structuredClone(value)
 async function mockStats(product: Product) {
   const datasets = await projectApi.list(product.id)
   const sum = (fn: (item: typeof datasets[number]) => number) => datasets.reduce((total, item) => total + fn(item), 0)
-  return { ...clone(product), datasetCount: datasets.length, videoCount: sum((item) => item.dataCount), duration: sum((item) => item.duration || item.selectedDuration + item.unselectedDuration), effectiveDurationMs: sum((item) => item.validDuration * 1000), invalidDurationMs: sum((item) => item.invalidDuration * 1000), atomicTaskCount: sum((item) => item.goalCount), atomicActionCount: sum((item) => item.actionCount) }
+  return { ...clone(product),
+    teams: product.teams.map((team) => ({ ...team, inUse: datasets.some((item) => (item.teamIds || []).includes(team.id) || item.teams.includes(team.name)) })),
+    labelLibraries: product.labelLibraries.map((library) => ({ ...library, inUse: datasets.some((item) => item.labelLibraryIds.includes(library.id)) })),
+    operationLibraries: product.operationLibraries.map((library) => ({ ...library, inUse: datasets.some((item) => item.operationLibraryId === library.id) })),
+    datasetCount: datasets.length, videoCount: sum((item) => item.dataCount), duration: sum((item) => item.duration || item.selectedDuration + item.unselectedDuration), effectiveDurationMs: sum((item) => item.validDuration * 1000), invalidDurationMs: sum((item) => item.invalidDuration * 1000), atomicTaskCount: sum((item) => item.goalCount), atomicActionCount: sum((item) => item.actionCount) }
 }
 function validate(payload: ProductPayload) {
-  if (!payload.name.trim() || !payload.ownerId || !payload.deliveryAt || !payload.teamIds.length || !payload.operationLibraryIds.length) throw new Error('请填写名称、负责人、交付时间，并选择团队和操作对象库')
+  if (!payload.name.trim() || !payload.ownerId || !payload.teamIds.length || !payload.operationLibraryIds.length) throw new Error('请填写名称、负责人，并选择团队和操作对象库')
 }
 export const productApi = {
   async list(query: ProductQuery): Promise<{ items: Product[]; total: number; pages: number }> {
@@ -61,16 +65,21 @@ export const productApi = {
       if (mockProducts.some((item) => item.id !== id && item.name === payload.name.trim())) throw new Error('生产项目名称已存在')
       const existing = id ? await this.detail(id) : undefined
       if (existing?.status === 'finished') throw new Error('已结束生产项目只读')
-      if (existing && ['running', 'paused'].includes(existing.status) && [
+      if (existing && [
         [existing.teams, payload.teamIds], [existing.labelLibraries, payload.labelLibraryIds], [existing.operationLibraries, payload.operationLibraryIds],
-      ].some(([old, ids]) => (old as ProductAssociation[]).some((item) => !(ids as string[]).includes(item.id)))) throw new Error('进行中或暂停的生产项目只能新增关联，不能移除')
-      const raw = { id: id || String(Date.now()), name: payload.name.trim(), description: payload.description, delivery_at: payload.deliveryAt, status: existing?.status || 'not_started', owner: { id: payload.ownerId, display_name: mockMembers.find((member) => member.accountId === payload.ownerId)?.name }, teams: payload.teamIds.map((teamId) => ({ id: teamId, name: mockTeams.find((team) => team.id === teamId)?.name })), label_libraries: payload.labelLibraryIds.map((libraryId) => ({ id: libraryId, name: mockLabelLibraries.find((library) => library.id === libraryId)?.name })), operation_libraries: payload.operationLibraryIds.map((libraryId) => ({ id: libraryId, name: '常用操作对象库' })) }
+      ].some(([old, ids]) => (old as ProductAssociation[]).some((item) => item.inUse && !(ids as string[]).includes(item.id)))) throw new Error('已被子数据集使用的团队、标签库或对象库不能移除')
+      const raw = { id: id || String(Date.now()), name: payload.name.trim(), description: payload.description, delivery_at: payload.deliveryAt || null, status: existing?.status || 'not_started', owner: { id: payload.ownerId, display_name: mockMembers.find((member) => member.accountId === payload.ownerId)?.name }, teams: payload.teamIds.map((teamId) => ({ id: teamId, name: mockTeams.find((team) => team.id === teamId)?.name })), label_libraries: payload.labelLibraryIds.map((libraryId) => ({ id: libraryId, name: mockLabelLibraries.find((library) => library.id === libraryId)?.name })), operation_libraries: payload.operationLibraryIds.map((libraryId) => ({ id: libraryId, name: '常用操作对象库' })) }
       const next = normalizeProduct(raw)
       mockProducts = existing ? mockProducts.map((item) => item.id === id ? next : item) : [next, ...mockProducts]
       return
     }
-    const body = { name: payload.name.trim(), description: payload.description, delivery_at: payload.deliveryAt, owner_id: Number(payload.ownerId), team_ids: payload.teamIds.map(Number), label_library_ids: payload.labelLibraryIds.map(Number), operation_library_ids: payload.operationLibraryIds.map(Number) }
-    await request(id ? `/api/products/${encodeURIComponent(id)}` : '/api/products/', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) })
+    const body = { name: payload.name.trim(), description: payload.description, delivery_at: payload.deliveryAt || null, owner_id: Number(payload.ownerId), team_ids: payload.teamIds.map(Number), label_library_ids: payload.labelLibraryIds.map(Number), operation_library_ids: payload.operationLibraryIds.map(Number) }
+    try {
+      await request(id ? `/api/products/${encodeURIComponent(id)}` : '/api/products/', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) })
+    } catch (failure) {
+      if (failure instanceof Error && (failure as Error & { code?: string }).code === 'product_delivery_before_project') failure.message = '交付日期不得早于数据集'
+      throw failure
+    }
   },
   async setStatus(id: string, status: ProductStatus) {
     if (runtimeConfig.apiMode === 'mock') { const item = await this.detail(id); if (!productTransitions[item.status].includes(status)) throw new Error('不允许的状态流转'); mockProducts = mockProducts.map((product) => product.id === id ? { ...product, status } : product); return }
