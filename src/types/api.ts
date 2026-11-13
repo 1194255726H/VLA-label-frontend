@@ -283,6 +283,7 @@ export interface ManagedProject {
   teamIds?: string[]
   memberCount: number
   dataCount: number
+  pendingAnnotationCount: number
   duration?: number
   selectedDuration: number
   validDuration: number
