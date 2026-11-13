@@ -1,4 +1,4 @@
-import { ArrowLeft, Archive, ChevronDown, CircleAlert, Edit3, Eye, Pause, Play, Plus, RotateCcw, Search, Square, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ChevronDown, CircleAlert, Edit3, Eye, Pause, Play, Plus, RotateCcw, Search, Square, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { productApi } from '../services/productApi'
@@ -11,14 +11,20 @@ import { PaginationJump } from '../components/PaginationJump'
 import { fleetApi, labelApi, mediaApi, operationObjectApi, projectApi, teamApi } from '../services/managementApi'
 import type { FleetSupplierOption, LabelLibrary, ManagedProject, Member, OperationObjectLibrary, Product, ProjectPayload, ProjectStatus, SessionResponse, Team } from '../types/api'
 import { nodeToneByLabel } from '../utils/node'
+import { datasetDeliveryRisk, deliveryRiskLabels, type DeliveryRisk } from '../utils/deliveryRisk'
 
 const statusLabels: Record<ProjectStatus, string> = { 'not-started': '未启动', running: '进行中', paused: '已暂停', finished: '已结束', archived: '已归档' }
 const statusActions: Record<ProjectStatus, Array<{ label: string; status: ProjectStatus; icon: typeof Play }>> = {
-  'not-started': [{ label: '启动', status: 'running', icon: Play }], running: [{ label: '暂停', status: 'paused', icon: Pause }, { label: '结束', status: 'finished', icon: Square }], paused: [{ label: '恢复', status: 'running', icon: RotateCcw }, { label: '结束', status: 'finished', icon: Square }], finished: [{ label: '归档', status: 'archived', icon: Archive }], archived: [],
+  'not-started': [{ label: '启动', status: 'running', icon: Play }], running: [{ label: '暂停', status: 'paused', icon: Pause }, { label: '结束', status: 'finished', icon: Square }], paused: [{ label: '恢复', status: 'running', icon: RotateCcw }, { label: '结束', status: 'finished', icon: Square }], finished: [], archived: [],
 }
 const emptyForm: ProjectPayload = { supplierId: '', fleetSupplierId: '', name: '', desc: '', teams: [], owner: '', deliveryAt: '', completionNode: '验收', modelGenerationNode: '标注', assignmentStrategy: 'manual_claim', labelLibraryIds: [], operationLibraryId: '', annotationGuideline: null }
 const nodeOrder = ['标注', '质检', '审核', '验收'] as const
 function localToday() { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}` }
+
+function DatasetDeliveryDate({ item, today }: { item: ManagedProject; today: string }) {
+  const risk = datasetDeliveryRisk(item.deliveryAt, item.status, today)
+  return <div className="dataset-delivery-date"><span className={risk === 'overdue' ? 'risk-date' : undefined}>{item.deliveryAt || '无固定日期'}</span>{risk && <span className={`delivery-risk-tag ${risk}`}>{deliveryRiskLabels[risk]}</span>}</div>
+}
 
 function duration(value: number) {
   if (!Number.isFinite(value)) return '-'
@@ -44,6 +50,9 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   const [keywordInput, setKeywordInput] = useState('')
   const [keyword, setKeyword] = useState('')
   const [team, setTeam] = useState('')
+  const [riskInput, setRiskInput] = useState<DeliveryRisk | ''>('')
+  const [risk, setRisk] = useState<DeliveryRisk | ''>('')
+  const [today, setToday] = useState(localToday)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [modalOpen, setModalOpen] = useState(false)
@@ -102,9 +111,15 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
     return () => { active = false }
   }, [productId])
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(''), 2500); return () => clearTimeout(timer) }, [toast])
+  useEffect(() => {
+    const refreshDate = () => setToday(localToday())
+    const timer = window.setInterval(refreshDate, 60000)
+    window.addEventListener('focus', refreshDate)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refreshDate) }
+  }, [])
 
   const counts = useMemo(() => Object.fromEntries(Object.keys(statusLabels).map((key) => [key, items.filter((item) => item.status === key).length])), [items])
-  const filtered = useMemo(() => items.filter((item) => (status === 'all' || item.status === status) && (!keyword || `${item.name}${item.code}`.toLowerCase().includes(keyword.toLowerCase())) && (!team || item.teams.includes(team))), [items, keyword, status, team])
+  const filtered = useMemo(() => items.filter((item) => (status === 'all' || item.status === status) && (!keyword || `${item.name}${item.code}`.toLowerCase().includes(keyword.toLowerCase())) && (!team || item.teams.includes(team)) && (!risk || datasetDeliveryRisk(item.deliveryAt, item.status, today) === risk)), [items, keyword, status, team, risk, today])
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const currentPage = Math.min(page, pages)
   const visibleProjects = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
@@ -165,7 +180,6 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   }
   async function changeStatus(item: ManagedProject, next: ProjectStatus) {
     if (datasetStatusBlocked) return setToast('项目未进行中，不能变更数据集状态')
-    if (next === 'archived' && !window.confirm(`确认归档数据集“${item.name}”？归档后将不能再编辑。`)) return
     try { setItems(await projectApi.setStatus(item.id, next, productId)); setToast(`${item.name} ${statusLabels[next]}`) } catch (reason) { setToast(reason instanceof Error ? reason.message : '状态变更失败') }
   }
   async function removeProject(item: ManagedProject) { if (!window.confirm(`确认删除数据集“${item.name}”？`)) return; try { setItems(await projectApi.delete(item.id, productId)); setToast('数据集已删除') } catch (reason) { setToast(reason instanceof Error ? reason.message : '项目删除失败') } }
@@ -177,16 +191,17 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
         {product && <div className="project-binding-summary"><span>生产项目负责人：<b>{product.ownerName || '-'}</b></span><span>交付时间：<b>{product.deliveryAt || '-'}</b></span><span>配置范围：团队 {product.teams.length} 个 · 标签库 {product.labelLibraries.length} 个 · 对象库 {product.operationLibraries.length} 个</span></div>}
         {loadError && <div className="error-banner"><CircleAlert size={18} />{loadError}</div>}
         <header className="management-toolbar">
-          <div className="status-segments"><button className={status === 'all' ? 'active' : ''} onClick={() => { setStatus('all'); setPage(1) }} type="button">全部 <span>{items.length}</span></button>{Object.entries(statusLabels).map(([key, label]) => <button className={status === key ? 'active' : ''} onClick={() => { setStatus(key as ProjectStatus); setPage(1) }} type="button" key={key}>{label} <span>{counts[key] || 0}</span></button>)}</div>
+          <div className="status-segments"><button className={status === 'all' ? 'active' : ''} onClick={() => { setStatus('all'); setPage(1) }} type="button">全部 <span>{items.length}</span></button>{Object.entries(statusLabels).filter(([key]) => key !== 'archived').map(([key, label]) => <button className={status === key ? 'active' : ''} onClick={() => { setStatus(key as ProjectStatus); setPage(1) }} type="button" key={key}>{label} <span>{counts[key] || 0}</span></button>)}</div>
           {canCreateProject && product?.id === productId && !loading && product.status !== 'finished' && <button className="primary-button" type="button" disabled={product.status === 'paused'} title={product.status === 'paused' ? '生产项目已暂停，暂不能创建数据集' : undefined} onClick={openCreate}><Plus size={16} />创建数据集</button>}
         </header>
-        <div className="management-filters">
+        <div className="management-filters dataset-filters">
           <label><span>数据集名称</span><div className="filter-control"><Search size={16} /><input value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="请输入数据集名称或编号" /></div></label>
           <label><span>所属团队</span><div className="filter-control select"><select value={team} onChange={(event) => { setTeam(event.target.value); setPage(1) }}><option value="">全部团队</option>{teams.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select><ChevronDown size={14} /></div></label>
-          <button className="primary-button compact" type="button" onClick={() => { setKeyword(keywordInput.trim()); setPage(1) }}>查询</button><button className="secondary-button compact" type="button" onClick={() => { setKeywordInput(''); setKeyword(''); setTeam(''); setPage(1) }}>重置</button>
+          <label><span>交付风险</span><div className="filter-control select"><select aria-label="交付风险" value={riskInput} onChange={(event) => setRiskInput(event.target.value as DeliveryRisk | '')}><option value="">请选择交付风险</option>{Object.entries(deliveryRiskLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><ChevronDown size={14} /></div></label>
+          <button className="primary-button compact" type="button" onClick={() => { setKeyword(keywordInput.trim()); setRisk(riskInput); setPage(1) }}>查询</button><button className="secondary-button compact" type="button" onClick={() => { setKeywordInput(''); setKeyword(''); setTeam(''); setRiskInput(''); setRisk(''); setPage(1) }}>重置</button>
         </div>
         <div className="management-table-wrap"><table className="management-table project-table dataset-table"><thead><tr><th>数据集名称</th><th>数据集描述</th><th>供应商</th><th>最近自动同步时间</th><th>状态</th><th>团队</th><th>标注人数</th><th>数据量</th><th>待标注量</th><th>视频时长</th><th>有效片段时长</th><th>无效片段时长</th><th title="视频时长 − 有效片段时长 − 无效片段时长">未处理时长</th><th>单次任务数</th><th>小目标数</th><th>完成节点</th><th>进度</th><th>负责人</th><th>创建时间</th><th>交付时间</th><th>操作</th></tr></thead><tbody>
-          {loading ? <tr><td colSpan={21}><div className="management-empty">正在加载数据集...</div></td></tr> : visibleProjects.map((item) => <tr key={item.id}><td><div className="entity-name"><strong>{item.name}</strong><small>{item.code}</small></div></td><td className="dataset-description-column" title={item.desc || undefined}>{item.desc || '-'}</td><td title={item.supplier?.name}>{item.supplier?.name || '未绑定（手动同步）'}</td><td>{item.autoSyncTime ? formatDateTime(item.autoSyncTime) : '-'}</td><td><span className={`project-status ${item.status}`}>{statusLabels[item.status]}</span></td><td title={item.teams.join('、')}>{item.teams.join('、')}</td><td>{item.memberCount}</td><td>{item.dataCount}</td><td>{item.pendingAnnotationCount ?? 0}</td><td>{duration(item.duration || 0)}</td><td>{duration(item.validDuration)}</td><td>{duration(item.invalidDuration)}</td><td>{duration(Math.max(0, (item.duration || 0) - item.validDuration - item.invalidDuration))}</td><td>{item.goalCount}</td><td>{item.actionCount}</td><td><span className={`node-tag ${nodeToneByLabel(item.completionNode)}`}>{item.completionNode}</span></td><td><div className="progress-cell"><span><i style={{ width: `${item.progress}%` }} /></span><b>{item.progress}%</b></div></td><td>{item.owner}</td><td>{item.createdAt ? formatDateTime(item.createdAt) : '-'}</td><td><span className={new Date(item.deliveryAt) < new Date() && item.status !== 'finished' ? 'risk-date' : ''}>{item.deliveryAt || '-'}</span></td><td><div className="row-actions"><button type="button" onClick={() => { window.location.hash = `/projects/${encodeURIComponent(item.id)}/annotation-data` }}><Eye size={15} />查看</button><button type="button" disabled={item.status === 'archived' || Boolean(openingProjectId)} title={item.status === 'archived' ? '已归档数据集不可编辑' : item.status === 'running' ? '进行中数据集仅可查看，暂停后可编辑' : item.status === 'finished' ? '已结束数据集仅可查看' : undefined} onClick={() => void openEdit(item)}><Edit3 size={15} />{openingProjectId === item.id ? '加载中' : '编辑'}</button>{statusActions[item.status].map(({ label, status: next, icon: Icon }) => <button key={label} className="dataset-status-action" type="button" disabled={datasetStatusBlocked} title={datasetStatusBlocked ? '项目未进行中，不能变更数据集状态' : undefined} onClick={() => changeStatus(item, next)}><Icon size={15} />{label}</button>)}<button className="danger-action" type="button" onClick={() => removeProject(item)}><Trash2 size={15} />删除</button></div></td></tr>)}
+          {loading ? <tr><td colSpan={21}><div className="management-empty">正在加载数据集...</div></td></tr> : visibleProjects.map((item) => <tr key={item.id}><td><div className="entity-name"><strong>{item.name}</strong><small>{item.code}</small></div></td><td className="dataset-description-column" title={item.desc || undefined}>{item.desc || '-'}</td><td title={item.supplier?.name}>{item.supplier?.name || '未绑定（手动同步）'}</td><td>{item.autoSyncTime ? formatDateTime(item.autoSyncTime) : '-'}</td><td><span className={`project-status ${item.status}`}>{statusLabels[item.status]}</span></td><td title={item.teams.join('、')}>{item.teams.join('、')}</td><td>{item.memberCount}</td><td>{item.dataCount}</td><td>{item.pendingAnnotationCount ?? 0}</td><td>{duration(item.duration || 0)}</td><td>{duration(item.validDuration)}</td><td>{duration(item.invalidDuration)}</td><td>{duration(Math.max(0, (item.duration || 0) - item.validDuration - item.invalidDuration))}</td><td>{item.goalCount}</td><td>{item.actionCount}</td><td><span className={`node-tag ${nodeToneByLabel(item.completionNode)}`}>{item.completionNode}</span></td><td><div className="progress-cell"><span><i style={{ width: `${item.progress}%` }} /></span><b>{item.progress}%</b></div></td><td>{item.owner}</td><td>{item.createdAt ? formatDateTime(item.createdAt) : '-'}</td><td><DatasetDeliveryDate item={item} today={today} /></td><td><div className="row-actions"><button type="button" onClick={() => { window.location.hash = `/projects/${encodeURIComponent(item.id)}/annotation-data` }}><Eye size={15} />查看</button><button type="button" disabled={item.status === 'archived' || Boolean(openingProjectId)} title={item.status === 'archived' ? '已归档数据集不可编辑' : item.status === 'running' ? '进行中数据集仅可查看，暂停后可编辑' : item.status === 'finished' ? '已结束数据集仅可查看' : undefined} onClick={() => void openEdit(item)}><Edit3 size={15} />{openingProjectId === item.id ? '加载中' : '编辑'}</button>{statusActions[item.status].map(({ label, status: next, icon: Icon }) => <button key={label} className="dataset-status-action" type="button" disabled={datasetStatusBlocked} title={datasetStatusBlocked ? '项目未进行中，不能变更数据集状态' : undefined} onClick={() => changeStatus(item, next)}><Icon size={15} />{label}</button>)}<button className="danger-action" type="button" onClick={() => removeProject(item)}><Trash2 size={15} />删除</button></div></td></tr>)}
           {!loading && !filtered.length && <tr><td colSpan={21}><div className="management-empty"><CircleAlert size={32} />未找到匹配数据集</div></td></tr>}
         </tbody></table></div>
         <footer className="management-footer"><span>共 {filtered.length} 条</span><PaginationJump page={page} pages={pages} disabled={loading} onChange={setPage} pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></footer>

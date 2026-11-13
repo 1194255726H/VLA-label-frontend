@@ -1,12 +1,13 @@
 import { VideoInvalidationBadge } from '../components/VideoInvalidationBadge'
 import { workTypeLabels } from '../utils/videoInvalidation'
 import {
-  ArrowRight, ChevronDown, CircleAlert,
+  ArrowRight, CircleAlert,
   ListFilter, Play, RefreshCw, Sparkles,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
+import { SearchableSelect } from '../components/SearchableSelect'
 import { DailyWorkStats } from '../components/DailyWorkStats'
 import { PaginationJump } from '../components/PaginationJump'
 import { VideoSceneEditor } from '../components/VideoSceneEditor'
@@ -62,7 +63,7 @@ function TaskTable({ items, tab, loading, onError, onScenesUpdated }: { items: V
         <thead><tr>
           <th className="video-name-column">视频名称</th><th className="scene-info-column">场景信息</th><th className="supplier-column">供应商</th><th>状态</th><th>当前节点</th>
           {tab === 'submitted' && <th>提交节点</th>}
-          <th>流转类型</th><th>视频时长</th><th className="segment-duration-column">有效片段时长</th><th className="segment-duration-column">无效片段时长</th><th className="count-column">单次任务数</th><th className="count-column">小目标数</th><th className="assignee-column">当前处理人</th><th className="date-column">创建时间</th><th className="date-column">更新时间</th><th className="action-column">操作</th>
+          <th>流转类型</th><th>视频时长</th><th className="segment-duration-column">有效时长</th><th className="segment-duration-column">无效时长</th><th className="count-column">单次任务数</th><th className="count-column">小目标数</th><th className="assignee-column">当前处理人</th><th className="date-column">创建时间</th><th className="date-column">更新时间</th><th className="action-column">操作</th>
         </tr></thead>
         <tbody>
           {!loading && (items.length === 0 ? <tr><td colSpan={columnCount}><div className="table-state"><ListFilter size={34} /><span>当前暂无视频</span></div></td></tr> : items.map((video, index) => {
@@ -217,7 +218,7 @@ export function WorkbenchPage({ session }: { session: SessionResponse }) {
         <section className="project-hero panel">
           <div className="project-hero-main">
             <div className="project-kicker"><span className="live-dot" />当前作业数据集</div>
-            <div className="project-title-row"><h1>{currentProject?.name || (loading ? '加载中...' : '暂无可作业数据集')}</h1><div className="project-select-wrap"><select value={projectId} disabled={!projects.length} onChange={(event) => { setLoading(true); setError(''); setSnapshot(null); setProjectId(event.target.value); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }}>{!projects.length && <option value="">暂无数据集</option>}{projects.map((project) => <option key={project.id} value={project.id}>{project.productName ? `${project.productName} / ` : ''}{project.name}</option>)}</select><ChevronDown size={15} /></div></div>
+            <div className="project-title-row"><h1>{currentProject?.name || (loading ? '加载中...' : '暂无可作业数据集')}</h1><div className="project-select-wrap"><SearchableSelect label="选择作业数据集" value={projectId} options={projects.map((project) => ({ id: project.id, name: `${project.productName ? `${project.productName} / ` : ''}${project.name}` }))} disabled={!projects.length} placeholder="输入数据集名称搜索" emptyText="暂无数据集" onChange={(id) => { if (id === projectId) return; setLoading(true); setError(''); setSnapshot(null); setProjectId(id); setPageNo(1); setTabTotals({ pending: 0, submitted: 0 }) }} /></div></div>
             <p>{currentProject?.productName && <>{currentProject.productName} / </>}{currentProject?.batchName} <span /> {tab === 'pending' ? '待处理' : '已提交'} {snapshot?.tasks.page.total || 0} 条 <span /> 当前任务额度 {currentProject?.pendingCount || 0}/{currentProject?.claimLimit || 10}</p>
           </div>
           {!loading && snapshot && (snapshot.recommendedTask ? <div className="recommended-task">
