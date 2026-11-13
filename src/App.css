@@ -261,6 +261,7 @@
 .entity-name { display: flex; flex-direction: column; gap: 4px; }.entity-name strong, .management-table td > strong { color: #29384e; }.entity-name small { color: #95a2b3; font-size: 10px; }
 .management-table code { padding: 3px 6px; border-radius: 3px; color: #44617e; background: #f1f5f9; font-size: 11px; }
 .management-table .row-actions { gap: 10px; }.management-table .row-actions button { display: inline-flex; padding: 2px 0; align-items: center; gap: 3px; border: 0; color: #2768c7; background: transparent; white-space: nowrap; font-size: 11px; }.management-table .row-actions .danger-action { color: #cf3f50; }
+.management-table .row-actions .dataset-status-action:disabled { color: #aab6c8; cursor: not-allowed; }
 .current-team-actions { display: flex; gap: 6px; padding: 0 12px 12px; }.current-team-actions .edit-current-team { flex: 1; margin: 0; justify-content: center; }.current-team-actions .danger-action { color: #cf3f50; }
 .management-footer { display: flex; min-height: 52px; padding: 0 18px; flex: 0 0 auto; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); color: #7b899c; font-size: 12px; }
 .pagination-with-size { display: flex; align-items: center; gap: 10px; }
