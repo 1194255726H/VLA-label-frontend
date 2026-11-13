@@ -114,7 +114,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
     catch (reason) { setToast(reason instanceof Error ? reason.message : '标注配置加载失败') }
     finally { setLoadingLabelLibraries(false) }
   }
-  function openCreate() { if (!product || product.status === 'finished') return; setOriginalOwner({ id: product.ownerId, name: product.ownerName }); setEditingId(undefined); setEditingSupplier(undefined); setOriginalSupplier({ supplierId: '', fleetSupplierId: '' }); void loadSupplierOptions(); setEditingReadOnly(false); setForm({ ...emptyForm, productId, owner: product.ownerId, deliveryAt: product.deliveryAt, teams: product.teams.slice(0, 1).map((team) => team.id), operationLibraryId: product.operationLibraries[0]?.id || '' }); setLabelKeyword(''); setLabelPickerOpen(false); setUploadingGuideline(false); setStep(1); setError(''); setModalOpen(true); void loadLabelLibraryOptions() }
+  function openCreate() { if (!product || product.status === 'finished' || product.status === 'paused') return; setOriginalOwner({ id: product.ownerId, name: product.ownerName }); setEditingId(undefined); setEditingSupplier(undefined); setOriginalSupplier({ supplierId: '', fleetSupplierId: '' }); void loadSupplierOptions(); setEditingReadOnly(false); setForm({ ...emptyForm, productId, owner: product.ownerId, deliveryAt: product.deliveryAt, teams: product.teams.slice(0, 1).map((team) => team.id), operationLibraryId: product.operationLibraries[0]?.id || '' }); setLabelKeyword(''); setLabelPickerOpen(false); setUploadingGuideline(false); setStep(1); setError(''); setModalOpen(true); void loadLabelLibraryOptions() }
   async function openEdit(item: ManagedProject) {
     if (item.status === 'archived') return setToast('已归档数据集不可编辑')
     setEditingReadOnly(!['not-started', 'paused'].includes(item.status))
@@ -143,6 +143,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
     event.preventDefault(); setError('')
     if (savingProject || !product) return
     if (!editingId && product.status === 'finished') return setError('已结束生产项目不能创建数据集')
+    if (!editingId && product.status === 'paused') return setError('生产项目已暂停，暂不能创建数据集')
     if (form.deliveryAt && product.deliveryAt && form.deliveryAt > product.deliveryAt) return setError('数据集交付时间不能晚于生产项目交付时间')
     if (form.teams.some((id) => !product.teams.some((team) => team.id === id)) || form.labelLibraryIds.some((id) => !product.labelLibraries.some((library) => library.id === id)) || form.operationLibraryId && !product.operationLibraries.some((library) => library.id === form.operationLibraryId)) return setError('数据集的团队、标签库和对象库必须属于当前生产项目')
     if (editingReadOnly) return
@@ -175,7 +176,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
         {loadError && <div className="error-banner"><CircleAlert size={18} />{loadError}</div>}
         <header className="management-toolbar">
           <div className="status-segments"><button className={status === 'all' ? 'active' : ''} onClick={() => { setStatus('all'); setPage(1) }} type="button">全部 <span>{items.length}</span></button>{Object.entries(statusLabels).map(([key, label]) => <button className={status === key ? 'active' : ''} onClick={() => { setStatus(key as ProjectStatus); setPage(1) }} type="button" key={key}>{label} <span>{counts[key] || 0}</span></button>)}</div>
-          {canCreateProject && product?.id === productId && !loading && product.status !== 'finished' && <button className="primary-button" type="button" onClick={openCreate}><Plus size={16} />创建数据集</button>}
+          {canCreateProject && product?.id === productId && !loading && product.status !== 'finished' && <button className="primary-button" type="button" disabled={product.status === 'paused'} title={product.status === 'paused' ? '生产项目已暂停，暂不能创建数据集' : undefined} onClick={openCreate}><Plus size={16} />创建数据集</button>}
         </header>
         <div className="management-filters">
           <label><span>数据集名称</span><div className="filter-control"><Search size={16} /><input value={keywordInput} onChange={(event) => setKeywordInput(event.target.value)} placeholder="请输入数据集名称或编号" /></div></label>
