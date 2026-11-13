@@ -67,7 +67,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const businessFailed = payload?.success === false || (typeof payload?.code === 'string' && payload.code !== 'ok')
   if (!response.ok || businessFailed) {
     const validationMessages = collectErrorMessages(payload?.errors)
-    const error = new Error(validationMessages.length ? validationMessages.join('；') : payload?.message || `请求失败（${response.status}）`) as Error & { code?: string; status?: number; errors?: ImportValidationError[] }
+    const productFinishMessage = payload?.code === 'product_projects_not_finished' && typeof payload.message === 'string' ? payload.message.trim() : ''
+    const error = new Error(productFinishMessage || (validationMessages.length ? validationMessages.join('；') : payload?.message || `请求失败（${response.status}）`)) as Error & { code?: string; status?: number; errors?: ImportValidationError[] }
     error.code = payload?.code
     error.status = response.status
     if (Array.isArray(payload?.errors)) {
