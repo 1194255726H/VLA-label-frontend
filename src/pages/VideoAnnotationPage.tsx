@@ -1,3 +1,4 @@
+import { AnnotationGuidelineButton } from '../components/AnnotationGuidelineButton'
 import { VideoInvalidationBadge } from '../components/VideoInvalidationBadge'
 import { cancellationMessage } from '../utils/videoInvalidation'
 import {
@@ -1654,6 +1655,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
           <button className="comment-all-button" type="button" onClick={() => commentsOpen ? setCommentsOpen(false) : openComments()}>全部批注 <b>{videoComments.length}</b></button>
         }
         {canEditLaterStages ? <button className={`editing-badge annotation-edit-switch${editModeEnabled ? ' enabled' : ''}`} type="button" role="switch" aria-label="编辑模式" aria-checked={editModeEnabled} disabled={hardReadonly || saving || submitting || returning || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId)} onClick={toggleEditMode}><span>编辑模式</span><i aria-hidden="true" /><span>{editModeEnabled ? '开' : '关'}</span></button> : <span className={readonly ? 'readonly-badge' : 'editing-badge'}>{readonly ? '标注内容已锁定' : '编辑模式'}</span>}
+        <AnnotationGuidelineButton key={`${projectId}:${videoId}`} guideline={workspace.annotationGuideline} onError={setToast} />
         <button className="secondary-button annotation-shortcut-button" type="button" onClick={() => setShortcutsOpen(true)}><Keyboard size={15} />快捷键</button>
         {/* <button className="secondary-button" type="button" disabled={hardReadonly || !dirty || saving || Boolean(editing)} onClick={() => save()}><Save size={15} />保存草稿</button> */}
         {canReturn && <button className="secondary-button return-button" type="button" disabled={hardReadonly || returning || saving || submitting || voidingVideo || Boolean(editing) || Boolean(sampleUpdatingId) || Boolean(descriptionEditingId) || Boolean(descriptionModalId) || commentsLoading || unresolvedCommentCount === 0} title={unresolvedCommentCount === 0 ? '至少需要一条未解决批注才能退回' : undefined} onClick={returnTask}>{returning ? '正在退回...' : '退回'}</button>}

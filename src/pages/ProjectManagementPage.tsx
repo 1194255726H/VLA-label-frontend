@@ -2,6 +2,7 @@ import { ArrowLeft, ChevronDown, CircleAlert, Edit3, Eye, Pause, Play, Plus, Rot
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { productApi } from '../services/productApi'
+import { resolveAnnotationFileUrl } from '../services/annotationGuidelineApi'
 import { AppShell } from '../components/AppShell'
 import { Modal } from '../components/Modal'
 import { ProjectSupplierSelect } from '../components/ProjectSupplierSelect'
@@ -178,7 +179,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
       try { const parsed = new URL(url); if (parsed.protocol !== 'https:' || parsed.username || parsed.password) throw new Error() } catch { return setError('标注规则链接必须是不含账号密码的 HTTPS 地址') }
     }
     if (form.annotationGuideline?.type === 'file') {
-      if (!form.annotationGuideline.displayName.trim() || !form.annotationGuideline.url.trim()) return setError('请先上传标注规则文件')
+      if (!form.annotationGuideline.url.trim()) return setError('请先上传标注规则文件')
     }
     try { setSavingProject(true); setItems(await projectApi.save({ ...form, productId, projectId: editingId, deliveryAt: form.deliveryAt, ...(editingId && form.supplierId === originalSupplier.supplierId && form.fleetSupplierId === originalSupplier.fleetSupplierId ? { supplierId: undefined, fleetSupplierId: undefined } : {}) })); setModalOpen(false); setToast(editingId ? '数据集已更新' : '数据集创建成功') } catch (reason) { setError(reason instanceof Error ? reason.message : '数据集保存失败') } finally { setSavingProject(false) }
   }
@@ -227,7 +228,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
             {labelPickerOpen && <div className="label-library-options">{loadingLabelLibraries ? <p>正在加载标签库...</p> : <>{labelLibraries.filter((library) => library.enabled && library.name.toLowerCase().includes(labelKeyword.trim().toLowerCase())).map((library) => <button type="button" className={form.labelLibraryIds.includes(library.id) ? 'selected' : ''} key={library.id} onClick={() => setForm({ ...form, labelLibraryIds: form.labelLibraryIds.includes(library.id) ? form.labelLibraryIds.filter((id) => id !== library.id) : [...form.labelLibraryIds, library.id] })}><span>{library.name}</span><small>{form.labelLibraryIds.includes(library.id) ? '已选择' : library.code}</small></button>)}{!labelLibraries.some((library) => library.enabled && library.name.toLowerCase().includes(labelKeyword.trim().toLowerCase())) && <p>未找到匹配的标签库</p>}</>}</div>}
           </div></div>
           {form.annotationGuideline?.type === 'link' && <><label><span>规则名称 <i className="required-mark">*</i></span><input value={form.annotationGuideline.displayName} onChange={(e) => updateLinkGuideline({ displayName: e.target.value })} placeholder="例如：标注规则" /></label><label><span>HTTPS 链接 <i className="required-mark">*</i></span><input type="url" value={form.annotationGuideline.url} onChange={(e) => updateLinkGuideline({ url: e.target.value })} placeholder="https://example.com/guideline" /></label></>}
-          {form.annotationGuideline?.type === 'file' && <div className="wide project-field"><span>规则文件 <i className="required-mark">*</i></span><div className="guideline-upload-row"><input type="file" disabled={uploadingGuideline || savingProject} onChange={(e) => void uploadGuideline(e.target.files?.[0])} />{uploadingGuideline && <small>正在上传...</small>}{!uploadingGuideline && form.annotationGuideline.url && <a href={form.annotationGuideline.url} target="_blank" rel="noreferrer">已上传：{form.annotationGuideline.displayName}</a>}</div><p className="guideline-hint">文件大小限制 20MB，上传成功后会自动关联到数据集。</p></div>}
+          {form.annotationGuideline?.type === 'file' && <div className="wide project-field"><span>规则文件 <i className="required-mark">*</i></span><div className="guideline-upload-row"><input type="file" disabled={uploadingGuideline || savingProject} onChange={(e) => void uploadGuideline(e.target.files?.[0])} />{uploadingGuideline && <small>正在上传...</small>}{!uploadingGuideline && form.annotationGuideline.url && <a href={resolveAnnotationFileUrl(form.annotationGuideline.url).href} target="_blank" rel="noopener noreferrer">已上传：{form.annotationGuideline.displayName}</a>}</div><p className="guideline-hint">文件大小限制 20MB，上传成功后会自动关联到数据集。</p></div>}
         </div>}
         </fieldset>
         {error && <p className="inline-error">{error}</p>}

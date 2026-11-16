@@ -1,5 +1,6 @@
 import { runtimeConfig } from '../config/runtime'
 import { productReference } from '../utils/product'
+import { normalizeAnnotationGuideline } from '../utils/annotationGuideline'
 import { normalizeInvalidIntervalList } from '../utils/invalidReason'
 import { normalizeFleetSyncStatus } from '../utils/fleetSync'
 import { mockLabelLibraries, mockManagedProjects, mockMembers, mockProjectDistribution, mockTeams } from '../mocks/data'
@@ -96,12 +97,7 @@ function normalizeProject(item: Record<string, unknown>): ManagedProject {
   const completionLabels: Record<string, ManagedProject['completionNode']> = { annotation: '标注', quality_check: '质检', review: '审核', acceptance: '验收' }
   const currentNodeLabels: Record<string, NonNullable<ManagedProject['currentNode']>> = { annotation: '标注', quality_check: '质检', review: '审核', acceptance: '验收' }
   const modelGenerationLabels: Record<string, NonNullable<ManagedProject['modelGenerationNode']>> = { annotation: '标注', quality_check: '质检', review: '审核', acceptance: '验收' }
-  const rawGuideline = record(item.annotation_guideline || item.annotationGuideline)
-  const annotationGuideline = rawGuideline.type === 'link'
-    ? { type: 'link' as const, displayName: String(rawGuideline.display_name || rawGuideline.displayName || ''), url: String(rawGuideline.url || '') }
-    : rawGuideline.type === 'file'
-      ? { type: 'file' as const, displayName: String(rawGuideline.display_name || rawGuideline.displayName || ''), url: String(rawGuideline.url || '') }
-      : null
+  const annotationGuideline = normalizeAnnotationGuideline(item.annotation_guideline ?? item.annotationGuideline ?? workConfig.annotation_guideline)
   return {
     ...productReference(item),
     supplier: normalizeSupplier(item.supplier) || null, fleetSupplierId: item.fleet_supplier_id == null ? undefined : String(item.fleet_supplier_id), autoSyncTime: item.auto_sync_time == null ? null : String(item.auto_sync_time),
@@ -186,7 +182,7 @@ export const projectApi = {
     const annotationGuideline = payload.annotationGuideline?.type === 'link'
       ? { type: 'link', display_name: payload.annotationGuideline.displayName, url: payload.annotationGuideline.url }
       : payload.annotationGuideline?.type === 'file'
-        ? { type: 'file', display_name: payload.annotationGuideline.displayName, url: payload.annotationGuideline.url }
+        ? { type: 'file', ...(payload.annotationGuideline.displayName.trim() ? { display_name: payload.annotationGuideline.displayName } : {}), url: payload.annotationGuideline.url }
         : null
     const body = { ...(!payload.projectId ? { product_id: Number(payload.productId) } : {}), ...(changingSupplier ? { supplier_id: payload.supplierId ? Number(payload.supplierId) : null, fleet_supplier_id: payload.fleetSupplierId ? Number(payload.fleetSupplierId) : null } : {}), name: payload.name, description: payload.desc, team_ids: payload.teams.map(Number), owner_id: payload.owner ? Number(payload.owner) : '', delivery_at: payload.deliveryAt || null, completion_node: nodeValues[payload.completionNode], model_generation_node: nodeValues[payload.modelGenerationNode], assignment_strategy: payload.assignmentStrategy, active_task_limit: 10, label_library_ids: payload.labelLibraryIds.map(Number), operation_library_id: Number(payload.operationLibraryId), ...(annotationGuideline ? { annotation_guideline: annotationGuideline } : {}) }
     await request(payload.projectId ? `/api/projects/${encodeURIComponent(payload.projectId)}` : '/api/projects/', { method: payload.projectId ? 'PATCH' : 'POST', body: JSON.stringify(body) })

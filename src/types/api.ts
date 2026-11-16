@@ -616,6 +616,7 @@ export interface AnnotationResult {
 }
 
 export interface AnnotationWorkspace {
+  annotationGuideline?: AnnotationGuideline | null
   productId?: string
   productName?: string
   stage?: VideoStage
