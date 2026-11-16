@@ -24,7 +24,7 @@ const nodeOrder = ['标注', '质检', '审核', '验收'] as const
 function localToday() { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}` }
 
 function DatasetDeliveryDate({ item, today }: { item: ManagedProject; today: string }) {
-  const risk = datasetDeliveryRisk(item.deliveryAt, item.status, today)
+  const risk = datasetDeliveryRisk(item.deliveryAt, today)
   return <div className="dataset-delivery-date"><span className={risk === 'overdue' ? 'risk-date' : undefined}>{item.deliveryAt || '无固定日期'}</span>{risk && <span className={`delivery-risk-tag ${risk}`}>{deliveryRiskLabels[risk]}</span>}</div>
 }
 
@@ -126,7 +126,7 @@ export function ProjectManagementPage({ session }: { session: SessionResponse })
   }, [])
 
   const counts = useMemo(() => Object.fromEntries(Object.keys(statusLabels).map((key) => [key, items.filter((item) => item.status === key).length])), [items])
-  const filtered = useMemo(() => items.filter((item) => (status === 'all' || item.status === status) && (!keyword || `${item.name}${item.code}`.toLowerCase().includes(keyword.toLowerCase())) && (!team || item.teams.includes(team)) && (!risk || datasetDeliveryRisk(item.deliveryAt, item.status, today) === risk)), [items, keyword, status, team, risk, today])
+  const filtered = useMemo(() => items.filter((item) => (status === 'all' || item.status === status) && (!keyword || `${item.name}${item.code}`.toLowerCase().includes(keyword.toLowerCase())) && (!team || item.teams.includes(team)) && (!risk || datasetDeliveryRisk(item.deliveryAt, today) === risk)), [items, keyword, status, team, risk, today])
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const currentPage = Math.min(page, pages)
   const visibleProjects = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)

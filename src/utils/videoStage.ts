@@ -1,11 +1,11 @@
 import type { VideoListItem, VideoStage, VideoStageStatus } from '../types/api'
 
 export const videoStages: Array<{ value: VideoStage; label: string }> = [
-  { value: 'pre_annotation', label: '预处理' }, { value: 'human_processing', label: '人工处理' },
-  { value: 'model_description', label: '模型描述' }, { value: 'cutting', label: '切割' },
+  { value: 'pre_annotation', label: 'AI 预处理' }, { value: 'human_processing', label: '人工作业' },
+  { value: 'model_description', label: 'AI 描述' }, { value: 'cutting', label: '视频切分' },
   { value: 'completed', label: '已完成' }, { value: 'cancelled', label: '已作废' },
 ]
-export const videoStageStatusLabels: Record<VideoStageStatus, string> = { queued: '排队中', running: '处理中', retrying: '重试中', succeeded: '成功', failed: '失败', skipped: '已跳过', cancelled: '已取消' }
+export const videoStageStatusLabels: Record<VideoStageStatus, string> = { queued: '排队中', running: '执行中', retrying: '重试中', succeeded: '成功', failed: '失败', skipped: '已跳过', cancelled: '已取消' }
 
 export function normalizeVideoStageFields(raw: Record<string, unknown>): Pick<VideoListItem, 'stage' | 'stageStatus' | 'preAnnotationJobId' | 'stageFailureReason'> {
   const job = (raw.pre_annotation_job || raw.latest_pre_annotation_job || {}) as Record<string, unknown>
