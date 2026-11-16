@@ -248,6 +248,7 @@
 .delivery-calendar-days > button { height: 28px; padding: 0; border: 0; border-radius: 4px; color: #526178; background: transparent; font-size: 12px; }
 .delivery-calendar-days > button:hover,.delivery-calendar-heading > button:hover { background: #eaf4ff; }
 .delivery-calendar-days > button[aria-pressed=true] { color: #fff; background: var(--primary); }
+.delivery-calendar-days > button:disabled,.delivery-calendar-footer > button:disabled { color: #b7c0cc; background: transparent; cursor: not-allowed; }
 .delivery-calendar-footer { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .delivery-calendar-footer > button { padding: 4px 8px; border: 0; border-radius: 4px; color: var(--primary); background: #eaf4ff; font-size: 12px; }
 .management-page { display: flex; width: 100%; max-width: 1720px; height: calc(100vh - 64px); min-height: 0; margin: 0 auto; padding: 18px; overflow: hidden; }

@@ -6,7 +6,7 @@ function monthOf(value: string) {
   return { year: date.getFullYear(), month: date.getMonth() }
 }
 
-export function DeliveryDatePicker({ value, noFixedDate = false, disabled, onChange }: { value: string; noFixedDate?: boolean; disabled?: boolean; onChange: (value: string, noFixedDate: boolean) => void }) {
+export function DeliveryDatePicker({ value, noFixedDate = false, disabled, min, max, onChange }: { value: string; noFixedDate?: boolean; disabled?: boolean; min?: string; max?: string; onChange: (value: string, noFixedDate: boolean) => void }) {
   const [open, setOpen] = useState(false)
   const [view, setView] = useState(() => monthOf(value))
   const root = useRef<HTMLDivElement>(null)
@@ -21,7 +21,9 @@ export function DeliveryDatePicker({ value, noFixedDate = false, disabled, onCha
     document.addEventListener('pointerdown', outside)
     return () => document.removeEventListener('pointerdown', outside)
   }, [open])
-  function choose(date: string, noFixed = false) { if (disabled) return; onChange(date, noFixed); setOpen(false) }
+  function outsideBounds(date: string) { return Boolean(date && (min && date < min || max && date > max)) }
+  const todayValue = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  function choose(date: string, noFixed = false) { if (disabled || outsideBounds(date)) return; onChange(date, noFixed); setOpen(false) }
   function moveMonth(offset: number) { const date = new Date(view.year, view.month + offset, 1); setView({ year: date.getFullYear(), month: date.getMonth() }) }
   return <div ref={root} className="delivery-date-picker" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }} onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); setOpen(false) } }}>
     <button type="button" className="delivery-date-trigger" disabled={disabled} aria-label="交付时间（必填）" aria-haspopup="dialog" aria-expanded={open} aria-controls={popupId} onClick={() => { if (!open) setView(monthOf(value)); setOpen(!open) }}><span>{value || (noFixedDate ? '无固定日期' : '请选择交付时间')}</span><CalendarDays size={16} /></button>
@@ -30,9 +32,9 @@ export function DeliveryDatePicker({ value, noFixedDate = false, disabled, onCha
       <div className="delivery-calendar-days">{['一', '二', '三', '四', '五', '六', '日'].map((day) => <span key={day}>{day}</span>)}{Array.from({ length: firstDay }, (_, index) => <i key={`blank-${index}`} />)}{Array.from({ length: days }, (_, index) => {
         const day = index + 1
         const date = `${view.year}-${String(view.month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-        return <button type="button" key={day} aria-label={date} aria-pressed={value === date} onClick={() => choose(date)}>{day}</button>
+        return <button type="button" key={day} aria-label={date} aria-pressed={value === date} disabled={outsideBounds(date)} onClick={() => choose(date)}>{day}</button>
       })}</div>
-      <div className="delivery-calendar-footer"><button type="button" onClick={() => choose('')}>清除</button><button type="button" onClick={() => choose('', true)}>无固定日期</button><button type="button" onClick={() => choose(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`)}>今天</button></div>
+      <div className="delivery-calendar-footer"><button type="button" onClick={() => choose('')}>清除</button><button type="button" onClick={() => choose('', true)}>无固定日期</button><button type="button" disabled={outsideBounds(todayValue)} onClick={() => choose(todayValue)}>今天</button></div>
     </div>}
   </div>
 }
