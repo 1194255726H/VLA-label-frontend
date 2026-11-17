@@ -68,7 +68,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok || businessFailed) {
     const validationMessages = collectErrorMessages(payload?.errors)
     const productFinishMessage = payload?.code === 'product_projects_not_finished' && typeof payload.message === 'string' ? payload.message.trim() : ''
-    const error = new Error(productFinishMessage || (validationMessages.length ? validationMessages.join('；') : payload?.message || `请求失败（${response.status}）`)) as Error & { code?: string; status?: number; errors?: ImportValidationError[] }
+    const datasetFinishMessage = payload?.code === 'project_has_unfinished_videos' ? '数据集仍有未完成任务，请先处理完再结束' : ''
+    const error = new Error(datasetFinishMessage || productFinishMessage || (validationMessages.length ? validationMessages.join('；') : payload?.message || `请求失败（${response.status}）`)) as Error & { code?: string; status?: number; errors?: ImportValidationError[] }
     error.code = payload?.code
     error.status = response.status
     if (Array.isArray(payload?.errors)) {
