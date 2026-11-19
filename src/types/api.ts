@@ -1,3 +1,4 @@
+import type { VideoCopySource } from '../utils/videoCopy'
 export type ApiMode = 'mock' | 'real'
 
 export interface User {
@@ -85,7 +86,7 @@ export interface ProjectStageStats {
   items: Array<{ stage: VideoStage; name: string; count: number }>
 }
 
-export interface VideoListItem {
+export interface VideoListItem extends VideoCopySource {
   invalidatedAt?: string | null
   invalidatedNode?: TaskNode
   id: string
@@ -615,7 +616,7 @@ export interface AnnotationResult {
   nextInvalidSequence: number
 }
 
-export interface AnnotationWorkspace {
+export interface AnnotationWorkspace extends VideoCopySource {
   annotationGuideline?: AnnotationGuideline | null
   productId?: string
   productName?: string

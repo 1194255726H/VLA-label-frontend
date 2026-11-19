@@ -1,3 +1,4 @@
+import { normalizeVideoCopy } from '../utils/videoCopy'
 import { normalizeVideoInvalidation, taskNodeFromApi } from '../utils/videoInvalidation'
 import { normalizeVideoStageFields } from '../utils/videoStage'
 import { runtimeConfig } from '../config/runtime'
@@ -230,7 +231,7 @@ function normalizeWorkspace(projectId: string, videoId: string, raw: Record<stri
     Math.max(baseResult.totalFrames || 0, Math.round(durationSeconds * frameRate)),
   )
   return {
-    completionNode, stage: normalizeVideoStageFields({ ...task, ...selectedVideo }).stage, ...normalizeVideoInvalidation({ ...task, ...selectedVideo }),
+    completionNode, stage: normalizeVideoStageFields({ ...task, ...selectedVideo }).stage, ...normalizeVideoInvalidation({ ...task, ...selectedVideo }), ...normalizeVideoCopy({ ...task, ...selectedVideo }),
     scene1: normalizeScene(selectedVideo.scene1), scene2: normalizeScene(selectedVideo.scene2), supplier: normalizeSupplier(selectedVideo.supplier),
     currentAssigneeId: selectedVideo.current_assignee_id == null ? undefined : String(selectedVideo.current_assignee_id),
     videoId,

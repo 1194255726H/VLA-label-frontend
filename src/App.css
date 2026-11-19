@@ -822,3 +822,25 @@
 .stage-status.succeeded { color: #168267; }
 .stage-status.failed,.stage-status.cancelled { color: #bd4545; }
 .project-video-table th:last-child,.project-video-table td:last-child { min-width: 150px; }
+
+/* Data copying */
+.video-copy-dialog { display: flex; flex-direction: column; gap: 16px; }
+.video-copy-dialog p { margin: 0; }
+.video-copy-dialog .project-field { display: flex; flex-direction: column; gap: 8px; }
+.video-copy-dialog .project-field>label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.video-copy-dialog input[type="radio"], .video-copy-dialog input[type="checkbox"] { flex: 0 0 14px; width: 14px; height: 14px; min-width: 14px; min-height: 14px; margin: 0; padding: 0; accent-color: #2563eb; }
+.video-copy-dialog .video-copy-pre-annotation { flex-direction: row; align-items: center; gap: 8px; }
+.video-copy-dialog textarea { min-height: 74px; resize: vertical; }
+.video-copy-dialog progress { width: 100%; margin-top: 10px; }
+.video-copy-results ul { max-height: 230px; overflow: auto; padding-left: 20px; }
+.video-copy-results li { margin: 8px 0; overflow-wrap: anywhere; }
+.copy-success { color: #18866a; }
+.video-copy-badge { display: inline-block; width: fit-content; padding: 2px 6px; border-radius: 3px; background: #edf1ff; color: #6652c5; font-size: 11px; }
+.video-more-actions { position: relative; }
+.video-more-actions summary { color: #2563eb; cursor: pointer; white-space: nowrap; }
+.video-more-actions[open] { z-index: 2; }
+.video-more-actions>button { display: block; width: 100%; text-align: left; }
+.project-supplier-options button:disabled { opacity: .5; cursor: not-allowed; }
+.project-supplier-options button small { white-space: normal; }
+.modal:has(.video-copy-dialog) { display: flex; max-height: calc(100dvh - 32px); flex-direction: column; }
+.modal:has(.video-copy-dialog)>.modal-body { overflow: auto; min-height: 0; }

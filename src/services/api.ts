@@ -1,3 +1,4 @@
+import { normalizeVideoCopy } from '../utils/videoCopy'
 import { normalizeVideoInvalidation } from '../utils/videoInvalidation'
 import { productReference } from '../utils/product'
 import { runtimeConfig } from '../config/runtime'
@@ -279,7 +280,7 @@ function normalizeVideo(item: Record<string, unknown>): VideoListItem {
     submittedById: optionalString(item.submitted_by_id),
     submittedAt: optionalString(item.submitted_at),
     submittedDecision: optionalString(item.submitted_decision),
-    ...normalizeVideoInvalidation(item),
+    ...normalizeVideoInvalidation(item), ...normalizeVideoCopy(item),
     selectedDurationMs: numberValue(item.selected_duration_ms),
     effectiveDurationMs: numberValue(item.effective_duration_ms),
     invalidDurationMs: numberValue(item.invalid_duration_ms),

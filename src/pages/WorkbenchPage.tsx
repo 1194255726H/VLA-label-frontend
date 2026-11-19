@@ -1,3 +1,4 @@
+import { VideoCopyBadge } from '../components/VideoCopyBadge'
 import { VideoInvalidationBadge } from '../components/VideoInvalidationBadge'
 import { workTypeLabels } from '../utils/videoInvalidation'
 import {
@@ -70,7 +71,7 @@ function TaskTable({ items, tab, loading, onError, onScenesUpdated }: { items: V
             const action = actionFor(video, tab)
             const submittedNode = submittedNodeMap[video.submittedNode || '']
             return <tr key={`${video.id}-${video.submittedNode || 'pending'}-${index}`}>
-              <td className="video-name-column"><div className="data-name"><strong title={video.filename}>{video.filename}</strong><VideoInvalidationBadge video={video} /><small>{video.externalVideoId || video.videoId || `#${video.id}`}</small></div></td>
+              <td className="video-name-column"><div className="data-name"><strong title={video.filename}>{video.filename}</strong><VideoInvalidationBadge video={video} /><VideoCopyBadge video={video} /><small>{video.externalVideoId || video.videoId || `#${video.id}`}</small></div></td>
               <td><VideoSceneEditor key={`${video.projectId}:${video.id}`} variant="table" workspace={{ ...video, videoId: video.id }} canEdit onUpdated={(scenes) => onScenesUpdated(video, scenes)} /></td><td title={video.supplier?.name}>{video.supplier?.name || '-'}</td>
               <td><span className={`status-tag ${video.videoStatus}`}>{videoStatusLabels[video.videoStatus] || video.videoStatus || '-'}</span></td>
               <td><span className={`node-tag ${nodeTones[video.currentNode]}`}>{nodeLabels[video.currentNode]}</span></td>

@@ -46,3 +46,11 @@ npm run build:real
 生产项目通过 `/api/products/` 配置团队、负责人、标签库、对象库和交付时间；数据集创建带 `product_id`，配置只能选所属生产项目的关联项，交付日期不能晚于生产项目。生产项目状态不自动级联数据集。
 
 上线前需由后端创建首个生产项目，并执行文档中的 `python manage.py attach_legacy_projects --product-id <ID>` 迁移历史数据集；前端不自动挂载或更改历史数据归属。
+
+### 数据复制
+
+数据列表的“更多操作 → 复制”和“批量复制”共用复制弹窗，批量沿用跨页勾选。管理员可选可见生产项目，项目经理按负责人查询管理的生产项目；目标数据集沿用项目下可见列表，仅未启动、进行中允许接收。
+
+复制调用 `POST /api/projects/{target_project_id}/videos/copy`，每批最多 200 条，串行提交。逐条成功项不会因部分失败而重试；请求结果不明时停止后续批次并提示检查目标数据集。`copy_annotation` 复制最新已提交标注，`run_pre_annotation` 仅对原始数据复制生效。
+
+当前接口未提供重复检查、跳过重复项和“副本N”文件命名参数，这部分尚未实现，需补充后端协议；前端不发送推测的重复处理字段。接口来源字段 `is_copy`、`source_video_id`、`source_fleet_video_id`、`copy_reason`、`copied_at` 用于副本展示。
