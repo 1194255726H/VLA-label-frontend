@@ -95,7 +95,7 @@ export function ProductManagementPage({ session }: { session: SessionResponse })
     finally { setBusy(false) }
   }
   async function changeStatus(item: Product, next: ProductStatus) {
-    if (!window.confirm(`确认将“${item.name}”设为${productStatusLabels[next]}？${next === 'finished' ? '结束后不可编辑，也不能创建新数据集。' : ''}旗下数据集状态不会自动改变。`)) return
+    if (!window.confirm(`确认将“${item.name}”设为${productStatusLabels[next]}？${next === 'finished' ? '结束后不可编辑，也不能创建新数据集。' : ''}`)) return
     setBusy(true)
     try { await productApi.setStatus(item.id, next); setRefresh((value) => value + 1); setToast(`${item.name} ${productStatusLabels[next]}`) }
     catch (reason) { setToast(reason instanceof Error ? reason.message : '状态变更失败') }
