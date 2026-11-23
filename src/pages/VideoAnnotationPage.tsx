@@ -881,10 +881,19 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     const mediaStartTime = result?.mediaStartTime || firstSeekableTime
     const durationSeconds = Number.isFinite(media.duration) ? Math.max(0, media.duration - mediaStartTime) : 0
     if (result) {
-      const totalFrames = result.totalFrames || Math.round(durationSeconds * result.frameRate)
-      if (mediaStartTime !== result.mediaStartTime || totalFrames !== result.totalFrames) setResult(normalizeAnnotationResult({ ...result, mediaStartTime, totalFrames }))
+      // A saved annotation may only describe the valid portion of a longer media file.
+      // Extend the timeline from media metadata without trimming existing annotations.
+      const totalFrames = Math.max(result.totalFrames, Math.round(durationSeconds * result.frameRate))
+      if (mediaStartTime !== result.mediaStartTime || totalFrames !== result.totalFrames) {
+        const alignSnapshot = (snapshot: AnnotationResult) => normalizeAnnotationResult({ ...snapshot, mediaStartTime, totalFrames: Math.max(snapshot.totalFrames, Math.round(durationSeconds * snapshot.frameRate)) })
+        setResult(alignSnapshot(result))
+        undoStack.current = undoStack.current.map(alignSnapshot)
+        redoStack.current = redoStack.current.map(alignSnapshot)
+        if (editModeSnapshotRef.current) editModeSnapshotRef.current = alignSnapshot(editModeSnapshotRef.current)
+        setGoalViewport((current) => current.startFrame === 0 && current.endFrame === result.totalFrames ? { startFrame: 0, endFrame: totalFrames } : current)
+      }
     }
-    if (workspace && (mediaStartTime !== workspace.mediaStartTime || (!workspace.durationSeconds && durationSeconds))) setWorkspace({ ...workspace, mediaStartTime, durationSeconds: workspace.durationSeconds || durationSeconds })
+    if (workspace && (mediaStartTime !== workspace.mediaStartTime || durationSeconds > workspace.durationSeconds)) setWorkspace({ ...workspace, mediaStartTime, durationSeconds: Math.max(workspace.durationSeconds, durationSeconds) })
     if (media.currentTime < mediaStartTime) media.currentTime = mediaStartTime
   }
 
@@ -1667,7 +1676,7 @@ export function VideoAnnotationPage({ session }: { session: SessionResponse }) {
     <ResizableAnnotationLayout video={(resetButton) =>
       <section className="video-stage">
         <video ref={scrubVideoRef} className={`scrub-preview${scrubbing ? ' active' : ''}`} src={workspace.videoUrl || undefined} muted playsInline />
-        <div className="video-canvas"><video ref={videoRef} src={workspace.videoUrl || undefined} onLoadedMetadata={(event) => handleVideoMetadata(event.currentTarget)} onTimeUpdate={(event) => handleVideoTimeUpdate(event.currentTarget)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />{!workspace.videoUrl && <div className="video-unavailable"><CircleAlert size={28} /><strong>视频暂不可播放</strong><span>后端返回的是对象存储地址，当前 API 尚未提供预签名播放链接</span></div>}<div className="video-controls"><div className="video-control-side"><span>{timeText(currentSeconds)} / {timeText(result.totalFrames / result.frameRate)}</span><b>F{currentFrame}</b></div><div className="video-control-center"><button type="button" onClick={() => previewStep(-1)} aria-label="上一帧" title="上一帧"><SkipBack size={18} /></button><button className="video-play" type="button" disabled={!workspace.videoUrl} onClick={togglePlayback} aria-label={playing ? '暂停' : '播放'} title={playing ? '暂停' : '播放'}>{playing ? <Pause size={23} /> : <Play size={23} />}</button><button type="button" onClick={() => previewStep(1)} aria-label="下一帧" title="下一帧"><SkipForward size={18} /></button></div><div className="video-control-side end">{resetButton}<label><select value={rate} disabled={!workspace.videoUrl} onChange={(event) => { const next = Number(event.target.value); setRate(next); if (videoRef.current) videoRef.current.playbackRate = next }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select><ChevronDown size={13} /></label><button type="button" disabled={!workspace.videoUrl} onClick={() => videoRef.current?.requestFullscreen()} aria-label="全屏" title="全屏查看"><Expand size={18} /></button></div></div></div>
+        <div className="video-canvas"><video ref={videoRef} src={workspace.videoUrl || undefined} onLoadedMetadata={(event) => handleVideoMetadata(event.currentTarget)} onDurationChange={(event) => handleVideoMetadata(event.currentTarget)} onTimeUpdate={(event) => handleVideoTimeUpdate(event.currentTarget)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />{!workspace.videoUrl && <div className="video-unavailable"><CircleAlert size={28} /><strong>视频暂不可播放</strong><span>后端返回的是对象存储地址，当前 API 尚未提供预签名播放链接</span></div>}<div className="video-controls"><div className="video-control-side"><span>{timeText(currentSeconds)} / {timeText(result.totalFrames / result.frameRate)}</span><b>F{currentFrame}</b></div><div className="video-control-center"><button type="button" onClick={() => previewStep(-1)} aria-label="上一帧" title="上一帧"><SkipBack size={18} /></button><button className="video-play" type="button" disabled={!workspace.videoUrl} onClick={togglePlayback} aria-label={playing ? '暂停' : '播放'} title={playing ? '暂停' : '播放'}>{playing ? <Pause size={23} /> : <Play size={23} />}</button><button type="button" onClick={() => previewStep(1)} aria-label="下一帧" title="下一帧"><SkipForward size={18} /></button></div><div className="video-control-side end">{resetButton}<label><select value={rate} disabled={!workspace.videoUrl} onChange={(event) => { const next = Number(event.target.value); setRate(next); if (videoRef.current) videoRef.current.playbackRate = next }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option></select><ChevronDown size={13} /></label><button type="button" disabled={!workspace.videoUrl} onClick={() => videoRef.current?.requestFullscreen()} aria-label="全屏" title="全屏查看"><Expand size={18} /></button></div></div></div>
       </section>
     } inspector={
       <aside className="annotation-inspector">
