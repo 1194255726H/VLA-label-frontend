@@ -87,6 +87,16 @@ export interface ProjectStageStats {
 }
 
 export interface VideoListItem extends VideoCopySource {
+  preAnnotationStatus?: VideoStageStatus | null
+  modelDescriptionStatus?: VideoStageStatus | null
+  cuttingStatus?: VideoStageStatus | null
+  availableStats?: { duration: boolean; atomicTasks: boolean; atomicActions: boolean }
+  assigned?: boolean
+  isSample?: boolean
+  cancelledById?: string
+  cancelledByName?: string
+  cancelledAt?: string
+  cancelledReasons?: string[]
   invalidatedAt?: string | null
   invalidatedNode?: TaskNode
   id: string
@@ -196,6 +206,12 @@ export interface TaskQuery {
 }
 
 export interface ProjectVideoQuery {
+  preAnnotationStatus?: VideoStageStatus
+  modelDescriptionStatus?: VideoStageStatus
+  cuttingStatus?: VideoStageStatus
+  workType?: 'normal' | 'returned'
+  assigned?: boolean
+  isSample?: boolean
   filename?: string
   personName?: string
   scene1Id?: string

@@ -844,3 +844,19 @@
 .project-supplier-options button small { white-space: normal; }
 .modal:has(.video-copy-dialog) { display: flex; max-height: calc(100dvh - 32px); flex-direction: column; }
 .modal:has(.video-copy-dialog)>.modal-body { overflow: auto; min-height: 0; }
+
+.project-video-multi-filter { display: flex; min-width: 0; flex-direction: column; gap: 7px; color: #71839a; font-size: 12px; }
+.searchable-multi-select { position: relative; min-width: 0; }
+.multi-select-input { display: flex; min-height: 38px; padding: 3px 8px; align-items: center; flex-wrap: wrap; gap: 4px; border: 1px solid #d6e0ec; border-radius: 4px; background: #fff; }
+.multi-select-input>input { flex: 1; width: 100px; min-width: 80px; min-height: 28px; padding: 0; border: 0; outline: 0; color: #344258; font: inherit; }
+.multi-select-input:focus-within { border-color: #72a5f2; box-shadow: 0 0 0 3px rgba(37,99,235,.08); }
+.multi-select-options { position: absolute; z-index: 15; top: calc(100% + 4px); right: 0; left: 0; max-height: 230px; overflow: auto; padding: 7px; border: 1px solid #d6e0ec; border-radius: 4px; background: #fff; box-shadow: 0 8px 20px #1f395b24; }
+.management-filters .multi-select-options>label { display: flex; flex-direction: row; gap: 8px; align-items: center; padding: 7px; cursor: pointer; }
+.multi-select-options input[type="checkbox"] { flex: 0 0 14px; width: 14px; height: 14px; min-height: 14px; margin: 0; accent-color: #2563eb; }
+.multi-select-options>button { display: block; width: 100%; padding: 7px; border: 0; color: #2563eb; background: #fff; text-align: left; }
+.project-video-table.video-tab-pre_annotation { min-width: 1000px; }
+.project-video-table.video-tab-model_description { min-width: 1600px; }
+.project-video-table.video-tab-cutting, .project-video-table.video-tab-cancelled { min-width: 1750px; }
+.project-video-table.video-tab-all { min-width: 2600px; }
+.project-video-table .row-actions button:disabled { color: #a7b3c4; cursor: not-allowed; }
+.project-video-scan-status { padding: 10px 20px; color: #62758e; font-size: 12px; }

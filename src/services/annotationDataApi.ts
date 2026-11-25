@@ -2,11 +2,11 @@ import { normalizeVideoCopy } from '../utils/videoCopy'
 import { normalizeVideoInvalidation } from '../utils/videoInvalidation'
 import { runtimeConfig } from '../config/runtime'
 import { mockProjects, mockTasks } from '../mocks/data'
-import type { ProjectStageStats, ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem } from '../types/api'
+import type { ProjectStageStats, ProjectVideoPage, ProjectVideoQuery, TaskNode, VideoListItem, VideoStageStatus } from '../types/api'
 import { request, requestDownload } from './api'
 import { getMockFleetSyncedTasks } from './managementApi'
 import { normalizeInvalidIntervalList } from '../utils/invalidReason'
-import { normalizeVideoStageFields, videoStages } from '../utils/videoStage'
+import { normalizeVideoStageFields, videoStages, videoStageStatusLabels } from '../utils/videoStage'
 
 const pendingStageStatsRequests = new Map<string, Promise<ProjectStageStats>>()
 const pendingVideoListRequests = new Map<string, Promise<ProjectVideoPage>>()
@@ -24,9 +24,18 @@ function normalizeNode(value: unknown): TaskNode {
   return nodeMap[raw] || raw as TaskNode
 }
 
+function executionStatus(value: unknown): VideoStageStatus | null | undefined {
+  if (value === undefined) return undefined
+  return typeof value === 'string' && Object.hasOwn(videoStageStatusLabels, value) ? value as VideoStageStatus : null
+}
+
 function normalize(item: Record<string, unknown>): VideoListItem {
   return {
     ...normalizeVideoStageFields(item),
+    preAnnotationStatus: executionStatus(item.pre_annotation_status),
+    modelDescriptionStatus: executionStatus(item.model_description_status),
+    cuttingStatus: executionStatus(item.cutting_status),
+    availableStats: { duration: item.duration != null, atomicTasks: item.atomic_task_count != null, atomicActions: item.atomic_action_count != null },
     deviceId: optionalString(item.device_id), personName: optionalString(item.person_name),
     invalidIntervalList: normalizeInvalidIntervalList(Array.isArray(item.invalid_interval_list) ? item.invalid_interval_list : item.invalid_intervals),
     id: String(item.id || ''), projectId: String(item.project_id || ''), projectName: String(item.project_name || ''),
@@ -35,7 +44,11 @@ function normalize(item: Record<string, unknown>): VideoListItem {
     filename: String(item.filename || item.external_video_id || item.video_id || item.uri || `视频 ${item.id || ''}`), uri: String(item.uri || item.preview_url || ''), sourceUri: String(item.source_uri || ''), previewUrl: String(item.preview_url || item.uri || ''), ossBucket: String(item.oss_bucket || ''), ossKey: String(item.oss_key || ''),
     duration: numberValue(item.duration), fileSize: numberValue(item.file_size), storageStatus: String(item.storage_status || 'unchecked') as VideoListItem['storageStatus'], storageError: optionalString(item.storage_error), storageCheckedAt: optionalString(item.storage_checked_at),
     videoMeta: item.video_meta && typeof item.video_meta === 'object' ? item.video_meta as Record<string, unknown> : {}, createdAt: String(item.created_at || ''), updatedAt: String(item.updated_at || ''), scene1: normalizeScene(item.scene1), scene2: normalizeScene(item.scene2), supplier: normalizeSupplier(item.supplier), submittedNode: optionalString(item.submitted_node), submittedById: optionalString(item.submitted_by_id), submittedAt: optionalString(item.submitted_at), submittedDecision: optionalString(item.submitted_decision),
-    ...normalizeVideoInvalidation(item), ...normalizeVideoCopy(item), selectedDurationMs: numberValue(item.selected_duration_ms), effectiveDurationMs: numberValue(item.effective_duration_ms), invalidDurationMs: numberValue(item.invalid_duration_ms), unselectedDurationMs: nullableNumberValue(item.unselected_duration_ms), atomicTaskCount: numberValue(item.atomic_task_count), atomicActionCount: numberValue(item.atomic_action_count),
+    ...normalizeVideoInvalidation(item), ...normalizeVideoCopy(item),
+    workType: item.work_type === 'returned' ? 'returned' : 'normal',
+    assigned: typeof item.assigned === 'boolean' ? item.assigned : Boolean(item.current_assignee_id),
+    isSample: typeof item.is_sample === 'boolean' ? item.is_sample : undefined,
+    cancelledById: optionalString(item.cancelled_by_id), cancelledByName: optionalString(item.cancelled_by_name), cancelledAt: optionalString(item.cancelled_at), cancelledReasons: Array.isArray(item.cancelled_reason) ? item.cancelled_reason.map(String) : [], selectedDurationMs: numberValue(item.selected_duration_ms), effectiveDurationMs: numberValue(item.effective_duration_ms), invalidDurationMs: numberValue(item.invalid_duration_ms), unselectedDurationMs: nullableNumberValue(item.unselected_duration_ms), atomicTaskCount: numberValue(item.atomic_task_count), atomicActionCount: numberValue(item.atomic_action_count),
   }
 }
 
@@ -83,10 +96,13 @@ export const annotationDataApi = {
     if (runtimeConfig.apiMode === 'mock') {
       await delay()
       const filename = query.filename?.toLowerCase()
-      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.personName || (item.personName || '').includes(query.personName)) && (!query.scene1Id || item.scene1?.id === query.scene1Id) && (!query.scene2Id || item.scene2?.id === query.scene2Id) && (!query.invalidReason || item.invalidIntervalList?.some((interval) => interval.reason === query.invalidReason)) && (!query.status || item.videoStatus === query.status) && (!query.stage || item.stage === query.stage) && (!query.stageStatus || item.stageStatus === query.stageStatus) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
+      const items = mockItems(projectId).filter((item) => (!filename || item.filename.toLowerCase().includes(filename)) && (!query.personName || item.personName === query.personName) && (!query.scene1Id || (query.scene1Id === 'null' ? !item.scene1 : item.scene1?.id === query.scene1Id)) && (!query.scene2Id || (query.scene2Id === 'null' ? !item.scene2 : item.scene2?.id === query.scene2Id)) && (!query.invalidReason || item.invalidIntervalList?.some((interval) => interval.reason === query.invalidReason)) && (!query.status || item.videoStatus === query.status) && (!query.stage || item.stage === query.stage) && (!query.stageStatus || item.stageStatus === query.stageStatus) && (!query.preAnnotationStatus || (item.preAnnotationStatus === undefined && item.stage === 'pre_annotation' ? item.stageStatus : item.preAnnotationStatus) === query.preAnnotationStatus) && (!query.modelDescriptionStatus || (item.modelDescriptionStatus === undefined && item.stage === 'model_description' ? item.stageStatus : item.modelDescriptionStatus) === query.modelDescriptionStatus) && (!query.cuttingStatus || (item.cuttingStatus === undefined && item.stage === 'cutting' ? item.stageStatus : item.cuttingStatus) === query.cuttingStatus) && (!query.workType || item.workType === query.workType) && (query.assigned === undefined || item.assigned === query.assigned) && (query.isSample === undefined || (item.isSample ?? item.invalidIntervalList?.some((range) => range.isSample) ?? false) === query.isSample) && (!query.currentAssigneeId || item.currentAssigneeId === query.currentAssigneeId) && (!query.createdAtStart || item.createdAt >= query.createdAtStart) && (!query.createdAtEnd || item.createdAt.slice(0, 10) <= query.createdAtEnd))
       return { items: items.slice((page - 1) * pageSize, page * pageSize), total: items.length, page, pageSize, pages: Math.max(1, Math.ceil(items.length / pageSize)) }
     }
     const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+    if (query.workType) params.set('work_type', query.workType)
+    if (query.assigned !== undefined) params.set('assigned', String(query.assigned))
+    if (query.isSample !== undefined) params.set('is_sample', String(query.isSample))
     if (query.filename) params.set('filename', query.filename)
     if (query.personName) params.set('person_name', query.personName)
     if (query.scene1Id) params.set('scene1_id', query.scene1Id)
@@ -95,6 +111,9 @@ export const annotationDataApi = {
     if (query.status) params.set('status', query.status)
     if (query.stage) params.set('stage', query.stage)
     if (query.stageStatus) params.set('stage_status', query.stageStatus)
+    if (query.preAnnotationStatus) params.set('pre_annotation_status', query.preAnnotationStatus)
+    if (query.modelDescriptionStatus) params.set('model_description_status', query.modelDescriptionStatus)
+    if (query.cuttingStatus) params.set('cutting_status', query.cuttingStatus)
     if (query.currentAssigneeId) params.set('current_assignee_id', query.currentAssigneeId)
     if (query.createdAtStart) params.set('created_at_start', query.createdAtStart)
     if (query.createdAtEnd) params.set('created_at_end', query.createdAtEnd)
