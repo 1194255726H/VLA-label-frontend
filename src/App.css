@@ -860,3 +860,13 @@
 .project-video-table.video-tab-all { min-width: 2600px; }
 .project-video-table .row-actions button:disabled { color: #a7b3c4; cursor: not-allowed; }
 .project-video-scan-status { padding: 10px 20px; color: #62758e; font-size: 12px; }
+
+.date-range-trigger { height: 34px; }
+.date-range-trigger>span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.date-range-trigger>svg { flex: none; }
+.date-range-popup { left: 0; right: auto; width: 320px; }
+.date-range-inputs { display: flex; gap: 8px; margin-bottom: 12px; }
+.management-filters .date-range-inputs>label { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 5px; padding: 5px; border: 1px solid #d6e0ec; border-radius: 4px; color: #71839a; font-size: 11px; }
+.management-filters .date-range-inputs>label.active { border-color: #72a5f2; }
+.date-range-inputs input { width: 100%; min-width: 0; height: 28px; padding: 0 2px; border: 0; outline: 0; color: #344258; font: inherit; }
+.date-range-popup .delivery-calendar-days>button.in-range { background: #eaf4ff; }

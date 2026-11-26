@@ -20,23 +20,24 @@ export const tabColumns: Record<VideoTab, VideoColumn[]> = {
   abnormal: ['name', 'scene', 'stage', ...machineStages, ...metrics, 'collector', 'assignee', 'updated', 'operations'],
 }
 export interface VideoListFilters {
+  failureStage: '' | MachineStage
   name: string; collectors: string[]; assignees: string[]; scene1: string; scene2: string
   node: TaskNode | ''; assigned: '' | 'true' | 'false'; status: '' | 'pending' | 'in_progress'
   workType: '' | 'normal' | 'returned'; reasons: string[]; sample: '' | 'true' | 'false'
   executions: Record<MachineStage, '' | VideoStageStatus>; updatedStart: string; updatedEnd: string
 }
 export function emptyVideoFilters(): VideoListFilters {
-  return { name: '', collectors: [], assignees: [], scene1: '', scene2: '', node: '', assigned: '', status: '', workType: '', reasons: [], sample: '', executions: { pre_annotation: '', model_description: '', cutting: '' }, updatedStart: '', updatedEnd: '' }
+  return { failureStage: '', name: '', collectors: [], assignees: [], scene1: '', scene2: '', node: '', assigned: '', status: '', workType: '', reasons: [], sample: '', executions: { pre_annotation: '', model_description: '', cutting: '' }, updatedStart: '', updatedEnd: '' }
 }
 export function filterVisibility(tab: VideoTab) {
-  return { human: tab === '' || tab === 'human_processing', reasons: !['pre_annotation', 'cancelled'].includes(tab), assignee: tab !== 'pre_annotation' && tab !== 'model_description', machine: machineStages.includes(tab as MachineStage) }
+  return { human: tab === '' || tab === 'human_processing', reasons: ['human_processing', 'model_description', 'completed'].includes(tab), assignee: tab !== 'pre_annotation' && tab !== 'model_description', machine: machineStages.includes(tab as MachineStage) }
 }
 export function executionFilterStages(tab: VideoTab): MachineStage[] {
-  return tab === 'completed' || tab === 'abnormal' ? machineStages : machineStages.includes(tab as MachineStage) ? [tab as MachineStage] : []
+  return machineStages.includes(tab as MachineStage) ? [tab as MachineStage] : []
 }
 export function filtersForTab(filters: VideoListFilters, tab: VideoTab): VideoListFilters {
   const visible = filterVisibility(tab)
-  return { ...filters, ...(tab !== 'human_processing' ? { status: '' } as const : {}), ...(!visible.human ? { node: '', assigned: '', status: '', workType: '' } as const : {}), ...(!visible.reasons ? { reasons: [], sample: '' } as const : {}), ...(!visible.assignee ? { assignees: [] } : {}), executions: Object.fromEntries(machineStages.map((stage) => [stage, executionFilterStages(tab).includes(stage) ? filters.executions[stage] : ''])) as VideoListFilters['executions'] }
+  return { ...filters, ...(tab !== 'abnormal' ? { failureStage: '' } as const : {}), ...(tab !== 'human_processing' ? { status: '' } as const : {}), ...(!visible.human ? { node: '', assigned: '', status: '', workType: '' } as const : {}), ...(!visible.reasons ? { reasons: [], sample: '' } as const : {}), ...(!visible.assignee ? { assignees: [] } : {}), executions: Object.fromEntries(machineStages.map((stage) => [stage, executionFilterStages(tab).includes(stage) ? filters.executions[stage] : ''])) as VideoListFilters['executions'] }
 }
 export function serverVideoQuery(filters: VideoListFilters, tab: VideoTab): ProjectVideoQuery {
   return {
@@ -45,7 +46,7 @@ export function serverVideoQuery(filters: VideoListFilters, tab: VideoTab): Proj
     currentAssigneeId: filters.assignees.length === 1 ? filters.assignees[0] : undefined,
     invalidReason: filters.reasons.length === 1 ? filters.reasons[0] : undefined,
     scene1Id: filters.scene1 || undefined, scene2Id: filters.scene2 || undefined,
-    stage: tab === 'abnormal' || tab === '' ? undefined : tab,
+    stage: tab === 'abnormal' ? filters.failureStage || undefined : tab || undefined,
     stageStatus: tab === 'abnormal' ? 'failed' : undefined,
     preAnnotationStatus: filters.executions.pre_annotation || undefined,
     modelDescriptionStatus: filters.executions.model_description || undefined,
@@ -78,6 +79,7 @@ export function matchesVideoFilters(video: VideoListItem, filters: VideoListFilt
   const updated = Date.parse(video.updatedAt)
   return (!filters.name || video.filename.toLowerCase().includes(filters.name.toLowerCase()) || video.id.includes(filters.name))
     && (tab !== 'abnormal' || machineStages.includes(video.stage as MachineStage) && video.stageStatus === 'failed')
+    && (tab !== 'abnormal' || !filters.failureStage || video.stage === filters.failureStage)
     && machineStages.every((stage) => !filters.executions[stage] || machineStatus(video, stage) === filters.executions[stage])
     && (!filters.node || video.stage === 'human_processing' && video.currentNode === filters.node)
     && (!filters.collectors.length || filters.collectors.includes(video.personName || ''))
