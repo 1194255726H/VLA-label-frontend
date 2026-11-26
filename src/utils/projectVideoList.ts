@@ -36,7 +36,7 @@ export function executionFilterStages(tab: VideoTab): MachineStage[] {
 }
 export function filtersForTab(filters: VideoListFilters, tab: VideoTab): VideoListFilters {
   const visible = filterVisibility(tab)
-  return { ...filters, ...(!visible.human ? { node: '', assigned: '', status: '', workType: '' } as const : {}), ...(!visible.reasons ? { reasons: [], sample: '' } as const : {}), ...(!visible.assignee ? { assignees: [] } : {}), executions: Object.fromEntries(machineStages.map((stage) => [stage, executionFilterStages(tab).includes(stage) ? filters.executions[stage] : ''])) as VideoListFilters['executions'] }
+  return { ...filters, ...(tab !== 'human_processing' ? { status: '' } as const : {}), ...(!visible.human ? { node: '', assigned: '', status: '', workType: '' } as const : {}), ...(!visible.reasons ? { reasons: [], sample: '' } as const : {}), ...(!visible.assignee ? { assignees: [] } : {}), executions: Object.fromEntries(machineStages.map((stage) => [stage, executionFilterStages(tab).includes(stage) ? filters.executions[stage] : ''])) as VideoListFilters['executions'] }
 }
 export function serverVideoQuery(filters: VideoListFilters, tab: VideoTab): ProjectVideoQuery {
   return {
