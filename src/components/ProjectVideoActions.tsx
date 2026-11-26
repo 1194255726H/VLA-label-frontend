@@ -17,11 +17,15 @@ export function ProjectVideoActions({ video, tab, projectId, accountId, canManag
   const human = video.stage === 'human_processing'
   const failed = video.stageStatus === 'failed'
   const canProcess = human && (canManage || video.currentAssigneeId === accountId)
+  const canRelease = canManage && human && videoAssigned(video) && (tab === '' || tab === 'human_processing')
   const canCopy = canManage && tab !== 'cancelled'
   const canCancel = canManage && !['completed', 'cancelled'].includes(video.stage || '')
   const missing = '暂不可用：尚未提供此操作的后端接口'
-  async function perform(operation: 'retry' | 'cancel') {
+  async function perform(operation: 'retry' | 'cancel' | 'release') {
     if (busyRef.current) return
+    if (operation === 'release') {
+      if (!canRelease || !window.confirm(`确认释放“${video.filename}”？释放后将解除当前分配，返回分配池。`)) return
+    }
     if (operation === 'cancel') {
       const endNode = (Object.keys(nodeLabels) as TaskNode[]).find((key) => nodeLabels[key] === completionNode)
       if (!window.confirm(`确认作废“${video.filename}”？${cancellationMessage({ stage: video.stage, node: video.currentNode, completionNode: endNode })}`)) return
@@ -32,6 +36,9 @@ export function ProjectVideoActions({ video, tab, projectId, accountId, canManag
         if (!video.preAnnotationJobId) throw new Error('接口未返回预标注任务 ID，无法重试')
         await annotationDataApi.retryPreAnnotation(video.preAnnotationJobId)
         onMessage('已提交重试 AI 预处理')
+      } else if (operation === 'release') {
+        await annotationDataApi.releaseVideo(video.projectId || projectId, video.id)
+        onMessage('数据已释放，已返回分配池')
       } else {
         const result = await annotationApi.cancelVideo(projectId, video.id, human ? video.currentNode : undefined)
         if (!result.cancelled && !result.invalidated) throw new Error('接口未确认作废结果，请刷新后检查')
@@ -51,7 +58,7 @@ export function ProjectVideoActions({ video, tab, projectId, accountId, canManag
     {canManage && video.stage === 'cutting' && failed && (tab === '' || tab === 'abnormal') && <><button type="button" disabled title={missing}>分配返修</button><button type="button" disabled title={missing}>重新切割</button></>}
     {(canCopy || canCancel) && <details className="video-more-actions"><summary>更多操作</summary>
       {canCopy && <button type="button" disabled={busy} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); onCopy() }}>复制</button>}
-      {canManage && human && videoAssigned(video) && (tab === '' || tab === 'human_processing') && <button type="button" disabled title={missing}>释放</button>}
+      {canRelease && <button type="button" disabled={busy} title="解除分配，返回分配池" onClick={() => void perform('release')}>释放</button>}
       {canCancel && <button type="button" disabled={busy} onClick={() => void perform('cancel')}>作废</button>}
       {canManage && !['completed', 'cancelled'].includes(video.stage || '') && tab !== 'abnormal' && <button type="button" disabled title={video.stage === 'cutting' ? '视频切分阶段不可删除' : missing}>删除</button>}
     </details>}
