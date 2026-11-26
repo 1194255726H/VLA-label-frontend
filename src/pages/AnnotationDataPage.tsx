@@ -49,6 +49,9 @@ function ProjectVideoData({ session, projectId }: { session: SessionResponse; pr
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
   const [reload, setReload] = useState(0)
+  const [collectorReload, setCollectorReload] = useState(0)
+  const collectorKey = `${projectId}:${collectorReload}`
+  const [collectorData, setCollectorData] = useState<{ key: string; names: string[]; error: string }>({ key: '', names: [], error: '' })
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState(0)
@@ -78,10 +81,24 @@ function ProjectVideoData({ session, projectId }: { session: SessionResponse; pr
   const someSelected = !tableLoading && items.some((item) => selectedIds.has(item.id))
   const project = projectDetail?.id === projectId ? projectDetail : undefined
   const notStarted = project?.status === 'not-started' || Boolean(productStatus?.id === project?.productId && productStatus?.status === 'not_started')
-  const collectorOptions = [...new Set([...items.map((item) => item.personName || ''), ...input.collectors])].filter(Boolean).map((name) => ({ id: name, name }))
+  const collectorOptions = collectorData.names.map((name) => ({ id: name, name }))
+  const collectorsLoading = collectorData.key !== collectorKey
   const assigneeOptions = [...new Map([...members.map((member) => ({ id: member.accountId, name: member.name })), ...items.filter((item) => item.currentAssigneeId).map((item) => ({ id: item.currentAssigneeId!, name: item.currentAssigneeName || item.currentAssigneeId! }))].map((option) => [option.id, option])).values()]
   const patch = (value: Partial<VideoListFilters>) => setInput((old) => ({ ...old, ...value }))
   const loadVideos = () => setReload((value) => value + 1)
+  const refreshData = () => { loadVideos(); setCollectorReload((value) => value + 1) }
+
+  useEffect(() => {
+    const controller = new AbortController()
+    collectProjectVideos(projectId, {}, controller.signal, () => undefined).then((videos) => {
+      if (controller.signal.aborted) return
+      const names = [...new Set(videos.map((video) => (video.personName || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+      setCollectorData({ key: collectorKey, names, error: '' })
+    }).catch((failure) => {
+      if (!controller.signal.aborted) setCollectorData((old) => ({ key: collectorKey, names: old.names, error: failure instanceof Error ? failure.message : '采集人加载失败' }))
+    })
+    return () => controller.abort()
+  }, [projectId, collectorKey])
 
   useEffect(() => {
     let active = true
@@ -184,10 +201,10 @@ function ProjectVideoData({ session, projectId }: { session: SessionResponse; pr
     <div className="annotation-data-tabs project-stage-tabs"><div className="status-segments">{[{ value: '', label: '全部' }, ...videoStages, { value: 'abnormal', label: '异常' }].map((tab) => {
       const stats = stageStats.key === statsKey ? stageStats.data : undefined, count = tab.value === '' ? stats?.total : stats?.items.find((item) => item.stage === tab.value)?.count ?? (stats ? 0 : undefined)
       return <button key={tab.value || 'all'} type="button" className={stageTab === tab.value ? 'active' : ''} onClick={() => changeTab(tab.value as VideoTab)}>{tab.label}{tab.value !== 'abnormal' && <span>{count ?? '—'}</span>}</button>
-    })}</div><div className="project-video-toolbar-actions">{canManage && stageTab !== 'cancelled' && <button className="secondary-button" type="button" disabled={!selectedIds.size} onClick={() => setCopySelection({ projectId, ids: [...selectedIds] })}>批量复制（{selectedIds.size}）</button>}<button className="secondary-button" type="button" disabled={tableLoading} onClick={loadVideos}>刷新</button><button className="secondary-button" type="button" disabled={!selectedIds.size || exporting} onClick={() => void exportSelected()}><Download size={16} />{exporting ? '正在导出…' : '导出 CSV'}</button><button className="primary-button" type="button" onClick={() => setManualSyncOpen(true)}><Database size={16} />手动同步</button></div></div>
+    })}</div><div className="project-video-toolbar-actions">{canManage && stageTab !== 'cancelled' && <button className="secondary-button" type="button" disabled={!selectedIds.size} onClick={() => setCopySelection({ projectId, ids: [...selectedIds] })}>批量复制（{selectedIds.size}）</button>}<button className="secondary-button" type="button" disabled={tableLoading} onClick={refreshData}>刷新</button><button className="secondary-button" type="button" disabled={!selectedIds.size || exporting} onClick={() => void exportSelected()}><Download size={16} />{exporting ? '正在导出…' : '导出 CSV'}</button><button className="primary-button" type="button" onClick={() => setManualSyncOpen(true)}><Database size={16} />手动同步</button></div></div>
     <form className="management-filters project-video-filters" onSubmit={(event) => { event.preventDefault(); search() }}>
       <label><span>数据名称</span><div className="filter-control"><Search size={16} /><input value={input.name} onChange={(event) => patch({ name: event.target.value })} placeholder="请输入数据名称或 ID" /></div></label>
-      <div className="project-video-multi-filter"><span>采集人</span><SearchableMultiSelect label="采集人" value={input.collectors} options={collectorOptions} allowCustom onChange={(collectors) => patch({ collectors })} /></div>
+      <div className="project-video-multi-filter"><span>采集人</span><SearchableMultiSelect label="采集人" clearSearchOnSelect value={input.collectors} options={collectorOptions} loading={collectorsLoading} onChange={(collectors) => patch({ collectors })} />{!collectorsLoading && collectorData.error && <small className="inline-error">{collectorData.error}<button type="button" onClick={() => setCollectorReload((value) => value + 1)}>重试</button></small>}</div>
       <label><span>场景</span><div className="filter-control"><select aria-label="一级场景" disabled={scenesLoading} value={input.scene1} onChange={(event) => patch({ scene1: event.target.value, scene2: '' })}><option value="">全部一级场景</option><option value="null">未设置一级场景</option>{scenes.map((scene) => <option key={scene.id} value={scene.id}>{scene.name}</option>)}</select></div></label>
       <label><span>二级场景</span><div className="filter-control"><select aria-label="二级场景" disabled={!input.scene1 || input.scene1 === 'null'} value={input.scene2} onChange={(event) => patch({ scene2: event.target.value })}><option value="">全部二级场景</option><option value="null">未设置二级场景</option>{scenes.find((scene) => scene.id === input.scene1)?.children.map((scene) => <option key={scene.id} value={scene.id}>{scene.name}</option>)}</select></div></label>
       <label><span>更新时间（开始）</span><div className="filter-control"><input aria-label="更新时间开始" type="date" value={input.updatedStart} max={input.updatedEnd || undefined} onChange={(event) => patch({ updatedStart: event.target.value })} /></div></label>
@@ -208,8 +225,8 @@ function ProjectVideoData({ session, projectId }: { session: SessionResponse; pr
     </tbody></table></div>
     <footer className="management-footer"><span>共 {total} 条{selectedIds.size > 0 && <> · 已选 {selectedIds.size} 条（含其他页）<button className="clear-video-selection" type="button" disabled={exporting} onClick={() => { rowSelection.reset(); setSelectedVideos({ projectId, ids: new Set() }) }}>清空选择</button></>}</span><PaginationJump page={page} pages={pages} disabled={tableLoading} onChange={setPage} pageSize={pageSize} onPageSizeChange={(size) => { setPageSize(size); setPage(1) }} /></footer>
   </section></section>
-    {manualSyncOpen && <ManualFleetSyncModal key={projectId} projectId={projectId} projectName={project?.name || '数据集'} supplierName={project?.supplier?.name} onClose={() => setManualSyncOpen(false)} onSynced={(message) => { setManualSyncOpen(false); loadVideos(); setToast(message) }} />}
-    {copySelection?.projectId === projectId && <VideoCopyModal key={projectId} ids={copySelection.ids} currentProductId={project?.productId} session={session} onClose={() => setCopySelection(undefined)} onCopied={(ids) => { if (ids.length) { toggleSelection(ids, false); loadVideos() } }} />}
+    {manualSyncOpen && <ManualFleetSyncModal key={projectId} projectId={projectId} projectName={project?.name || '数据集'} supplierName={project?.supplier?.name} onClose={() => setManualSyncOpen(false)} onSynced={(message) => { setManualSyncOpen(false); refreshData(); setToast(message) }} />}
+    {copySelection?.projectId === projectId && <VideoCopyModal key={projectId} ids={copySelection.ids} currentProductId={project?.productId} session={session} onClose={() => setCopySelection(undefined)} onCopied={(ids) => { if (ids.length) { toggleSelection(ids, false); refreshData() } }} />}
     {toast && <div className="toast">{toast}</div>}
   </AppShell>
 }
