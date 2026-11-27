@@ -828,7 +828,7 @@ python manage.py init_roles
 | `owner_id` | 否 | 项目负责人，用户必须启用且拥有 `project_manager` 角色 |
 | `delivery_at` | 否 | 交付日期，格式 `YYYY-MM-DD` |
 | `completion_node` | 否 | 完成节点：`quality_check`、`review`、`acceptance` |
-| `model_generation_node` | 否 | 模型生成环节：`annotation`、`quality_check`、`review`、`acceptance`，不能晚于完成节点 |
+| `model_generation_node` | 否 | AI描述生成节点：`annotation`、`quality_check`、`review`、`acceptance`，不能晚于完成节点 |
 | `assignment_strategy` | 否 | `manual_claim`、`load_balance`、`round_robin`；默认 `manual_claim` |
 | `label_library_ids` | 否 | 项目使用的标签库，只允许启用且未删除标签库 |
 | `annotation_guideline` | 否 | 标注规范，支持链接或文件元数据 |
