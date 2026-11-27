@@ -870,3 +870,10 @@
 .management-filters .date-range-inputs>label.active { border-color: #72a5f2; }
 .date-range-inputs input { width: 100%; min-width: 0; height: 28px; padding: 0 2px; border: 0; outline: 0; color: #344258; font: inherit; }
 .date-range-popup .delivery-calendar-days>button.in-range { background: #eaf4ff; }
+
+.collapsible-filter-fields { display: flex; min-width: 0; flex: 1 1 250px; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.collapsible-filter-field { width: 250px; max-width: 100%; min-width: 0; flex: 0 0 250px; }
+.collapsible-filter-field[hidden] { display: none; }
+.collapsible-filter-field>label { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: #66758a; font-size: 11px; }
+.collapsible-filter-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+.filter-expand-button { display: inline-flex; min-width: 56px; height: 34px; padding: 0; align-items: center; justify-content: center; gap: 3px; border: 0; color: #2563eb; background: transparent; font-size: 12px; white-space: nowrap; }

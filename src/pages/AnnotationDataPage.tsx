@@ -1,3 +1,4 @@
+import { CollapsibleFilterForm } from '../components/CollapsibleFilterForm'
 import { DateRangePicker } from '../components/DateRangePicker'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -203,7 +204,7 @@ function ProjectVideoData({ session, projectId }: { session: SessionResponse; pr
       const stats = stageStats.key === statsKey ? stageStats.data : undefined, count = tab.value === '' ? stats?.total : stats?.items.find((item) => item.stage === tab.value)?.count ?? (stats ? 0 : undefined)
       return <button key={tab.value || 'all'} type="button" className={stageTab === tab.value ? 'active' : ''} onClick={() => changeTab(tab.value as VideoTab)}>{tab.label}{tab.value !== 'abnormal' && <span>{count ?? '—'}</span>}</button>
     })}</div><div className="project-video-toolbar-actions">{canManage && stageTab !== 'cancelled' && <button className="secondary-button" type="button" disabled={!selectedIds.size} onClick={() => setCopySelection({ projectId, ids: [...selectedIds] })}>批量复制（{selectedIds.size}）</button>}<button className="secondary-button" type="button" disabled={tableLoading} onClick={refreshData}>刷新</button><button className="secondary-button" type="button" disabled={!selectedIds.size || exporting} onClick={() => void exportSelected()}><Download size={16} />{exporting ? '正在导出…' : '导出 CSV'}</button><button className="primary-button" type="button" onClick={() => setManualSyncOpen(true)}><Database size={16} />手动同步</button></div></div>
-    <form className="management-filters project-video-filters" onSubmit={(event) => { event.preventDefault(); search() }}>
+    <CollapsibleFilterForm onSubmit={(event) => { event.preventDefault(); search() }} onReset={() => { setInput(emptyVideoFilters()); setFilters(emptyVideoFilters()); setPage(1) }}>
       <label><span>数据名称</span><div className="filter-control"><Search size={16} /><input value={input.name} onChange={(event) => patch({ name: event.target.value })} placeholder="请输入数据名称或 ID" /></div></label>
       <div className="project-video-multi-filter"><span>采集人</span><SearchableMultiSelect label="采集人" clearSearchOnSelect value={input.collectors} options={collectorOptions} loading={collectorsLoading} onChange={(collectors) => patch({ collectors })} />{!collectorsLoading && collectorData.error && <small className="inline-error">{collectorData.error}<button type="button" onClick={() => setCollectorReload((value) => value + 1)}>重试</button></small>}</div>
       <label><span>场景</span><div className="filter-control"><select aria-label="一级场景" disabled={scenesLoading} value={input.scene1} onChange={(event) => patch({ scene1: event.target.value, scene2: '' })}><option value="">全部一级场景</option><option value="null">未设置一级场景</option>{scenes.map((scene) => <option key={scene.id} value={scene.id}>{scene.name}</option>)}</select></div></label>
@@ -214,8 +215,7 @@ function ProjectVideoData({ session, projectId }: { session: SessionResponse; pr
       {executionFilterStages(stageTab).map((stage) => executionFilter(stage))}
       {visible.reasons && <><div className="project-video-multi-filter"><span>无效原因</span><SearchableMultiSelect label="无效原因" value={input.reasons} options={listInvalidReasons.map((name) => ({ id: name, name }))} onChange={(reasons) => patch({ reasons })} /></div><label><span>样例状态</span><div className="filter-control"><select aria-label="样例状态" value={input.sample} onChange={(event) => patch({ sample: event.target.value as VideoListFilters['sample'] })}><option value="">全部样例状态</option><option value="true">已设样例</option><option value="false">未设样例</option></select></div></label></>}
       {visible.assignee && <div className="project-video-multi-filter"><span>处理人</span><SearchableMultiSelect label="处理人" value={input.assignees} options={assigneeOptions} onChange={(assignees) => patch({ assignees })} /></div>}
-      <button className="primary-button compact" type="submit">查询</button><button className="secondary-button compact" type="button" onClick={() => { setInput(emptyVideoFilters()); setFilters(emptyVideoFilters()); setPage(1) }}>重置</button>
-    </form>
+    </CollapsibleFilterForm>
     {stageStats.key === statsKey && stageStats.error && <div className="error-banner"><CircleAlert size={18} /><span>{stageStats.error}</span><button type="button" onClick={loadVideos}>重新加载</button></div>}
     {!scenesLoading && sceneData.error && <div className="error-banner"><span>{sceneData.error}</span><button type="button" onClick={() => setSceneReload((value) => value + 1)}>重新加载场景</button></div>}
     {error && <div className="error-banner"><CircleAlert size={18} /><span>{error}</span><button type="button" onClick={loadVideos}>重新加载</button></div>}
