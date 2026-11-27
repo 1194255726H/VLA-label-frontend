@@ -192,7 +192,7 @@ function ProjectVideoData({ session, projectId }: { session: SessionResponse; pr
       case 'cancelReasons': return video.cancelledReasons?.join('、') || '-'
       case 'cancelBy': return video.cancelledByName || video.cancelledById || '-'
       case 'cancelAt': return video.cancelledAt ? formatDateTime(video.cancelledAt) : '-'
-      case 'operations': return <ProjectVideoActions video={video} tab={stageTab} projectId={projectId} accountId={String(session.account.id)} canManage={canManage} completionNode={project?.completionNode} onNavigate={navigate} onCopy={() => setCopySelection({ projectId, ids: [video.id] })} onChanged={loadVideos} onMessage={setToast} />
+      case 'operations': return <ProjectVideoActions video={video} tab={stageTab} projectId={projectId} accountId={String(session.account.id)} canManage={canManage} completionNode={project?.completionNode} onNavigate={navigate} onCopy={() => setCopySelection({ projectId, ids: [video.id] })} onChanged={loadVideos} onDeleted={() => { toggleSelection([video.id], false); setCollectorReload((value) => value + 1) }} onMessage={setToast} />
     }
   }
   function executionFilter(stage: MachineStage) { return <label key={stage}><span>{machineLabels[stage]}</span><div className="filter-control"><select aria-label={machineLabels[stage]} value={input.executions[stage]} onChange={(event) => patch({ executions: { ...input.executions, [stage]: event.target.value as VideoListFilters['executions'][MachineStage] } })}><option value="">全部</option>{executionStates.map((status) => <option key={status} value={status}>{videoStageStatusLabels[status]}</option>)}</select></div></label> }

@@ -9,6 +9,7 @@ import { normalizeInvalidIntervalList } from '../utils/invalidReason'
 import { normalizeVideoStageFields, videoStages, videoStageStatusLabels } from '../utils/videoStage'
 
 const releasedMockVideos = new Set<string>()
+const deletedMockVideos = new Set<string>()
 const pendingStageStatsRequests = new Map<string, Promise<ProjectStageStats>>()
 const pendingVideoListRequests = new Map<string, Promise<ProjectVideoPage>>()
 
@@ -57,7 +58,7 @@ function mockItems(projectId: string): VideoListItem[] {
   const project = mockProjects.find((item) => item.id === projectId) || mockProjects[0]
   const localVideos = mockTasks.map((item, index) => normalize({ id: `video-${index + 1}`, stage: index === 0 ? 'pre_annotation' : item.status === 'completed' ? 'completed' : 'human_processing', stage_status: index === 0 ? 'failed' : 'running', pre_annotation_job_id: index === 0 ? 1001 : undefined, pre_annotation_error: index === 0 ? '二级场景选择失败' : '', device_id: `02:00:00:00:00:${String(index + 1).padStart(2, '0')}`, person_name: ['王龙', '李明'][index % 2], project_id: projectId, project_name: project.name, current_node: item.node, current_assignee_id: item.assignee, status: item.status === 'processing' ? 'in_progress' : item.status === 'pending' ? 'assigned' : item.status, sort_order: index, external_video_id: item.dataId, filename: `${item.dataName}.mp4`, uri: '/temp.mp4', duration: item.totalDuration, file_size: 96978164, storage_status: index === 2 ? 'missing' : index === 4 ? 'unchecked' : 'available', storage_error: index === 2 ? '对象存储中未找到该视频' : '', updated_at: item.updatedAt }))
   const syncedVideos = getMockFleetSyncedTasks(projectId).map((item, index) => normalize({ id: `fleet-video-${item.id}`, stage: 'pre_annotation', stage_status: 'queued', device_id: item.device, person_name: item.operator, project_id: projectId, project_name: project.name, fleet_video_id: item.id, current_node: 'annotation', status: 'pending', sort_order: index, external_video_id: item.externalTaskId, filename: `${item.externalTaskId}.mp4`, duration: item.totalDuration, storage_status: 'unchecked', updated_at: new Date().toISOString() }))
-  return [...syncedVideos, ...localVideos].map((video) => releasedMockVideos.has(`${projectId}:${video.id}`) ? { ...video, assigned: false, currentAssigneeId: undefined, currentAssigneeName: undefined, assignmentSource: '', videoStatus: 'pending' } : video)
+  return [...syncedVideos, ...localVideos].filter((video) => !deletedMockVideos.has(`${projectId}:${video.id}`)).map((video) => releasedMockVideos.has(`${projectId}:${video.id}`) ? { ...video, assigned: false, currentAssigneeId: undefined, currentAssigneeName: undefined, assignmentSource: '', videoStatus: 'pending' } : video)
 }
 
 export const annotationDataApi = {
@@ -124,6 +125,17 @@ export const annotationDataApi = {
     const pending = request<{ items: Array<Record<string, unknown>>; total: number; page: number; page_size: number; pages: number }>(path).then((result) => ({ items: result.items.map(normalize), total: result.total || 0, page: result.page || page, pageSize: result.page_size || pageSize, pages: result.pages || 1 }))
     pendingVideoListRequests.set(path, pending)
     try { return await pending } finally { if (pendingVideoListRequests.get(path) === pending) pendingVideoListRequests.delete(path) }
+  },
+  async deleteVideo(projectId: string, videoId: string): Promise<void> {
+    if (runtimeConfig.apiMode === 'mock') {
+      await delay()
+      const video = mockItems(projectId).find((item) => item.id === videoId)
+      if (!video) throw new Error('数据不存在或已删除')
+      deletedMockVideos.add(`${projectId}:${videoId}`)
+      return
+    }
+    if ([projectId, videoId].some((id) => !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) throw new Error('数据集或视频 ID 无效，请刷新后重试')
+    await request(`/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(videoId)}`, { method: 'DELETE' })
   },
   async releaseVideo(projectId: string, videoId: string): Promise<void> {
     if (runtimeConfig.apiMode === 'mock') {
