@@ -1,3 +1,4 @@
+import { RowActionMenu } from './RowActionMenu'
 import { Eye } from 'lucide-react'
 import type { VideoListItem, TaskNode } from '../types/api'
 import { videoAssigned, type VideoTab } from '../utils/projectVideoList'
@@ -24,7 +25,7 @@ export function ProjectVideoActions({ video, tab, projectId, accountId, canManag
   const missing = '暂不可用：尚未提供此操作的后端接口'
   async function perform(operation: 'retry' | 'cancel' | 'release' | 'delete') {
     if (busyRef.current) return
-    if (operation === 'delete' && (!canManage || !window.confirm(`确认删除“${video.filename}”？删除后该数据将从数据集中移除。`))) return
+    if (operation === 'delete' && (!window.confirm(`确认删除“${video.filename}”？删除后该数据将从数据集中移除。`))) return
     if (operation === 'release') {
       if (!canRelease || !window.confirm(`确认释放“${video.filename}”？释放后将解除当前分配，返回分配池。`)) return
     }
@@ -62,11 +63,11 @@ export function ProjectVideoActions({ video, tab, projectId, accountId, canManag
     {canManage && video.stage === 'pre_annotation' && failed && <button type="button" disabled={busy || !video.preAnnotationJobId} title={!video.preAnnotationJobId ? '接口未返回预标注任务 ID' : undefined} onClick={() => void perform('retry')}>{busy ? '处理中…' : '重试 AI 预处理'}</button>}
     {canManage && video.stage === 'model_description' && failed && <><button type="button" disabled title={missing}>重新生成</button>{(tab === '' || tab === 'abnormal') && <button type="button" disabled title={missing}>人工修改</button>}</>}
     {canManage && video.stage === 'cutting' && failed && (tab === '' || tab === 'abnormal') && <><button type="button" disabled title={missing}>分配返修</button><button type="button" disabled title={missing}>重新切割</button></>}
-    {(canCopy || canCancel || canManage) && <details className="video-more-actions"><summary>更多操作</summary>
-      {canCopy && <button type="button" disabled={busy} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); onCopy() }}>复制</button>}
+    <RowActionMenu disabled={busy}>
+      {canCopy && <button type="button" disabled={busy} onClick={onCopy}>复制</button>}
       {canRelease && <button type="button" disabled={busy} title="解除分配，返回分配池" onClick={() => void perform('release')}>释放</button>}
-      {canCancel && <button type="button" disabled={busy} onClick={() => void perform('cancel')}>作废</button>}
-      {canManage && <button type="button" disabled={busy} onClick={() => void perform('delete')}>删除</button>}
-    </details>}
+      {canCancel && <button type="button" className="danger-action" disabled={busy} onClick={() => void perform('cancel')}>作废</button>}
+      <button type="button" className="danger-action" disabled={busy} onClick={() => void perform('delete')}>删除</button>
+    </RowActionMenu>
   </div>
 }

@@ -836,10 +836,12 @@
 .video-copy-results li { margin: 8px 0; overflow-wrap: anywhere; }
 .copy-success { color: #18866a; }
 .video-copy-badge { display: inline-block; width: fit-content; padding: 2px 6px; border-radius: 3px; background: #edf1ff; color: #6652c5; font-size: 11px; }
-.video-more-actions { position: relative; }
-.video-more-actions summary { color: #2563eb; cursor: pointer; white-space: nowrap; }
-.video-more-actions[open] { z-index: 2; }
-.video-more-actions>button { display: block; width: 100%; text-align: left; }
+.video-more-menu { position: fixed; z-index: 1000; width: 132px; padding: 5px 0; overflow-y: auto; border: 1px solid #d6e0ec; border-radius: 6px; background: #fff; box-shadow: 0 6px 20px rgba(35, 59, 92, .14); }
+.video-more-menu>button { display: flex; width: 100%; min-height: 36px; padding: 8px 16px; align-items: center; border: 0; color: #42536a; background: transparent; text-align: left; font-size: 12px; cursor: pointer; }
+.video-more-menu>button:hover, .video-more-menu>button:focus-visible { color: #2563eb; background: #edf4ff; }
+.video-more-menu>button.danger-action { color: #e34950; }
+.video-more-menu>button.danger-action { border-top: 1px solid #edf1f7; }
+.video-more-menu>button:disabled { color: #a7b3c4; background: transparent; cursor: not-allowed; }
 .project-supplier-options button:disabled { opacity: .5; cursor: not-allowed; }
 .project-supplier-options button small { white-space: normal; }
 .modal:has(.video-copy-dialog) { display: flex; max-height: calc(100dvh - 32px); flex-direction: column; }
